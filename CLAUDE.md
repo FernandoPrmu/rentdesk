@@ -90,7 +90,8 @@ paid provider" in `docs/progress.md`.
 - Store database changes only as SQL migrations in `supabase/migrations/`. Never edit the
   database by hand. Generate TypeScript types from the schema.
 - Keep components small. No business logic in components; put it in `src/lib/`.
-- Seed script (`supabase/seed.sql`) creates:
+- Seed script (`scripts/seed.ts`, `npm run db:seed`; a TypeScript script because auth users
+  must be created through the Auth Admin API) creates:
   - 1 admin,
   - 2 owners,
   - customers,
@@ -111,5 +112,12 @@ paid provider" in `docs/progress.md`.
 - `npm run lint` / `npm run typecheck` / `npm test` / `npm run test:e2e`
 - `npx supabase link --project-ref <ref>` (once; links the CLI to the cloud project)
 - `npm run db:push` = `supabase db push` (apply new migrations to the linked cloud DB;
-  add `--dry-run` to preview, `--include-seed` to also run `supabase/seed.sql`)
+  add `--dry-run` to preview)
 - `npm run db:types` = `supabase gen types typescript --linked > src/types/db.ts`
+- `npm run db:seed` = demo data via `scripts/seed.ts` (safe to re-run; prints demo logins)
+- `npm run test:db` = RLS and workflow tests against the linked dev DB (needs `SUPABASE_DB_URL`;
+  everything is rolled back). `DB_TEST_APPLY_MIGRATIONS=1` also tests unpushed migrations.
+- Schema and access rules: `docs/database.md`. Multi-table writes go through the atomic `app.*`
+  workflow functions, called with the service-role client through their `public.rpc_*`
+  wrappers (`admin.rpc("rpc_...")`), never through separate client calls. The `app` schema
+  stays private (not exposed in the Data API).

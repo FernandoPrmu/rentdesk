@@ -14,8 +14,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:db": "vitest run --config vitest.db.config.mts",
     "db:push": "supabase db push",
-    "db:types": "supabase gen types typescript --linked > src/types/db.ts"
+    "db:types": "supabase gen types typescript --linked > src/types/db.ts",
+    "db:seed": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -39,11 +41,13 @@
     "@serwist/cli": "^9.5.13",
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^24.19.1",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
+    "pg": "^8.23.1",
     "supabase": "^2.120.0",
     "tailwindcss": "^4",
     "typescript": "^5",

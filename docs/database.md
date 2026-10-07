@@ -1,0 +1,193 @@
+# RentDesk — Database
+
+Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0012`). Types are
+generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
+and workflow functions. It is **not** exposed through the Data API.
+
+## Conventions
+
+- **Tenancy.** `owner_id → owners(id)` on every tenant table, plus composite foreign keys
+  `(child_id, owner_id) → parent(id, owner_id)`. A row can never reference another tenant's row,
+  even when written with the service role.
+- **Identity.** `auth.users` holds credentials. The login email is synthetic:
+  `{username}@users.rentdesk.invalid`. `profiles.id`, `owners.id` and `customers.id` are all the
+  auth user id. Real contact emails live in `owners` and `customers`.
+- **Money** is `bigint` cents. **Timestamps** are `timestamptz`. Deadlines are computed in
+  `Asia/Colombo` by server code and passed in.
+- **Errors** raised by the workflow functions use these SQLSTATE codes:
+  - `RD400`: invalid input
+  - `RD403`: actor not allowed
+  - `RD404`: not found
+  - `RD409`: stale state or conflict
+
+## Tables
+
+| Area | Table | Purpose |
+| --- | --- | --- |
+| Accounts | `profiles` | Role (`ADMIN`/`OWNER`/`CUSTOMER`), tenant, status, `must_change_password`, login security |
+| | `owners` | Tenant business details, plan |
+| | `owner_company_profiles` | Branding (spec 17): company, logo, bank details, letterhead + layout, `onboarding_completed_at` |
+| | `customers` | Customer details (status lives in `profiles`) |
+| | `subscription_plans` | Optional plans (ADM-07) |
+| Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee |
+| | `owner_settings` | Per-owner overrides (null = inherit); view `owner_settings_effective` merges them |
+| Fleet | `machines` | Brand, model, serial, `MONO`/`COLOUR`, status, counter maximum (rollover) |
+| | `rental_agreements` | Terms, installation, initial/closing readings, cycle calendar (`next_cycle_no/date`) |
+| | `meter_baselines` | New baseline after a meter reset or replacement |
+| Billing cycle | `billing_cycle_tickets` | One per agreement per cycle (unique `(agreement_id, cycle_no)`); terms snapshot |
+| | `ticket_events` | Every transition: actor, from, to, reason |
+| | `ticket_comments` | Customer/owner comments |
+| | `meter_submissions` | Each reading attempt (idempotency key, server timestamp, review outcome) |
+| | `meter_readings` | Per-counter previous/current values, kept permanently |
+| | `meter_photos` | Temporary photo record; the file is deleted on confirm, the row stays |
+| | `invoices` / `invoice_lines` | Draft → issued invoice; number assigned on issue; branding snapshot |
+| | `invoice_counters` | Per-owner, gap-free invoice sequence |
+| Payments | `payments` | Customer slips and owner-recorded cash/cheque; duplicate flag |
+| | `payment_slips` | File path, SHA-256, MIME type, size, retention |
+| | `disputes` | Invoice disputes |
+| | `credits` | Overpayments, credits from cancelled invoices, advances |
+| Service | `service_requests` / `service_request_history` | Requests and their status trail (trigger-written) |
+| Cross-cutting | `notifications` | In-app centre and email/SMS outbox (delivery status) |
+| | `notification_templates` | Global (`owner_id` null) and per-owner templates |
+| | `idempotency_keys` | Request de-duplication for server actions |
+| | `login_attempts` | Rate limiting / lockout input |
+| | `audit_logs` | Append-only audit trail, written by triggers and `app.write_audit()` |
+
+```mermaid
+erDiagram
+    profiles ||--o| owners : "is (OWNER)"
+    profiles ||--o| customers : "is (CUSTOMER)"
+    owners ||--o| owner_company_profiles : branding
+    owners ||--o| owner_settings : overrides
+    owners ||--|| invoice_counters : numbers
+    owners ||--o{ customers : has
+    owners ||--o{ machines : owns
+    customers ||--o{ rental_agreements : rents
+    machines ||--o{ rental_agreements : "rented via"
+    rental_agreements ||--o{ meter_baselines : resets
+    rental_agreements ||--o{ billing_cycle_tickets : "one per cycle"
+    billing_cycle_tickets ||--o{ ticket_events : history
+    billing_cycle_tickets ||--o{ ticket_comments : comments
+    billing_cycle_tickets ||--o{ meter_submissions : attempts
+    meter_submissions ||--|{ meter_readings : counters
+    meter_submissions ||--o| meter_photos : photo
+    billing_cycle_tickets ||--o{ invoices : "drafts / reissues"
+    billing_cycle_tickets |o--o| invoices : "current invoice"
+    invoices ||--|{ invoice_lines : lines
+    invoices ||--o{ payments : paid_by
+    payments ||--o{ payment_slips : proof
+    invoices ||--o{ disputes : disputed
+    customers ||--o{ credits : holds
+    customers ||--o{ service_requests : raises
+    machines ||--o{ service_requests : about
+    service_requests ||--o{ service_request_history : trail
+    profiles ||--o{ notifications : receives
+```
+
+## Who can do what
+
+The database enforces this table. RLS policies use only four helpers in the private `app` schema:
+`current_user_role()`, `current_owner_id()`, `current_customer_id()` and `is_admin()`. They are
+`SECURITY DEFINER`, `STABLE`, and use `search_path = ''`. They return NULL unless the caller is
+`ACTIVE` and, for a customer, their owner is `ACTIVE` too. Suspended or deactivated users, and
+customers of a suspended owner, therefore match no policy and see nothing.
+
+| Data | ADMIN | OWNER (own tenant) | CUSTOMER (own records) | anon |
+| --- | --- | --- | --- | --- |
+| profiles, customers | read all | read; update customer contact columns | read self | — |
+| owners | read all | read self | read own owner | — |
+| company profile / branding | read all | read, insert, update | read (own owner) | — |
+| settings | read all; update global | read, insert, update own | — | — |
+| machines, agreements | read all | read, insert, update (limited columns) | read those they rent | — |
+| meter baselines | read all | read, insert | — | — |
+| tickets, events, comments, submissions, readings | read all | read | read own | — |
+| meter photos (rows and files) | rows only | read | — | — |
+| invoices, lines | read all | read | read own, **not DRAFT/REJECTED** | — |
+| payments, slips, disputes, credits | read all | read | read own | — |
+| service requests + history | read all | read | read own | — |
+| notifications | read all | read tenant delivery log | read own; set `read_at` | — |
+| templates | read all; manage global | read global + own; manage own | — | — |
+| audit logs | read all | read own tenant | — | — |
+| login_attempts, idempotency_keys | — | — | — | — |
+
+**Server-write-only.** Clients have no write grants on these tables. Writes come only from server code
+using the service role:
+
+- `profiles`, `owners`, inserts into `customers`
+- tickets, events and comments
+- meter submissions, readings and photos
+- invoices, invoice lines and invoice counters
+- payments, payment slips, disputes and credits
+- service requests and their history
+- inserts into `notifications`
+- `idempotency_keys`, `login_attempts` and `audit_logs`
+
+Customers write only through server actions. Clients have no DELETE grants except on an owner's own
+notification templates. `audit_logs` is append-only even for the service role.
+
+### Atomic workflow functions (`app` schema, called through `public.rpc_*`)
+
+Server code (`src/lib/tickets`) validates the request and the actor's role. It then calls the
+matching `public.rpc_<name>` wrapper with the service-role client, for example
+`admin.rpc("rpc_confirm_meter_submission", …)`. Each wrapper only forwards to `app.<name>`.
+
+- **Wrappers:** only `service_role` can execute them. Anon and authenticated get `42501`.
+- **Default privileges:** in `public` they are revoked, so a new function is never callable by anon
+  or authenticated unless granted explicitly.
+
+Each function:
+
+1. locks the ticket with `SELECT … FOR UPDATE`,
+2. re-checks the current status and the actor,
+3. writes every affected table in one transaction.
+
+A concurrent second request waits for the lock and then fails with `RD409`.
+
+| Function | Effect |
+| --- | --- |
+| `open_billing_cycle` | Creates ticket + event + notifications; advances the cycle calendar; replays safely |
+| `submit_meter_reading` | Submission + readings + photo row + draft invoice/lines → `PENDING_OWNER_REVIEW` (idempotent) |
+| `confirm_meter_submission` | Assigns the invoice number, issues the invoice, marks the photo for deletion → `AWAITING_PAYMENT` |
+| `reject_meter_submission` | Reason required; draft → `REJECTED`; → `METER_REQUESTED` |
+| `submit_payment` | Payment + slip, duplicate flag → `PAYMENT_SUBMITTED` (idempotent) |
+| `verify_payment` | Accept → `CLOSED`, or partial → `PARTIALLY_PAID`, or reject (reason). An overpayment becomes a credit |
+| `transition_ticket` | Overdue, cancel (reason), reopen (reason), return from overdue or dispute; the invoice follows |
+| `assign_invoice_number` | Per-owner counter row lock. Rolls back with the transaction, so numbering is gap-free |
+| `provision_account` | Profile + owner/customer rows; enforces Admin → Owner → Customer |
+| `write_audit` | Explicit audit entries (logins, resets) |
+
+Audit triggers record the actor:
+
+- For a signed-in user, the actor is `auth.uid()`.
+- For the service role, it is the `app.actor_id` set by these functions, or the `x-actor-id` request
+  header. Both are honoured only when the JWT role is `service_role`.
+
+> Keep `app` out of **Project Settings → Data API → Exposed schemas**. Only `public` and
+> `graphql_public` are exposed. To make a new workflow function callable by server code, add a
+> `public.rpc_*` wrapper and grant it to `service_role` only. `rls.db.test.ts` fails if any callable
+> function in `public` is executable by anon or authenticated.
+
+## Storage
+
+All buckets are private. Files are served through short-lived signed URLs. Paths start with
+`{owner_id}/`.
+
+| Bucket | Limit / types | Direct client access |
+| --- | --- | --- |
+| `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/…` while their ticket awaits a reading. Only the owner reads |
+| `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads while their ticket awaits payment. Customer, owner and admin read |
+| `branding` | 5 MB; PNG, JPEG, SVG, PDF | Owner manages their own prefix. Their customers and admin read |
+
+## Tests and seed
+
+- `npm run test:db` runs RLS and workflow tests against the linked dev database.
+  - It uses `SUPABASE_DB_URL`. Use the **session pooler** URI: long runs over the direct IPv6 host
+    dropped their connection.
+  - Each suite builds a two-tenant fixture inside a transaction and rolls it back. The concurrency
+    test needs two connections, so it commits a fixture and deletes it afterwards.
+  - `DB_TEST_APPLY_MIGRATIONS=1` also applies not-yet-pushed migrations inside the test transaction
+    first.
+- `npm run db:seed` (`scripts/seed.ts`) creates demo accounts, machines, agreements and tickets in
+  several stages through the same workflow functions. It is safe to re-run, and it prints the demo
+  logins.

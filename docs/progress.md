@@ -9,6 +9,7 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 | Date | Task | Summary |
 | --- | --- | --- |
 | 2026-10-07 | 0. Setup | Next.js 16.4 (App Router, TS strict, Turbopack), Tailwind v4, shadcn/ui, Zod 4, Supabase JS + SSR helpers (browser / server / service-role with `server-only`), Serwist PWA (config mode: `serwist build` after `next build`), manifest and placeholder icons, mobile-first landing and login placeholder, Vitest + Playwright (Pixel 7) with sample tests, Supabase CLI for the cloud project (`supabase init`; link / db push / gen types), Vercel Cron in `vercel.json` with a stub `/api/cron/daily` secured by `CRON_SECRET`, Node 24. No requirement IDs are complete yet. |
+| 2026-10-07 | 1. Database schema + RLS | 12 migrations (`supabase/migrations/0001`–`0012`): enums for every spec status, all section 12 entities plus branding, settings (global + per owner), gap-free per-owner invoice counters, templates, idempotency keys, login attempts, audit log. Composite tenant FKs, RLS on every table, explicit grants (nothing to anon). Private `app` schema (not exposed in the Data API) with 4 RLS helpers and atomic workflow functions (row lock + status re-check), called by server code through service-role-only `public.rpc_*` wrappers. Audit triggers, 3 private storage buckets with policies. `npm run test:db`: 23 RLS/workflow tests against the linked dev DB (rolled back; the concurrency test cleans up). `scripts/seed.ts` (`npm run db:seed`) seeded and re-run safely. Types regenerated. See `docs/database.md`. No UI. |
 | 2026-10-07 | Spec v1.1 + Section 17 | Added BRD-01..07 (owner branding) as `todo`. Tenant isolation stays one shared schema with `owner_id` + RLS. |
 
 ## Requirements
@@ -22,12 +23,12 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 | AUTH-03 | Forced change of temporary password at first login | Must | todo | |
 | AUTH-04 | Passwords stored as salted hashes; temp password shown once | Must | todo | Hashing handled by Supabase Auth (bcrypt) |
 | AUTH-05 | Parent role resets passwords (Admin → owners, Owner → customers) | Must | todo | |
-| AUTH-06 | Role-based access control for ADMIN, OWNER, CUSTOMER | Must | todo | |
-| AUTH-07 | Tenant isolation by role and owner | Must | todo | RLS on every table |
+| AUTH-06 | Role-based access control for ADMIN, OWNER, CUSTOMER | Must | partial | DB layer done and tested: `profiles.role` and per-role RLS policies via `app.current_user_role()` (`supabase/tests/rls.db.test.ts`). Route guards in `src/proxy.ts` pending (task 2) |
+| AUTH-07 | Tenant isolation by role and owner | Must | partial | DB layer done and tested: `owner_id` + RLS on every table, composite tenant FKs, storage policies by `{owner_id}/` prefix; owner / customer / anon isolation tests. App queries pending |
 | AUTH-08 | Login rate limiting and temporary lockout | Must | todo | |
 | AUTH-09 | Secure sessions with expiry; HTTPS everywhere | Must | todo | Vercel serves HTTPS; session expiry via Supabase Auth settings |
-| AUTH-10 | Suspending an owner blocks that owner's customers | Must | todo | |
-| AUTH-11 | Audit log for account creation, resets, status changes, logins | Should | todo | |
+| AUTH-10 | Suspending an owner blocks that owner's customers | Must | partial | DB layer done and tested: RLS helpers return NULL for a suspended owner and their customers, so they see nothing. Login blocking pending (task 2) |
+| AUTH-11 | Audit log for account creation, resets, status changes, logins | Should | partial | Audit triggers on account tables (create, status, password change/reset, lockout, `last_login_at` → LOGIN) and on ticket / invoice / payment / request status; `app.write_audit()` for server events; actor attribution tested. Login and reset events must be written by the auth flow (task 2) |
 | AUTH-12 | Optional OTP/2FA for Admin and Owner | Could | todo | Supabase Auth TOTP MFA is free |
 
 ### 4.2 Admin Portal (ADM)
@@ -83,8 +84,8 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 | TKT-05 | Stage deadlines, reminders, escalation (spec 5.4) | Must | todo | |
 | TKT-06 | Ticket shows stage, who must act, due date, full history | Must | todo | |
 | TKT-07 | Next cycle scheduled from cycle calendar, not close date | Must | todo | |
-| TKT-08 | Duplicate tickets per agreement and cycle prevented | Must | todo | Unique `(agreement_id, cycle_no)` |
-| TKT-09 | Every ticket action logged with user, time, reason | Must | todo | |
+| TKT-08 | Duplicate tickets per agreement and cycle prevented | Must | partial | Unique `(agreement_id, cycle_no)` + replay-safe `app.open_billing_cycle` (tested). Daily cron not built yet |
+| TKT-09 | Every ticket action logged with user, time, reason | Must | partial | Every workflow function writes `ticket_events` (actor, from, to, reason) in the same transaction (tested). TS state machine pending |
 | TKT-10 | Owner cancels or reopens a ticket with mandatory reason | Should | todo | |
 | TKT-11 | Customer and owner comments on a ticket | Should | todo | |
 | TKT-12 | Tickets paused for suspended accounts; resume on reactivation | Should | todo | |
@@ -104,9 +105,9 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 | INV-08 | Owner corrects a mistyped reading with audit note; recalculated; customer notified | Should | todo | |
 | INV-09 | On confirm: photo deleted, invoice issued, sent to customer with PDF | Must | todo | |
 | INV-10 | Reading values, confirming user, timestamps kept permanently | Must | todo | |
-| INV-11 | Unique invoice numbers per owner | Must | todo | |
+| INV-11 | Unique invoice numbers per owner | Must | partial | Per-owner `invoice_counters` + `app.assign_invoice_number` inside the issuing transaction: unique, ordered, gap-free (rollback test). Invoice flow / PDF pending |
 | INV-12 | Owner enters a reading manually with a note | Should | todo | |
-| INV-13 | Idempotent submissions; drafts survive poor connections | Must | todo | Client-generated idempotency key |
+| INV-13 | Idempotent submissions; drafts survive poor connections | Must | partial | Unique idempotency keys on submissions / payments; workflow functions replay instead of duplicating (tested); `idempotency_keys` table for server actions. Client offline queue pending |
 | INV-14 | Server-side timestamp per submission and photo | Should | todo | |
 
 ### 4.8 Payments and Payment Slips (PAY)

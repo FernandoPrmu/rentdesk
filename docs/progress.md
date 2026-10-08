@@ -11,6 +11,7 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 | 2026-10-07 | 0. Setup | Next.js 16.4 (App Router, TS strict, Turbopack), Tailwind v4, shadcn/ui, Zod 4, Supabase JS + SSR helpers (browser / server / service-role with `server-only`), Serwist PWA (config mode: `serwist build` after `next build`), manifest and placeholder icons, mobile-first landing and login placeholder, Vitest + Playwright (Pixel 7) with sample tests, Supabase CLI for the cloud project (`supabase init`; link / db push / gen types), Vercel Cron in `vercel.json` with a stub `/api/cron/daily` secured by `CRON_SECRET`, Node 24. No requirement IDs are complete yet. |
 | 2026-10-07 | 1. Database schema + RLS | 12 migrations (`supabase/migrations/0001`–`0012`): enums for every spec status, all section 12 entities plus branding, settings (global + per owner), gap-free per-owner invoice counters, templates, idempotency keys, login attempts, audit log. Composite tenant FKs, RLS on every table, explicit grants (nothing to anon). Private `app` schema (not exposed in the Data API) with 4 RLS helpers and atomic workflow functions (row lock + status re-check), called by server code through service-role-only `public.rpc_*` wrappers. Audit triggers, 3 private storage buckets with policies. `npm run test:db`: 23 RLS/workflow tests against the linked dev DB (rolled back; the concurrency test cleans up). `scripts/seed.ts` (`npm run db:seed`) seeded and re-run safely. Types regenerated. See `docs/database.md`. No UI. |
 | 2026-10-07 | Spec v1.1 + Section 17 | Added BRD-01..07 (owner branding) as `todo`. Tenant isolation stays one shared schema with `owner_id` + RLS. |
+| 2026-10-08 | 2. Auth + accounts + company setup | Migration `0013`: login lockout / IP limit and session timeout settings in `platform_settings`; atomic account functions (`login_gate_state`, `record_login_attempt`, `session_state`, `set_account_status`, `reset_account_password`, `complete_password_change`, `update_owner`, `update_customer`, `save_company_profile`) behind service-role `rpc_*` wrappers; status-change reasons in the audit log; `custom_access_token_hook` (refuses tokens to blocked or locked accounts; enable in the dashboard, see `docs/database.md`). Username login with the synthetic email, one generic error, lockout and IP limit; `src/proxy.ts` refreshes sessions, signs out blocked or timed-out users, forces password change then owner setup, and guards `/admin`, `/owner`, `/customer`. Admin owner management and owner customer management (create with one-time credentials dialog, edit, suspend / reactivate / deactivate with reason, reset password), owner company setup gate and Settings › Company with logo upload (magic bytes, SVG safety check, rasterised and resized to PNG with `sharp`, signed URLs). Portal shells: customer bottom nav with "What you need to do now"; owner/admin sidebar on desktop, bottom nav on mobile. Tests: 73 unit, 33 DB (10 new), 20 Playwright at 360 px. Seed re-runs restore demo login state. |
 
 ## Requirements
 
@@ -18,26 +19,26 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 
 | ID | Description | Priority | Status | Notes |
 | --- | --- | --- | --- | --- |
-| AUTH-01 | No public registration; accounts created only by the role above | Must | todo | |
-| AUTH-02 | System generates username and temporary password on account creation | Must | todo | |
-| AUTH-03 | Forced change of temporary password at first login | Must | todo | |
-| AUTH-04 | Passwords stored as salted hashes; temp password shown once | Must | todo | Hashing handled by Supabase Auth (bcrypt) |
-| AUTH-05 | Parent role resets passwords (Admin → owners, Owner → customers) | Must | todo | |
-| AUTH-06 | Role-based access control for ADMIN, OWNER, CUSTOMER | Must | partial | DB layer done and tested: `profiles.role` and per-role RLS policies via `app.current_user_role()` (`supabase/tests/rls.db.test.ts`). Route guards in `src/proxy.ts` pending (task 2) |
-| AUTH-07 | Tenant isolation by role and owner | Must | partial | DB layer done and tested: `owner_id` + RLS on every table, composite tenant FKs, storage policies by `{owner_id}/` prefix; owner / customer / anon isolation tests. App queries pending |
-| AUTH-08 | Login rate limiting and temporary lockout | Must | todo | |
-| AUTH-09 | Secure sessions with expiry; HTTPS everywhere | Must | todo | Vercel serves HTTPS; session expiry via Supabase Auth settings |
-| AUTH-10 | Suspending an owner blocks that owner's customers | Must | partial | DB layer done and tested: RLS helpers return NULL for a suspended owner and their customers, so they see nothing. Login blocking pending (task 2) |
-| AUTH-11 | Audit log for account creation, resets, status changes, logins | Should | partial | Audit triggers on account tables (create, status, password change/reset, lockout, `last_login_at` → LOGIN) and on ticket / invoice / payment / request status; `app.write_audit()` for server events; actor attribution tested. Login and reset events must be written by the auth flow (task 2) |
-| AUTH-12 | Optional OTP/2FA for Admin and Owner | Could | todo | Supabase Auth TOTP MFA is free |
+| AUTH-01 | No public registration; accounts created only by the role above | Must | done | No sign-up page. `app.provision_account` allows only Admin → Owner → Customer (DB tests); admin and owner create accounts in the portals (e2e) |
+| AUTH-02 | System generates username and temporary password on account creation | Must | done | Usernames from the business name (`owner.…`, `cust.…`, number added on a clash) and 14-character temporary passwords from `crypto`, both server-side (`src/lib/auth/username.ts`, `temporary-password.ts`; unit + e2e) |
+| AUTH-03 | Forced change of temporary password at first login | Must | done | `must_change_password` sends every route to `/change-password` (proxy + DAL); live strength checklist; `rpc_complete_password_change` clears the flag. Rules: 10+ characters, a letter, a number, no part of the username, not a common password (the spec gives none). Unit + e2e (`cust.bandara`, new customer, new owner) |
+| AUTH-04 | Passwords stored as salted hashes; temp password shown once | Must | done | Supabase Auth stores bcrypt hashes; RentDesk never stores passwords. The credentials dialog shows them once and closes only after "I have saved these details" (e2e) |
+| AUTH-05 | Parent role resets passwords (Admin → owners, Owner → customers) | Must | done | `rpc_reset_account_password` (permission check, forces a change, clears lockout, audit) then the Auth Admin API sets a new temporary password. DB tests for both parents and refusals; e2e: owner resets a customer, old password stops working |
+| AUTH-06 | Role-based access control for ADMIN, OWNER, CUSTOMER | Must | done | RLS per role (task 1) + `src/proxy.ts` route guards + role checks in every page and Server Action (`requireUser` / `currentActor`). Unit (`routeDecision`) + e2e (owner → /admin, customer → /owner, signed-out → /login) |
+| AUTH-07 | Tenant isolation by role and owner | Must | done | DB layer from task 1. Portal queries run as the signed-in user so RLS decides; the service role is used only in server code for credentials and rpc calls. e2e: an owner opening another tenant's customer gets "not found". Every later feature must keep this |
+| AUTH-08 | Login rate limiting and temporary lockout | Must | done | 5 wrong passwords → 15 min lockout; 30 failures per IP per 15 min (spec gives no numbers; in `platform_settings`). Unknown usernames lock the same way; one generic error for wrong details. Pure gate `login-gate.ts` (unit), atomic `record_login_attempt` (DB), e2e lockout. Access token hook also refuses locked accounts. Raise Supabase's own sign-in rate limit before production (`docs/database.md`) |
+| AUTH-09 | Secure sessions with expiry; HTTPS everywhere | Must | done | Supabase session limits are paid, so the proxy signs out after 30 min idle and 12 h after sign-in (settings), with a message on /login. Unit (`sessionTimeout`) + e2e (idle). HTTPS: Vercel |
+| AUTH-10 | Suspending an owner blocks that owner's customers | Must | done | Blocked in four places: RLS helpers (task 1), login (clear message after a correct password), proxy on every request, and the access token hook (sign-in and refresh). Unit (`blockReason`), DB (`session_state.owner_status`, hook), e2e (suspended customer and owner cannot sign in) |
+| AUTH-11 | Audit log for account creation, resets, status changes, logins | Should | done | Audit entries: account creation, `LOGIN`, `LOGIN_FAILED` (username, IP, reason), `LOCKOUT`, `LOGOUT`, `PASSWORD_RESET`, `PASSWORD_CHANGED`, `STATUS_CHANGE` with reason, detail edits (DB tests). Viewing them is ADM-05 |
+| AUTH-12 | Optional OTP/2FA for Admin and Owner | Could | deferred | Left out of task 2 by decision. Supabase Auth TOTP MFA is free when it is picked up |
 
 ### 4.2 Admin Portal (ADM)
 
 | ID | Description | Priority | Status | Notes |
 | --- | --- | --- | --- | --- |
-| ADM-01 | Create, view, edit owner accounts | Must | todo | |
-| ADM-02 | Activate, suspend, deactivate owners | Must | todo | |
-| ADM-03 | Reset owner passwords and deliver credentials | Must | todo | |
+| ADM-01 | Create, view, edit owner accounts | Must | done | List with search (business, contact, phone, email, username) and status filter; create; view; edit (e2e) |
+| ADM-02 | Activate, suspend, deactivate owners | Must | done | Suspend / reactivate / deactivate with reason and confirm dialog; owner notified in-app; suspending an owner blocks their customers (AUTH-10). DB + e2e |
+| ADM-03 | Reset owner passwords and deliver credentials | Must | done | Reset with a new temporary password shown once in the copy dialog (spec 3.2 allows one-time on-screen display). Sending credentials by email waits for NOT-02 |
 | ADM-04 | System dashboard: owners, customers, machines, invoices, open requests | Should | todo | |
 | ADM-05 | View audit logs and notification delivery logs | Should | todo | |
 | ADM-06 | Global settings: reminder schedule, templates, branding | Should | todo | |
@@ -48,11 +49,11 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 
 | ID | Description | Priority | Status | Notes |
 | --- | --- | --- | --- | --- |
-| CUS-01 | Owner creates, edits, views customers | Must | todo | |
-| CUS-02 | System generates customer login; owner passes it on | Must | todo | |
-| CUS-03 | Owner suspends, reactivates, deactivates customers and resets passwords | Must | todo | |
+| CUS-01 | Owner creates, edits, views customers | Must | done | Owner creates, views and edits customers; list with search and status filter (e2e). Full customer profile is CUS-04 |
+| CUS-02 | System generates customer login; owner passes it on | Must | done | Login generated on creation and shown once (e2e: the new customer signs in and must change the password) |
+| CUS-03 | Owner suspends, reactivates, deactivates customers and resets passwords | Must | done | Suspend / reactivate / deactivate with reason, and password reset, own customers only (DB: other tenants refused; e2e) |
 | CUS-04 | Customer profile: machines, agreements, invoices, payments, requests | Must | todo | |
-| CUS-05 | Search and filter customers by name, status, outstanding balance | Should | todo | |
+| CUS-05 | Search and filter customers by name, status, outstanding balance | Should | partial | Search by name, business, phone, email, username and filter by status done. Filter by outstanding balance needs invoices |
 
 ### 4.4 Machine Management (MAC)
 
@@ -177,16 +178,16 @@ Tracks every requirement ID in `docs/spec.md` (v1.1). Update at the end of every
 | CP-05 | View/download past invoices, receipts, payment history | Must | todo | |
 | CP-06 | Raise a dispute and comment on a ticket | Should | todo | |
 | CP-07 | Raise and track service requests | Must | todo | |
-| CP-08 | Notification centre and profile with password change | Must | todo | |
+| CP-08 | Notification centre and profile with password change | Must | partial | Password change and sign-out from Help (task 2). Notification centre pending (NOT-01) |
 | CP-09 | Mobile-first responsive design (installable PWA) | Should | todo | Shell, manifest, icons and service worker in place (setup); not verified as done until the portal exists |
 
 ### 17. Owner Branding (BRD)
 
 | ID | Description | Priority | Status | Notes |
 | --- | --- | --- | --- | --- |
-| BRD-01 | Owner must complete company setup (name, logo, address, phone, email, bank details) after first password change, before the dashboard | Must | todo | Gate in proxy after AUTH-03 |
-| BRD-02 | Logo upload (JPG/PNG/SVG), validated, resized, stored privately; shown in portals, emails, invoices | Must | todo | SVG must be sanitised (script/XSS risk) and rasterised for PDFs |
-| BRD-03 | Edit company details and logo from Settings; applies to new invoices only | Must | todo | Issued invoices keep their stored PDF / snapshot |
+| BRD-01 | Owner must complete company setup (name, logo, address, phone, email, bank details) after first password change, before the dashboard | Must | done | After the password change an owner without `onboarding_completed_at` is sent to `/setup` (company, address, phone, email, bank details, optional logo with initials fallback) and cannot reach any owner page until saved (DB + e2e `owner.ceylon`) |
+| BRD-02 | Logo upload (JPG/PNG/SVG), validated, resized, stored privately; shown in portals, emails, invoices | Must | partial | Done: JPG/PNG/SVG up to 2 MB, magic-byte check, unsafe SVGs refused, every logo rasterised/resized to a 512 px PNG at `branding/{owner_id}/logo.png` (raw SVG never stored), signed URLs in the owner header and that owner's customer portal (unit + e2e). Pending: emails (NOT-02) and invoices (BRD-06) |
+| BRD-03 | Edit company details and logo from Settings; applies to new invoices only | Must | partial | Done: Settings › Company edits details and replaces or removes the logo (e2e). "Issued invoices keep their branding": `invoices.branding_snapshot` and the confirm rpc parameter exist; the snapshot is taken when invoice issuing is built |
 | BRD-04 | Upload invoice letterhead (A4 image or 1-page PDF) as invoice PDF background | Should | todo | |
 | BRD-05 | Position invoice data area on letterhead (presets or drag); saved per owner | Should | todo | |
 | BRD-06 | Without a letterhead, invoices use the built-in template with owner logo and details | Must | todo | |

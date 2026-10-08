@@ -107,9 +107,24 @@ paid provider" in `docs/progress.md`.
 4. Update `docs/progress.md` with the requirement IDs covered.
 5. Never mark a requirement done unless it is implemented and tested.
 
+## Git workflow
+- Every prompt/task starts from an up-to-date `main` on a new branch named
+  `feat/NN-short-name` (NN = prompt number, e.g. `feat/02-auth`):
+  `git checkout main && git pull && git checkout -b feat/NN-short-name`.
+- Commit in small logical steps with clear messages in Conventional Commits style
+  (e.g. `feat(auth): username login with lockout`).
+- Before the final commit, run `npm run lint`, `npm run typecheck`, `npm test` and
+  `npm run test:db`. All must pass.
+- At the end, push the branch to `origin`. Never merge into `main` and never push to
+  `main`: the user reviews and merges.
+- Never commit `.env.local` or any secret.
+- Line endings are LF everywhere (`.gitattributes`: `* text=auto eol=lf`).
+
 ## Commands
 - `npm run dev` / `npm run build`
 - `npm run lint` / `npm run typecheck` / `npm test` / `npm run test:e2e`
+  (e2e signs in with the seed accounts on the linked dev DB at a 360 px viewport; it restores
+  them afterwards and needs `SUPABASE_DB_URL` to delete the accounts it creates)
 - `npx supabase link --project-ref <ref>` (once; links the CLI to the cloud project)
 - `npm run db:push` = `supabase db push` (apply new migrations to the linked cloud DB;
   add `--dry-run` to preview)

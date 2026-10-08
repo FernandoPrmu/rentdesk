@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0012`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0013`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -30,7 +30,7 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `owner_company_profiles` | Branding (spec 17): company, logo, bank details, letterhead + layout, `onboarding_completed_at` |
 | | `customers` | Customer details (status lives in `profiles`) |
 | | `subscription_plans` | Optional plans (ADM-07) |
-| Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee |
+| Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee, login lockout and session timeout |
 | | `owner_settings` | Per-owner overrides (null = inherit); view `owner_settings_effective` merges them |
 | Fleet | `machines` | Brand, model, serial, `MONO`/`COLOUR`, status, counter maximum (rollover) |
 | | `rental_agreements` | Terms, installation, initial/closing readings, cycle calendar (`next_cycle_no/date`) |
@@ -156,6 +156,14 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `assign_invoice_number` | Per-owner counter row lock. Rolls back with the transaction, so numbering is gap-free |
 | `provision_account` | Profile + owner/customer rows; enforces Admin → Owner → Customer |
 | `write_audit` | Explicit audit entries (logins, resets) |
+| `login_gate_state` | Lock state, recent failures for the username and for the IP, and the thresholds, in one call |
+| `record_login_attempt` | Records an attempt under a profile row lock. A wrong password counts; at the threshold `locked_until` is set (audit `LOCKOUT`). Success clears the lock and sets `last_login_at` (audit `LOGIN`). Failures write `LOGIN_FAILED` |
+| `session_state` | Role, status, owner status, `must_change_password`, onboarding and session timeouts for the route guard |
+| `set_account_status` | Admin → owner, owner → own customer only. Reason required (stored in the audit entry). In-app notification to the user |
+| `reset_account_password` | Same parent rule. Sets `must_change_password`, clears the lockout, audit `PASSWORD_RESET`. Call it **before** setting the new password through the Auth Admin API: it is the permission check |
+| `complete_password_change` | Clears `must_change_password` (audit `PASSWORD_CHANGED`) |
+| `update_owner` / `update_customer` | Account details with the same parent rule |
+| `save_company_profile` | Owner only. Upserts branding; the first save sets `onboarding_completed_at` (BRD-01) |
 
 Audit triggers record the actor:
 
@@ -168,6 +176,59 @@ Audit triggers record the actor:
 > `public.rpc_*` wrapper and grant it to `service_role` only. `rls.db.test.ts` fails if any callable
 > function in `public` is executable by anon or authenticated.
 
+## Login security and sessions (migration 0013)
+
+- **Lockout (AUTH-08).** Wrong passwords for a username are counted since the later of
+  its last successful login and the start of the lockout window. After
+  `login_max_failures` (5) the account is locked for `login_lockout_minutes` (15).
+  Unknown usernames are treated the same way, so a lockout never reveals whether an
+  account exists. One IP may fail `login_ip_max_failures` (30) times per
+  `login_ip_window_minutes` (15). The pure decision is `src/lib/auth/login-gate.ts`.
+- **Sessions (AUTH-09).** Supabase's own session limits are paid features, so the
+  proxy (`src/proxy.ts`) signs users out after `session_idle_minutes` (30) without a
+  request and `session_max_hours` (12) after signing in (from the JWT `amr` time).
+- **Blocked accounts (AUTH-10).** The proxy reads `session_state` on every page
+  request and signs out suspended or deactivated users and customers of an inactive
+  owner, with a message on `/login`. The RLS helpers already return nothing for them.
+- **Audit (AUTH-11).** `LOGIN`, `LOGIN_FAILED`, `LOCKOUT`, `LOGOUT`, `PASSWORD_RESET`,
+  `PASSWORD_CHANGED` and `STATUS_CHANGE` (with the reason) are written to `audit_logs`.
+- All thresholds are columns of `platform_settings`; the admin may change them.
+
+### Custom Access Token hook
+
+`public.custom_access_token_hook(event jsonb)` runs inside Supabase Auth before any
+token is issued, so the rules above also hold when someone calls Supabase Auth
+directly with the public anon key (bypassing the app). It refuses a token with
+`403 RD_BLOCKED:<REASON>` when:
+
+- the user has no profile, is `SUSPENDED` or `DEACTIVATED`, or is a customer whose
+  owner is not `ACTIVE` (password sign-in **and** token refresh);
+- the account is locked (`locked_until` in the future), for password sign-in only, so
+  someone else's wrong guesses cannot sign the real user out.
+
+Only `supabase_auth_admin` may execute it. The app works the same with or without it;
+the login page shows the same clear messages either way.
+
+**Enable it (once per project):**
+
+1. Open the Supabase dashboard for the project and go to **Authentication → Hooks**
+   (under *Configuration*).
+2. Click **Add a new hook** and choose **Customize Access Token (JWT) Claims hook**.
+3. Hook type: **Postgres**. Schema: **public**. Function: **custom_access_token_hook**.
+4. Make sure **Enable Customize Access Token (JWT) Claims hook** is switched on, then
+   click **Create hook**.
+5. Check: sign in as `owner.lanka` (works). As admin, suspend a test owner and try to
+   sign in as that owner: the login page says the account is suspended.
+
+To turn it off, disable or delete the hook on the same page; nothing else changes.
+
+### Supabase Auth rate limits
+
+Sign-ins go through the app's server, so Supabase Auth sees the server's IP for every
+user. Before production, raise **Authentication → Rate Limits → Sign-ups and
+sign-ins** well above the default (for example to a few hundred per 5 minutes); the
+app's own per-account and per-IP limits above protect logins instead.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -177,7 +238,7 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 | --- | --- | --- |
 | `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/…` while their ticket awaits a reading. Only the owner reads |
 | `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads while their ticket awaits payment. Customer, owner and admin read |
-| `branding` | 5 MB; PNG, JPEG, SVG, PDF | Owner manages their own prefix. Their customers and admin read |
+| `branding` | 5 MB; PNG, JPEG, SVG, PDF | Owner manages their own prefix. Their customers and admin read. The app stores the logo only as `{owner_id}/logo.png` (max 512 px, SVG rasterised on the server) |
 
 ## Tests and seed
 
@@ -190,4 +251,7 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
     first.
 - `npm run db:seed` (`scripts/seed.ts`) creates demo accounts, machines, agreements and tickets in
   several stages through the same workflow functions. It is safe to re-run, and it prints the demo
-  logins.
+  logins. A re-run also restores the demo login state (active, not locked, forced password change
+  only for `cust.bandara`) and owner B (`owner.ceylon`) as not onboarded.
+- `npm run test:e2e` signs in with the seed accounts. Its global setup and teardown restore them
+  and delete the `owner.e2e-*` / `cust.e2e-*` accounts the tests create (needs `SUPABASE_DB_URL`).

@@ -364,13 +364,22 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
       const wrappers = rows.filter((r) => r.name.startsWith("rpc_"));
       expect(wrappers.map((r) => r.name).sort()).toEqual([
         "rpc_assign_invoice_number",
+        "rpc_complete_password_change",
         "rpc_confirm_meter_submission",
+        "rpc_login_gate_state",
         "rpc_open_billing_cycle",
         "rpc_provision_account",
+        "rpc_record_login_attempt",
         "rpc_reject_meter_submission",
+        "rpc_reset_account_password",
+        "rpc_save_company_profile",
+        "rpc_session_state",
+        "rpc_set_account_status",
         "rpc_submit_meter_reading",
         "rpc_submit_payment",
         "rpc_transition_ticket",
+        "rpc_update_customer",
+        "rpc_update_owner",
         "rpc_verify_payment",
         "rpc_write_audit",
       ]);

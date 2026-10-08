@@ -18,7 +18,20 @@ export function StatusBadge({ status }: { status: AccountStatusValue }) {
 }
 
 /** Search box + status filter. A plain GET form: works without JavaScript and keeps the URL shareable. */
-export function AccountFilters({ q, status, placeholder }: { q?: string; status?: string; placeholder: string }) {
+export function AccountFilters({
+  q,
+  status,
+  balance,
+  placeholder,
+  withBalance,
+}: {
+  q?: string;
+  status?: string;
+  balance?: string;
+  placeholder: string;
+  /** Owner's customer list: filter by outstanding balance (CUS-05). */
+  withBalance?: boolean;
+}) {
   return (
     <form method="get" role="search" className="mb-4 flex flex-col gap-2 sm:flex-row">
       <div className="relative flex-1">
@@ -37,6 +50,18 @@ export function AccountFilters({ q, status, placeholder }: { q?: string; status?
           <option value="SUSPENDED">Suspended</option>
           <option value="DEACTIVATED">Deactivated</option>
         </select>
+        {withBalance && (
+          <select
+            name="balance"
+            defaultValue={balance ?? ""}
+            aria-label="Balance"
+            className="h-12 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-base sm:w-44 sm:flex-none"
+          >
+            <option value="">Any balance</option>
+            <option value="due">Has balance due</option>
+            <option value="clear">Nothing due</option>
+          </select>
+        )}
         <Button type="submit" variant="secondary" className="h-12 px-5 text-base">
           Search
         </Button>
@@ -53,6 +78,8 @@ export interface AccountListItem {
   phone: string | null;
   status: AccountStatusValue;
   mustChangePassword: boolean;
+  /** Extra highlighted fact, e.g. the outstanding balance. */
+  note?: string;
 }
 
 /** Card rows: comfortable on a phone, still compact on a desktop. */
@@ -70,6 +97,7 @@ export function AccountList({ items, basePath, empty }: { items: AccountListItem
                 <span className="truncate font-medium">{item.title}</span>
                 <StatusBadge status={item.status} />
                 {item.mustChangePassword && item.status === "ACTIVE" && <Badge variant="outline">Not signed in yet</Badge>}
+                {item.note && <Badge variant="destructive">{item.note}</Badge>}
               </div>
               <p className="truncate text-sm text-muted-foreground">
                 {[item.subtitle, item.username, item.phone].filter(Boolean).join(" · ")}

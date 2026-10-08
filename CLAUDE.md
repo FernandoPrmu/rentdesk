@@ -123,6 +123,8 @@ paid provider" in `docs/progress.md`.
 ## Commands
 - `npm run dev` / `npm run build`
 - `npm run lint` / `npm run typecheck` / `npm test` / `npm run test:e2e`
+  (e2e signs in with the seed accounts on the linked dev DB at a 360 px viewport; it restores
+  them afterwards and needs `SUPABASE_DB_URL` to delete the accounts it creates)
 - `npx supabase link --project-ref <ref>` (once; links the CLI to the cloud project)
 - `npm run db:push` = `supabase db push` (apply new migrations to the linked cloud DB;
   add `--dry-run` to preview)

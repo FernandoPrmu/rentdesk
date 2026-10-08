@@ -41,7 +41,6 @@ function safeNext(next: string | undefined): string | null {
   return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : null;
 }
 
-const BLOCKED_PREFIX = "RD_BLOCKED:";
 const HOOK_REASONS: Record<string, BlockReason | "locked"> = {
   SUSPENDED: "suspended",
   DEACTIVATED: "deactivated",
@@ -49,6 +48,24 @@ const HOOK_REASONS: Record<string, BlockReason | "locked"> = {
   NO_PROFILE: "no_profile",
   LOCKED: "locked",
 };
+
+/**
+ * Why the access token hook refused a sign-in, from its "RD_BLOCKED:<REASON>"
+ * message (matched anywhere, in case Supabase Auth wraps it), or null.
+ */
+export function hookBlockReason(message: string | undefined): BlockReason | "locked" | null {
+  const match = /RD_BLOCKED:([A-Z_]+)/.exec(message ?? "");
+  return match ? (HOOK_REASONS[match[1]] ?? "no_profile") : null;
+}
+
+/** The hook runs only after the password was verified: say why the account is blocked. */
+async function refusedByHook(username: string): Promise<BlockReason | "locked"> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("profiles").select("id, locked_until").eq("username", username).maybeSingle();
+  if (!data) return "no_profile";
+  if (data.locked_until && new Date(data.locked_until) > new Date()) return "locked";
+  return blockReason(await loadSessionState(data.id)) ?? "no_profile";
+}
 
 /**
  * Username + password sign-in (AUTH-08, AUTH-10, AUTH-11).
@@ -98,11 +115,11 @@ export async function signInWithUsername(input: { username: string; password: st
 
   if (error || !data.user) {
     const message = error?.message ?? "";
-    if (message.startsWith(BLOCKED_PREFIX)) {
+    const hookReason = hookBlockReason(message) ?? (error?.status === 403 ? await refusedByHook(username) : null);
+    if (hookReason) {
       // The access token hook refused a correct password (blocked or locked account).
-      const reason = HOOK_REASONS[message.slice(BLOCKED_PREFIX.length)] ?? "no_profile";
-      await record(false, reason);
-      return { ok: false, error: reason === "locked" ? lockoutMessage(gate.policy.lockoutMinutes) : SIGN_OUT_MESSAGES[reason] };
+      await record(false, hookReason);
+      return { ok: false, error: hookReason === "locked" ? lockoutMessage(gate.policy.lockoutMinutes) : SIGN_OUT_MESSAGES[hookReason] };
     }
     if (error?.code === "invalid_credentials" || error?.status === 400) {
       const result = await record(false, "invalid_credentials");

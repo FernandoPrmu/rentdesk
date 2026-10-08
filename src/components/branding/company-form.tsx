@@ -59,7 +59,8 @@ export function CompanyForm({
   const shownLogo = preview ?? (removeLogo ? null : logoUrl);
 
   return (
-    <form onSubmit={onSubmit} className="space-y-6" noValidate>
+    // Saved values come back as new defaults: remount so the inputs pick them up.
+    <form key={JSON.stringify(defaults)} onSubmit={onSubmit} className="space-y-6" noValidate>
       <fieldset className="space-y-4">
         <legend className="mb-3 text-lg font-semibold">Company</legend>
         <div className="space-y-1.5">

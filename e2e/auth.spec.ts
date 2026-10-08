@@ -46,6 +46,36 @@ test.describe("login (AUTH-06, AUTH-08)", () => {
   });
 });
 
+test.describe("lockout and session timeout (AUTH-08, AUTH-09)", () => {
+  test("five wrong passwords lock the account; even the right password is refused", async ({ page }) => {
+    const { username, password } = DEMO.custFernando;
+    for (let i = 1; i <= 4; i++) {
+      await signIn(page, username, `wrong-password-${i}`);
+      await expect(page.getByText(GENERIC_ERROR)).toBeVisible();
+    }
+    await signIn(page, username, "wrong-password-5");
+    await expect(page.getByText(/^Too many sign-in attempts\. Please try again in 15 minutes\.$/)).toBeVisible();
+
+    await signIn(page, username, password);
+    await expect(page.getByText(/^Too many sign-in attempts/)).toBeVisible();
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("an idle session is signed out with an explanation", async ({ page, context, baseURL }) => {
+    await signInAndWait(page, DEMO.custPerera.username, DEMO.custPerera.password, /\/customer$/);
+    // Pretend the last request was 31 minutes ago (the idle limit is 30).
+    await context.addCookies([
+      { name: "rd_seen", value: String(Date.now() - 31 * 60_000), url: baseURL!, httpOnly: true, sameSite: "Lax" },
+    ]);
+    await page.goto("/customer/bills");
+    await expect(page).toHaveURL(/\/login\?reason=idle$/);
+    await expect(page.getByText("You were signed out after a period of inactivity.", { exact: false })).toBeVisible();
+    // The session is really gone.
+    await page.goto("/customer");
+    await expect(page).toHaveURL(/\/login\?next=%2Fcustomer$/);
+  });
+});
+
 test.describe("route guards (AUTH-06)", () => {
   test("an owner cannot open the admin portal", async ({ page }) => {
     await signInAndWait(page, DEMO.ownerLanka.username, DEMO.ownerLanka.password, /\/owner$/);

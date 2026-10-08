@@ -13,6 +13,7 @@ export const DEMO = {
   ownerCeylon: { username: "owner.ceylon", password: "RentDesk-Owner-2026!" },
   custPerera: { username: "cust.perera", password: "RentDesk-Customer-2026!" },
   custSilva: { username: "cust.silva", password: "RentDesk-Customer-2026!" },
+  custFernando: { username: "cust.fernando", password: "RentDesk-Customer-2026!" },
   custBandara: { username: "cust.bandara", password: "RentDesk-Customer-2026!" },
 } as const;
 

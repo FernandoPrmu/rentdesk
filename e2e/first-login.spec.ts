@@ -73,4 +73,15 @@ test("owner.ceylon completes company setup before reaching the dashboard (BRD-01
   // Setup is done once: /setup now leads to the dashboard.
   await page.goto("/setup");
   await expect(page).toHaveURL(/\/owner$/);
+
+  // BRD-03: details and logo can be changed later in Settings.
+  await page.goto("/owner/settings/company");
+  await expect(page.getByLabel("Account number")).toHaveValue("8001234567");
+  await page.getByLabel("Phone").fill("081 999 0000");
+  await page.getByRole("button", { name: "Remove logo" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Company details saved")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Phone")).toHaveValue("081 999 0000");
+  await expect(page.getByRole("img", { name: "Ceylon Office Machines logo" })).toHaveCount(0);
 });

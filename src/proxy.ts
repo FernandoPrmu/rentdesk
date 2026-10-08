@@ -67,7 +67,7 @@ export async function proxy(request: NextRequest) {
     return redirectTo(`${LOGIN_PATH}?next=${encodeURIComponent(pathname + search)}`);
   }
 
-  const { data: stateData, error } = await createAdminClient().rpc("rpc_session_state", { p_user_id: claims.sub });
+  const { data: stateData, error } = await loadState(claims.sub);
   if (error) {
     console.error("[proxy] session state:", error.message);
     return new NextResponse("Service unavailable. Please try again in a moment.", { status: 503 });
@@ -100,6 +100,14 @@ export async function proxy(request: NextRequest) {
 
   const target = routeDecision(state, pathname);
   return target ? redirectTo(target) : response;
+}
+
+/** Account state, retried once when the network to Supabase drops a request. */
+async function loadState(userId: string) {
+  const admin = createAdminClient();
+  const first = await admin.rpc("rpc_session_state", { p_user_id: userId });
+  if (!first.error || !/fetch failed|network/i.test(first.error.message)) return first;
+  return admin.rpc("rpc_session_state", { p_user_id: userId });
 }
 
 export const config = {

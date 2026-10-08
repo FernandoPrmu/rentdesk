@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import pg from "pg";
 
 /**
  * Seed accounts used by the e2e tests (`npm run db:seed` creates them) and a
@@ -22,7 +23,7 @@ function serviceClient() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-async function profileId(username: string): Promise<string> {
+export async function profileId(username: string): Promise<string> {
   const { data, error } = await serviceClient().from("profiles").select("id").eq("username", username).single();
   if (error || !data) throw new Error(`e2e: seed account ${username} not found. Run npm run db:seed first.`);
   return data.id as string;
@@ -63,4 +64,43 @@ export async function restoreDemoState(): Promise<void> {
     .in("username", [...usernames, ...unknown])
     .eq("success", false);
   if (attemptsError) throw new Error(`e2e: clear failed attempts: ${attemptsError.message}`);
+}
+
+/** Business names of accounts created by the e2e tests start with this; usernames with `.e2e-`. */
+export const E2E_PREFIX = "E2E";
+
+/**
+ * Deletes accounts the e2e tests created (`owner.e2e-*`, `cust.e2e-*`). Owners and
+ * profiles reference each other, so this runs as one transaction over
+ * SUPABASE_DB_URL (the same connection the database tests use). Audit entries stay.
+ */
+export async function deleteE2eAccounts(): Promise<void> {
+  const url = process.env.SUPABASE_DB_URL;
+  if (!url) throw new Error("e2e: SUPABASE_DB_URL must be set (.env.local) to clean up test accounts");
+  const db = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+  await db.connect();
+  try {
+    await db.query("begin");
+    const { rows } = await db.query<{ id: string }>(
+      "select id from public.profiles where username like 'owner.e2e-%' or username like 'cust.e2e-%'",
+    );
+    const ids = rows.map((r) => r.id);
+    if (ids.length > 0) {
+      await db.query("delete from public.notifications where user_id = any($1) or owner_id = any($1)", [ids]);
+      await db.query("delete from public.customers where id = any($1) or owner_id = any($1)", [ids]);
+      await db.query("delete from public.owner_company_profiles where owner_id = any($1)", [ids]);
+      await db.query("delete from public.owner_settings where owner_id = any($1)", [ids]);
+      await db.query("delete from public.invoice_counters where owner_id = any($1)", [ids]);
+      // owners.id -> profiles is checked at once; profiles.owner_id -> owners is deferred to commit.
+      await db.query("delete from public.owners where id = any($1)", [ids]);
+      await db.query("delete from public.profiles where id = any($1)", [ids]);
+      await db.query("delete from auth.users where id = any($1)", [ids]);
+    }
+    await db.query("commit");
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  } finally {
+    await db.end();
+  }
 }

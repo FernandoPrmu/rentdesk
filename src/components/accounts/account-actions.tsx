@@ -171,10 +171,14 @@ export function AccountActions({
               disabled={resetting}
               onClick={() =>
                 startReset(async () => {
-                  const result = await resetAction();
+                  try {
+                    const result = await resetAction();
+                    if (result.ok) setCredentials(result.data);
+                    else toast.error(result.error);
+                  } catch {
+                    toast.error("The server could not be reached. Please try again.");
+                  }
                   setConfirmReset(false);
-                  if (result.ok) setCredentials(result.data);
-                  else toast.error(result.error);
                 })
               }
             >

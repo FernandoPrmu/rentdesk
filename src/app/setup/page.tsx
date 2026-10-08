@@ -33,7 +33,9 @@ async function Setup() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Set up your company</CardTitle>
+          <CardTitle className="text-xl">
+            <h1>Set up your company</h1>
+          </CardTitle>
           <CardDescription>
             These details appear on your invoices and in your customers&apos; app. You can change them later in Settings.
           </CardDescription>

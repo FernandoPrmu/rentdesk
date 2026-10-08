@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useActionState, useState } from "react";
 
 import { loginAction } from "@/app/login/actions";
+import { useSubmitWithoutReset } from "@/components/forms/use-submit-without-reset";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,11 +15,14 @@ export function LoginForm() {
   const params = useSearchParams();
   const [state, formAction, pending] = useActionState(loginAction, null);
   const [showPassword, setShowPassword] = useState(false);
+  const [username, setUsername] = useState("");
+  // Keep what was typed after a failed attempt (the password can then be shown and fixed).
+  const onSubmit = useSubmitWithoutReset(formAction);
   const reason = params.get("reason");
   const notice = !state && isSignOutReason(reason) ? SIGN_OUT_MESSAGES[reason] : null;
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form onSubmit={onSubmit} className="space-y-4">
       <input type="hidden" name="next" value={params.get("next") ?? ""} />
       {notice && (
         <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -35,7 +39,8 @@ export function LoginForm() {
           autoCorrect="off"
           spellCheck={false}
           required
-          defaultValue={state?.username}
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           className="h-12 text-base"
         />
       </div>

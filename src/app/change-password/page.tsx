@@ -30,7 +30,9 @@ async function ChangePassword() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">{forced ? "Choose your own password" : "Change password"}</CardTitle>
+          <CardTitle className="text-xl">
+            <h1>{forced ? "Choose your own password" : "Change password"}</h1>
+          </CardTitle>
           <CardDescription>
             {forced
               ? "You signed in with a temporary password. Choose a new password that only you know."

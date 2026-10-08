@@ -13,7 +13,9 @@ export default function LoginPage() {
     <AppShell>
       <Card className="w-full">
         <CardHeader>
-          <CardTitle className="text-xl">Sign in</CardTitle>
+          <CardTitle className="text-xl">
+            <h1>Sign in</h1>
+          </CardTitle>
           <CardDescription>Use the username and password you were given.</CardDescription>
         </CardHeader>
         <CardContent>

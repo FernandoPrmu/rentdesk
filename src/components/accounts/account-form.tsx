@@ -68,7 +68,8 @@ export function AccountForm(
 
   return (
     <>
-      <form onSubmit={onSubmit} className="space-y-4" noValidate>
+      {/* Saved values come back as new defaults: remount so the inputs pick them up. */}
+      <form key={JSON.stringify(defaults)} onSubmit={onSubmit} className="space-y-4" noValidate>
         {FIELDS[props.kind].map((field) => (
           <FormField
             key={field.name}

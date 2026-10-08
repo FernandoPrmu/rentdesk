@@ -246,6 +246,16 @@ async function ensureUsers(): Promise<Record<string, string>> {
       `provision ${account.username}`,
     ) as { created: boolean };
     console.log(`  ${result.created ? "created " : "exists  "} ${account.role.padEnd(8)} ${account.username}`);
+
+    // Re-runs restore the demo login state (e2e tests and manual testing change it):
+    // active, not locked, and the forced password change exactly as defined above.
+    check(
+      await admin
+        .from("profiles")
+        .update({ status: "ACTIVE", failed_login_count: 0, locked_until: null, must_change_password: account.mustChangePassword ?? false })
+        .eq("id", ids[account.key]),
+      `restore login state ${account.username}`,
+    );
   }
   return ids;
 }
@@ -274,7 +284,10 @@ async function seedPlansTemplatesAndBranding(ids: Record<string, string>) {
     "templates",
   );
 
-  // Owner A is onboarded with branding; owner B has not completed setup yet.
+  // Owner A is onboarded with branding; owner B has not completed setup yet (a re-run
+  // undoes a setup done while testing, so the onboarding gate can be shown again).
+  check(await admin.from("owner_company_profiles").delete().eq("owner_id", ids.ownerB), "reset owner B setup");
+  check(await admin.storage.from("branding").remove([`${ids.ownerB}/logo.png`]), "reset owner B logo");
   const logoPath = `${ids.ownerA}/logo.png`;
   check(
     await admin.storage.from("branding").upload(logoPath, PNG, { contentType: "image/png", upsert: true }),

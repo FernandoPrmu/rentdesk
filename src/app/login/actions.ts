@@ -13,7 +13,6 @@ const loginSchema = z.object({
 
 export interface LoginState {
   error: string;
-  username: string;
 }
 
 /** AUTH-08: username + password sign-in with lockout; one generic error for wrong details. */
@@ -23,9 +22,9 @@ export async function loginAction(_prev: LoginState | null, formData: FormData):
     password: formData.get("password") ?? "",
     next: formData.get("next") || undefined,
   });
-  if (!parsed.success) return { error: GENERIC_LOGIN_ERROR, username: "" };
+  if (!parsed.success) return { error: GENERIC_LOGIN_ERROR };
 
   const outcome = await signInWithUsername(parsed.data);
-  if (!outcome.ok) return { error: outcome.error, username: parsed.data.username };
+  if (!outcome.ok) return { error: outcome.error };
   redirect(outcome.redirectTo);
 }

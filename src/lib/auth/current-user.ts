@@ -1,6 +1,7 @@
 import "server-only";
 
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { cache } from "react";
 
 import {
@@ -30,6 +31,9 @@ export async function loadSessionState(userId: string): Promise<SessionState | n
 
 /** The verified signed-in user and their account state, or null. Once per request. */
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+  // Session checks compare token times with the clock: always at request time,
+  // never inside a (runtime) prerender.
+  await connection();
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
   const userId = data?.claims?.sub;

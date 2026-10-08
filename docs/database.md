@@ -199,6 +199,13 @@ Audit triggers record the actor:
 - **Sessions (AUTH-09).** Supabase's own session limits are paid features, so the
   proxy (`src/proxy.ts`) signs users out after `session_idle_minutes` (30) without a
   request and `session_max_hours` (12) after signing in (from the JWT `amr` time).
+- **Server Actions.** The proxy never redirects a Server Action request (POST with
+  `Next-Action`): the browser would follow the 307 with the same POST and React throws
+  "An unexpected response was received from the server". It signs the user out if
+  needed, lets the request through and names the target page in the internal
+  `x-rentdesk-redirect` request header (a client-sent copy is dropped). `currentActor()`
+  then calls `redirect()` to it, so an expired, blocked or gated session lands on the
+  right page (e.g. `/login?reason=idle`).
 - **Blocked accounts (AUTH-10).** The proxy reads `session_state` on every page
   request and signs out suspended or deactivated users and customers of an inactive
   owner, with a message on `/login`. The RLS helpers already return nothing for them.

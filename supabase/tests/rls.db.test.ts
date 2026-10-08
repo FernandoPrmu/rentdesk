@@ -12,7 +12,7 @@ const ALL_RELATIONS = [
   "ticket_comments", "meter_submissions", "meter_readings", "meter_photos", "invoices",
   "invoice_lines", "invoice_counters", "payments", "payment_slips", "disputes", "credits",
   "service_requests", "service_request_history", "notifications", "notification_templates",
-  "idempotency_keys", "audit_logs",
+  "idempotency_keys", "audit_logs", "agreement_terms_history", "customer_balances",
 ];
 
 /** Relations with an owner_id column that authenticated users may read. */
@@ -22,6 +22,7 @@ const TENANT_RELATIONS = [
   "ticket_comments", "meter_submissions", "meter_readings", "meter_photos", "invoices",
   "invoice_lines", "invoice_counters", "payments", "payment_slips", "disputes", "credits",
   "service_requests", "service_request_history", "notifications", "notification_templates", "audit_logs",
+  "agreement_terms_history", "customer_balances",
 ];
 
 /** Rows visible to the current role; 0 when the relation is not granted at all. */
@@ -107,14 +108,14 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
       );
       expect(updateBranding.rowCount).toBe(0);
 
-      // Linking owner B's customer to an owner A agreement is impossible (composite FK).
+      // Agreements are written only through rpc_assign_machine (cross-tenant links: machines.db.test.ts).
       const crossLink = await sqlError(
         db,
         `insert into public.rental_agreements (owner_id, customer_id, machine_id, start_date, monthly_commitment_cents, bw_rate_cents)
          values ($1, $2, $3, current_date, 100, 1)`,
         [f.ownerA, f.custB1, f.machineASpare],
       );
-      expect(crossLink?.code).toBe("23503");
+      expect(crossLink?.code).toBe("42501");
 
       const template = await sqlError(
         db,
@@ -141,26 +142,34 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
     });
   });
 
-  it("an owner can manage their own machines, agreements and branding", async () => {
+  it("an owner edits their own machine details and branding; agreements and machine status go through rpc", async () => {
     await isolated(db, async () => {
       await asUser(db, f.ownerA);
       expect(await sqlError(db, "update public.machines set notes = 'serviced' where id = $1", [f.machineASpare])).toBeNull();
       expect(
-        await sqlError(db, "update public.owner_company_profiles set phone = '011' where owner_id = $1", [f.ownerA]),
+        await sqlError(db, "insert into public.machines (owner_id, brand, model, serial_no, type) values ($1, 'X', 'Y', $2, 'MONO')", [
+          f.ownerA,
+          `NEW-${f.tag}`,
+        ]),
       ).toBeNull();
       expect(
-        await sqlError(
-          db,
+        await sqlError(db, "update public.owner_company_profiles set phone = '011' where owner_id = $1", [f.ownerA]),
+      ).toBeNull();
+      // Migration 0014: no direct agreement writes, no hand-set machine status.
+      for (const [sql, params] of [
+        [
           `insert into public.rental_agreements (owner_id, customer_id, machine_id, start_date, monthly_commitment_cents, bw_rate_cents)
            values ($1, $2, $3, current_date, 100, 1)`,
           [f.ownerA, f.custA2, f.machineASpare],
-        ),
-      ).toBeNull();
-      // next_cycle_* is not client-editable.
-      const calendar = await sqlError(db, "update public.rental_agreements set next_cycle_no = 99 where id = $1", [
-        f.agrA1Mono,
-      ]);
-      expect(calendar?.code).toBe("42501");
+        ],
+        ["update public.rental_agreements set next_cycle_no = 99 where id = $1", [f.agrA1Mono]],
+        ["update public.rental_agreements set monthly_commitment_cents = 1 where id = $1", [f.agrA1Mono]],
+        ["update public.machines set status = 'RETIRED' where id = $1", [f.machineASpare]],
+        ["insert into public.machines (owner_id, brand, model, serial_no, type, status) values ($1, 'X', 'Y', 'Z-9', 'MONO', 'RENTED')", [f.ownerA]],
+        ["insert into public.agreement_terms_history (owner_id, agreement_id, version, effective_from_cycle_no, monthly_commitment_cents, bw_included, bw_rate_cents, due_days) values ($1, $2, 9, 1, 0, 0, 0, 7)", [f.ownerA, f.agrA1Mono]],
+      ] as const) {
+        expect((await sqlError(db, sql, [...params]))?.code, sql).toBe("42501");
+      }
     });
   });
 
@@ -364,20 +373,25 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
       const wrappers = rows.filter((r) => r.name.startsWith("rpc_"));
       expect(wrappers.map((r) => r.name).sort()).toEqual([
         "rpc_assign_invoice_number",
+        "rpc_assign_machine",
         "rpc_complete_password_change",
         "rpc_confirm_meter_submission",
         "rpc_login_gate_state",
         "rpc_open_billing_cycle",
         "rpc_provision_account",
+        "rpc_reassign_machine",
         "rpc_record_login_attempt",
         "rpc_reject_meter_submission",
         "rpc_reset_account_password",
+        "rpc_return_machine",
         "rpc_save_company_profile",
         "rpc_session_state",
         "rpc_set_account_status",
+        "rpc_set_machine_status",
         "rpc_submit_meter_reading",
         "rpc_submit_payment",
         "rpc_transition_ticket",
+        "rpc_update_agreement_terms",
         "rpc_update_customer",
         "rpc_update_owner",
         "rpc_verify_payment",

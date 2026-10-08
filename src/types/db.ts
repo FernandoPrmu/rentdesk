@@ -39,6 +39,86 @@ export type Database = {
   }
   public: {
     Tables: {
+      agreement_terms_history: {
+        Row: {
+          agreement_id: string
+          bw_included: number
+          bw_rate_cents: number
+          changed_at: string
+          changed_by: string | null
+          colour_included: number | null
+          colour_rate_cents: number | null
+          due_days: number
+          effective_from_cycle_no: number
+          id: string
+          monthly_commitment_cents: number
+          note: string | null
+          owner_id: string
+          version: number
+        }
+        Insert: {
+          agreement_id: string
+          bw_included: number
+          bw_rate_cents: number
+          changed_at?: string
+          changed_by?: string | null
+          colour_included?: number | null
+          colour_rate_cents?: number | null
+          due_days: number
+          effective_from_cycle_no: number
+          id?: string
+          monthly_commitment_cents: number
+          note?: string | null
+          owner_id: string
+          version: number
+        }
+        Update: {
+          agreement_id?: string
+          bw_included?: number
+          bw_rate_cents?: number
+          changed_at?: string
+          changed_by?: string | null
+          colour_included?: number | null
+          colour_rate_cents?: number | null
+          due_days?: number
+          effective_from_cycle_no?: number
+          id?: string
+          monthly_commitment_cents?: number
+          note?: string | null
+          owner_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agreement_terms_history_agreement_fkey"
+            columns: ["agreement_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "rental_agreements"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "agreement_terms_history_changed_by_fkey"
+            columns: ["changed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agreement_terms_history_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "agreement_terms_history_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
@@ -91,6 +171,7 @@ export type Database = {
           cycle_date: string
           cycle_length_days: number
           cycle_no: number
+          due_days: number | null
           escalation_level: number
           id: string
           is_late: boolean
@@ -125,6 +206,7 @@ export type Database = {
           cycle_date: string
           cycle_length_days: number
           cycle_no: number
+          due_days?: number | null
           escalation_level?: number
           id?: string
           is_late?: boolean
@@ -159,6 +241,7 @@ export type Database = {
           cycle_date?: string
           cycle_length_days?: number
           cycle_no?: number
+          due_days?: number | null
           escalation_level?: number
           id?: string
           is_late?: boolean
@@ -1975,6 +2058,7 @@ export type Database = {
           cycle_length_days: number
           due_days: number
           end_date: string | null
+          first_billing_date: string
           id: string
           initial_bw_reading: number
           initial_colour_reading: number | null
@@ -2003,6 +2087,7 @@ export type Database = {
           cycle_length_days?: number
           due_days?: number
           end_date?: string | null
+          first_billing_date: string
           id?: string
           initial_bw_reading?: number
           initial_colour_reading?: number | null
@@ -2031,6 +2116,7 @@ export type Database = {
           cycle_length_days?: number
           due_days?: number
           end_date?: string | null
+          first_billing_date?: string
           id?: string
           initial_bw_reading?: number
           initial_colour_reading?: number | null
@@ -2440,6 +2526,37 @@ export type Database = {
       }
     }
     Views: {
+      customer_balances: {
+        Row: {
+          customer_id: string | null
+          outstanding_cents: number | null
+          owner_id: string | null
+          unpaid_invoices: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "invoices_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "invoices_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       owner_settings_effective: {
         Row: {
           default_cycle_length_days: number | null
@@ -2486,6 +2603,16 @@ export type Database = {
         Args: { p_invoice_id: string }
         Returns: string
       }
+      rpc_assign_machine: {
+        Args: {
+          p_actor_id: string
+          p_customer_id: string
+          p_machine_id: string
+          p_terms: Json
+          p_today: string
+        }
+        Returns: Json
+      }
       rpc_complete_password_change: {
         Args: { p_user_id: string }
         Returns: Json
@@ -2528,6 +2655,18 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_reassign_machine: {
+        Args: {
+          p_actor_id: string
+          p_agreement_id: string
+          p_closing: Json
+          p_customer_id: string
+          p_reason: string
+          p_terms: Json
+          p_today: string
+        }
+        Returns: Json
+      }
       rpc_record_login_attempt: {
         Args: {
           p_ip: unknown
@@ -2554,6 +2693,16 @@ export type Database = {
         Args: { p_actor_id: string; p_target_id: string }
         Returns: Json
       }
+      rpc_return_machine: {
+        Args: {
+          p_actor_id: string
+          p_agreement_id: string
+          p_closing: Json
+          p_reason: string
+          p_today: string
+        }
+        Returns: Json
+      }
       rpc_save_company_profile: {
         Args: { p_details: Json; p_owner_id: string }
         Returns: Json
@@ -2565,6 +2714,15 @@ export type Database = {
           p_reason: string
           p_status: Database["public"]["Enums"]["account_status"]
           p_target_id: string
+        }
+        Returns: Json
+      }
+      rpc_set_machine_status: {
+        Args: {
+          p_actor_id: string
+          p_machine_id: string
+          p_reason: string
+          p_status: Database["public"]["Enums"]["machine_status"]
         }
         Returns: Json
       }
@@ -2609,6 +2767,16 @@ export type Database = {
           p_stage_due_at?: string
           p_ticket_id: string
           p_to: Database["public"]["Enums"]["ticket_status"]
+        }
+        Returns: Json
+      }
+      rpc_update_agreement_terms: {
+        Args: {
+          p_actor_id: string
+          p_agreement_id: string
+          p_note: string
+          p_terms: Json
+          p_today: string
         }
         Returns: Json
       }

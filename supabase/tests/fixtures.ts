@@ -250,6 +250,7 @@ export async function deleteFixture(db: pg.Client, f: Fixture) {
       "service_request_history",
       "service_requests",
       "meter_baselines",
+      "agreement_terms_history",
       "rental_agreements",
       "machines",
       "owner_settings",

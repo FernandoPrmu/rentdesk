@@ -18,21 +18,18 @@ import { createMachine, setMachineStatus, updateMachine } from "@/lib/machines/s
  * the server; the database checks the owner and tenant again (RLS or rpc).
  */
 
-const SIGNED_OUT = "Your session has ended. Please sign in again.";
 const NOT_FOUND = "This machine was not found.";
 const CHECK_FIELDS = "Please check the highlighted fields.";
 
 export async function createMachineAction(_prev: ActionResult<{ id: string }> | null, formData: FormData): Promise<ActionResult<{ id: string }>> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   const parsed = machineCreateSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail(CHECK_FIELDS, fieldErrorsFrom(parsed.error.issues));
   return createMachine(actor, parsed.data);
 }
 
 export async function updateMachineAction(machineId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
-  const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
+  await currentActor("OWNER"); // guard only: the update runs as the user (RLS)
   if (!uuidSchema.safeParse(machineId).success) return fail(NOT_FOUND);
   const type = await getMachineType(machineId);
   if (!type) return fail(NOT_FOUND);
@@ -45,7 +42,6 @@ export async function updateMachineAction(machineId: string, _prev: ActionResult
 
 export async function setMachineStatusAction(machineId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(machineId).success) return fail(NOT_FOUND);
   const parsed = machineStatusSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail(parsed.error.issues[0].message, fieldErrorsFrom(parsed.error.issues));
@@ -57,7 +53,6 @@ export async function setMachineStatusAction(machineId: string, _prev: ActionRes
 /** MAC-02 / AGR-01. On success the browser goes to the new agreement. */
 export async function assignMachineAction(machineId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(machineId).success) return fail(NOT_FOUND);
   const type = await getMachineType(machineId);
   if (!type) return fail(NOT_FOUND);
@@ -79,7 +74,6 @@ export async function reassignMachineAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(machineId).success || !uuidSchema.safeParse(agreementId).success) return fail(NOT_FOUND);
   const type = await getMachineType(machineId);
   if (!type) return fail(NOT_FOUND);

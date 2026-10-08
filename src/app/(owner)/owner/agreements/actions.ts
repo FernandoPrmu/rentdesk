@@ -12,7 +12,6 @@ import { currentActor } from "@/lib/auth/current-user";
 
 /** Owner portal: agreement terms (AGR-02) and machine return (MAC-04). */
 
-const SIGNED_OUT = "Your session has ended. Please sign in again.";
 const NOT_FOUND = "This agreement was not found.";
 const CHECK_FIELDS = "Please check the highlighted fields.";
 
@@ -28,7 +27,6 @@ export async function updateTermsAction(
   formData: FormData,
 ): Promise<ActionResult<TermsChange>> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   const agreement = await loadAgreement(agreementId);
   if (!agreement) return fail(NOT_FOUND);
   const parsed = termsEditSchema(agreement.machine.type, agreement.start_date).safeParse(formValues(formData));
@@ -40,7 +38,6 @@ export async function updateTermsAction(
 
 export async function returnMachineAction(agreementId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   const agreement = await loadAgreement(agreementId);
   if (!agreement) return fail(NOT_FOUND);
   const parsed = returnSchema(agreement.machine.type).safeParse(formValues(formData));

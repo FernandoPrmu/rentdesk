@@ -164,3 +164,37 @@ export function authenticatedAtFromClaims(claims: { iat?: number; amr?: unknown 
   if (times.length > 0) return new Date(times[0].timestamp * 1000);
   return typeof claims.iat === "number" ? new Date(claims.iat * 1000) : null;
 }
+
+/**
+ * Server Action requests (POST with a `Next-Action` header) must never receive a
+ * redirect or rewritten response from the proxy: the browser's fetch follows the
+ * 307 with the same POST and React throws "An unexpected response was received
+ * from the server". The proxy lets them through instead and puts the page the
+ * user must go to in this request header; the action guard then calls
+ * `redirect()`, which Next turns into a proper Server Action redirect.
+ */
+export const GUARD_REDIRECT_HEADER = "x-rentdesk-redirect";
+
+export function isServerActionRequest(method: string, headers: Headers): boolean {
+  return method === "POST" && headers.has("next-action");
+}
+
+/** A same-site path ("/login?reason=idle"), or null for anything else. */
+export function safeInternalPath(value: string | null | undefined): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
+  return value;
+}
+
+/**
+ * Where a Server Action sends a user who may not run it (the proxy did not say):
+ * signed out -> /login; blocked -> /login with the reason; pending gate -> the gate
+ * (unless this action is allowed there); another role -> that role's portal.
+ */
+export function actionRedirectTarget(state: SessionState | null, allowGate?: string): string {
+  if (!state) return LOGIN_PATH;
+  const blocked = blockReason(state);
+  if (blocked) return `${LOGIN_PATH}?reason=${blocked}`;
+  const gate = gatePath(state);
+  if (gate && gate !== allowGate) return gate;
+  return PORTAL_HOME[state.role];
+}

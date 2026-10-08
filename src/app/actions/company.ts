@@ -11,7 +11,6 @@ import { companySchema } from "@/lib/branding/schemas";
 
 async function save(formData: FormData, allowGate?: "/setup"): Promise<ActionResult> {
   const owner = await currentActor("OWNER", { allowGate });
-  if (!owner) return fail("Your session has ended. Please sign in again.");
   const parsed = companySchema.safeParse(formValues(formData));
   if (!parsed.success) return fail("Please check the highlighted fields.", fieldErrorsFrom(parsed.error.issues));
   const logo = formData.get("logo");

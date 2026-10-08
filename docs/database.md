@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0013`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0014`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -33,7 +33,8 @@ and workflow functions. It is **not** exposed through the Data API.
 | Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee, login lockout and session timeout |
 | | `owner_settings` | Per-owner overrides (null = inherit); view `owner_settings_effective` merges them |
 | Fleet | `machines` | Brand, model, serial, `MONO`/`COLOUR`, status, counter maximum (rollover) |
-| | `rental_agreements` | Terms, installation, initial/closing readings, cycle calendar (`next_cycle_no/date`) |
+| | `rental_agreements` | Current terms, installation, initial/closing readings, `first_billing_date`, cycle calendar (`next_cycle_no/date`). `billing_day` is **unused** (cycles run every `cycle_length_days`) |
+| | `agreement_terms_history` | Every version of the pricing terms (commitment, included copies, rates, due days), who changed it, when, and the cycle it applies from. Append-only |
 | | `meter_baselines` | New baseline after a meter reset or replacement |
 | Billing cycle | `billing_cycle_tickets` | One per agreement per cycle (unique `(agreement_id, cycle_no)`); terms snapshot |
 | | `ticket_events` | Every transition: actor, from, to, reason |
@@ -53,6 +54,7 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `idempotency_keys` | Request de-duplication for server actions |
 | | `login_attempts` | Rate limiting / lockout input |
 | | `audit_logs` | Append-only audit trail, written by triggers and `app.write_audit()` |
+| Views | `customer_balances` | Outstanding amount per customer: issued, unpaid invoices minus `amount_paid_cents` (security invoker, so RLS applies). Credits are not netted yet |
 
 ```mermaid
 erDiagram
@@ -65,6 +67,7 @@ erDiagram
     owners ||--o{ machines : owns
     customers ||--o{ rental_agreements : rents
     machines ||--o{ rental_agreements : "rented via"
+    rental_agreements ||--|{ agreement_terms_history : versions
     rental_agreements ||--o{ meter_baselines : resets
     rental_agreements ||--o{ billing_cycle_tickets : "one per cycle"
     billing_cycle_tickets ||--o{ ticket_events : history
@@ -99,7 +102,10 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | owners | read all | read self | read own owner | — |
 | company profile / branding | read all | read, insert, update | read (own owner) | — |
 | settings | read all; update global | read, insert, update own | — | — |
-| machines, agreements | read all | read, insert, update (limited columns) | read those they rent | — |
+| machines | read all | read, insert, update details (not status, not type) | read those they rent | — |
+| agreements | read all | read | read their own | — |
+| agreement terms history | read all | read | — | — |
+| customer balances (view) | read all | read | read own | — |
 | meter baselines | read all | read, insert | — | — |
 | tickets, events, comments, submissions, readings | read all | read | read own | — |
 | meter photos (rows and files) | rows only | read | — | — |
@@ -115,6 +121,7 @@ customers of a suspended owner, therefore match no policy and see nothing.
 using the service role:
 
 - `profiles`, `owners`, inserts into `customers`
+- `rental_agreements`, `agreement_terms_history` and `machines.status` (migration 0014)
 - tickets, events and comments
 - meter submissions, readings and photos
 - invoices, invoice lines and invoice counters
@@ -164,6 +171,11 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `complete_password_change` | Clears `must_change_password` (audit `PASSWORD_CHANGED`) |
 | `update_owner` / `update_customer` | Account details with the same parent rule |
 | `save_company_profile` | Owner only. Upserts branding; the first save sets `onboarding_completed_at` (BRD-01) |
+| `assign_machine` | Owner of both the machine and the customer (another tenant's customer is "not found"). Machine `AVAILABLE`, customer `ACTIVE`, first billing date ≥ today (passed in) and after the start date, colour terms only for colour machines, whole non-negative readings. Creates the agreement (terms version 1 by trigger), machine → `RENTED`, `next_cycle_no = 1`, `next_cycle_date = first_billing_date`, audit `MACHINE_ASSIGNED`, customer notified |
+| `return_machine` | Reason and closing reading(s) required; lower than the last known reading only on a counter with a maximum (rollover). `RD409 RETURN_BLOCKED:[…]` while a ticket is open or an invoice is unpaid. Agreement → `TERMINATED`, machine → `AVAILABLE`, audit `MACHINE_RETURNED` with the reason |
+| `reassign_machine` | `return_machine` + `assign_machine` in one transaction |
+| `update_agreement_terms` | New terms version from the cycle after the one in progress (`app.cycle_in_progress + 1`); installation location and end date change at once; customer notified |
+| `set_machine_status` | `AVAILABLE` / `UNDER_REPAIR` / `RETIRED` with a reason (audit). Never `RENTED`, never while rented |
 
 Audit triggers record the actor:
 
@@ -187,6 +199,13 @@ Audit triggers record the actor:
 - **Sessions (AUTH-09).** Supabase's own session limits are paid features, so the
   proxy (`src/proxy.ts`) signs users out after `session_idle_minutes` (30) without a
   request and `session_max_hours` (12) after signing in (from the JWT `amr` time).
+- **Server Actions.** The proxy never redirects a Server Action request (POST with
+  `Next-Action`): the browser would follow the 307 with the same POST and React throws
+  "An unexpected response was received from the server". It signs the user out if
+  needed, lets the request through and names the target page in the internal
+  `x-rentdesk-redirect` request header (a client-sent copy is dropped). `currentActor()`
+  then calls `redirect()` to it, so an expired, blocked or gated session lands on the
+  right page (e.g. `/login?reason=idle`).
 - **Blocked accounts (AUTH-10).** The proxy reads `session_state` on every page
   request and signs out suspended or deactivated users and customers of an inactive
   owner, with a message on `/login`. The RLS helpers already return nothing for them.
@@ -229,6 +248,22 @@ user. Before production, raise **Authentication → Rate Limits → Sign-ups and
 sign-ins** well above the default (for example to a few hundred per 5 minutes); the
 app's own per-account and per-IP limits above protect logins instead.
 
+## Machines and agreements (migration 0014)
+
+- **Cycle calendar.** Cycle *n* is due on `first_billing_date + (n − 1) × cycle_length_days` and covers the
+  `cycle_length_days` before that date (cycle 1 never starts before `start_date`). The start date may be
+  in the past (existing rentals being migrated); the first billing date must be today or later, so no
+  ticket is ever opened for a period before it. `app.cycle_date` and `app.cycle_in_progress` mirror
+  `src/lib/agreements/cycle-calendar.ts`. `billing_day` is unused.
+- **Terms changes (AGR-02).** The agreement row holds the terms in force. An edit writes a new
+  `agreement_terms_history` version effective from the next cycle; `open_billing_cycle` snapshots the
+  latest version effective for the cycle it opens (and copies it onto the agreement). Open tickets keep
+  their snapshot. Tickets also snapshot `due_days`.
+- **Guards (triggers).** A machine becomes `RENTED` only with a live agreement and leaves it only when the
+  agreement ends; its type and tenant cannot change once rented. An agreement needs an `AVAILABLE`
+  machine; customer, machine, start date, first billing date, cycle length and initial readings are fixed;
+  a terminated agreement stays terminated. One live agreement per machine (partial unique index).
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -253,5 +288,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
   several stages through the same workflow functions. It is safe to re-run, and it prints the demo
   logins. A re-run also restores the demo login state (active, not locked, forced password change
   only for `cust.bandara`) and owner B (`owner.ceylon`) as not onboarded.
+- The seed writes its agreements with the service role (stable ids, backdated first billing dates to create
+  tickets in several stages); the same triggers apply as for `rpc_assign_machine`.
 - `npm run test:e2e` signs in with the seed accounts. Its global setup and teardown restore them
-  and delete the `owner.e2e-*` / `cust.e2e-*` accounts the tests create (needs `SUPABASE_DB_URL`).
+  and delete the `owner.e2e-*` / `cust.e2e-*` accounts and the `E2E-*` machines (with their agreements) the
+  tests create (needs `SUPABASE_DB_URL`).

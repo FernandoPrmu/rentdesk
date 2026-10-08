@@ -105,3 +105,39 @@ export async function deleteE2eAccounts(): Promise<void> {
     await db.end();
   }
 }
+
+/** Serial numbers of machines created by the e2e tests start with this. */
+export const E2E_SERIAL_PREFIX = "E2E-";
+
+/**
+ * Deletes machines the e2e tests registered (serial `E2E-*`) with their agreements,
+ * terms history and notifications. Audit entries stay.
+ */
+export async function deleteE2eMachines(): Promise<void> {
+  const url = process.env.SUPABASE_DB_URL;
+  if (!url) throw new Error("e2e: SUPABASE_DB_URL must be set (.env.local) to clean up test machines");
+  const db = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+  await db.connect();
+  try {
+    await db.query("begin");
+    const { rows } = await db.query<{ id: string }>("select id from public.machines where serial_no like $1", [`${E2E_SERIAL_PREFIX}%`]);
+    const machines = rows.map((r) => r.id);
+    if (machines.length > 0) {
+      const { rows: agreementRows } = await db.query<{ id: string }>(
+        "select id from public.rental_agreements where machine_id = any($1)",
+        [machines],
+      );
+      const agreements = agreementRows.map((r) => r.id);
+      await db.query("delete from public.notifications where entity_id = any($1)", [agreements]);
+      await db.query("delete from public.agreement_terms_history where agreement_id = any($1)", [agreements]);
+      await db.query("delete from public.rental_agreements where id = any($1)", [agreements]);
+      await db.query("delete from public.machines where id = any($1)", [machines]);
+    }
+    await db.query("commit");
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  } finally {
+    await db.end();
+  }
+}

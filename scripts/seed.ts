@@ -343,6 +343,10 @@ async function seedMachinesAndAgreements(ids: Record<string, string>) {
       customer_id: ids[a.customer],
       machine_id: stableId(`machine:${a.machine}`),
       start_date: addDays(today, -a.startDaysAgo),
+      // The seed backdates rentals to create tickets in several stages, so the first
+      // billing date is in the past here; the app only allows today or later.
+      first_billing_date: addDays(today, 30 - a.startDaysAgo),
+      cycle_length_days: 30,
       due_days: 7,
       installation_location: "Front office",
       initial_bw_reading: 10_000,
@@ -350,7 +354,9 @@ async function seedMachinesAndAgreements(ids: Record<string, string>) {
       ...terms,
     };
   });
-  // Agreements are created by each owner (audited as that owner).
+  // Agreements are created by each owner (audited as that owner). The service role
+  // writes them directly to keep stable ids; the same triggers apply as for
+  // rpc_assign_machine (terms version 1, machine RENTED, cycle calendar).
   for (const owner of ["ownerA", "ownerB"]) {
     check(
       await actingAs(ids[owner]).from("rental_agreements").upsert(

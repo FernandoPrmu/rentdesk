@@ -25,6 +25,7 @@ const NAV: Record<Portal, NavItem[]> = {
   owner: [
     { href: "/owner", label: "Home", icon: House, exact: true },
     { href: "/owner/customers", label: "Customers", icon: Users },
+    { href: "/owner/machines", label: "Machines", icon: Printer },
     { href: "/owner/settings", label: "Settings", icon: Settings },
   ],
   customer: [

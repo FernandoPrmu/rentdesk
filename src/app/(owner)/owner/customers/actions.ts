@@ -14,11 +14,9 @@ import { currentActor } from "@/lib/auth/current-user";
  * manage only their own customers, whatever id the browser sends.
  */
 
-const SIGNED_OUT = "Your session has ended. Please sign in again.";
 
 export async function createCustomerAction(_prev: CreateAccountResult | null, formData: FormData): Promise<CreateAccountResult> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   const parsed = customerSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail("Please check the highlighted fields.", fieldErrorsFrom(parsed.error.issues));
   return createCustomer(actor, parsed.data);
@@ -26,7 +24,6 @@ export async function createCustomerAction(_prev: CreateAccountResult | null, fo
 
 export async function updateCustomerAction(customerId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(customerId).success) return fail("Customer not found.");
   const parsed = customerSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail("Please check the highlighted fields.", fieldErrorsFrom(parsed.error.issues));
@@ -37,7 +34,6 @@ export async function updateCustomerAction(customerId: string, _prev: ActionResu
 
 export async function setCustomerStatusAction(customerId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(customerId).success) return fail("Customer not found.");
   const parsed = statusChangeSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail(parsed.error.issues[0].message, fieldErrorsFrom(parsed.error.issues));
@@ -48,7 +44,6 @@ export async function setCustomerStatusAction(customerId: string, _prev: ActionR
 
 export async function resetCustomerPasswordAction(customerId: string): Promise<ActionResult<ShownCredentials>> {
   const actor = await currentActor("OWNER");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(customerId).success) return fail("Customer not found.");
   const result = await resetAccountPassword(actor, customerId);
   if (!result.ok) return result;

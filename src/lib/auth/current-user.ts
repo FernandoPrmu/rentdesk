@@ -1,15 +1,19 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { cache } from "react";
 
 import {
+  actionRedirectTarget,
   blockReason,
+  GUARD_REDIRECT_HEADER,
   gatePath,
   LOGIN_PATH,
   PORTAL_HOME,
   type Role,
+  safeInternalPath,
   type SessionState,
 } from "@/lib/auth/session-policy";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -66,14 +70,29 @@ export async function requireUser(
 }
 
 /**
- * For Server Actions: like requireUser, but returns null instead of redirecting,
- * so the action can answer with a typed error.
+ * Where the proxy says this Server Action request must go instead (it never
+ * redirects action requests itself, see GUARD_REDIRECT_HEADER), or null.
  */
-export async function currentActor(roles: Role | Role[], options: { allowGate?: "/change-password" | "/setup" } = {}) {
+export async function guardRedirect(): Promise<string | null> {
+  return safeInternalPath((await headers()).get(GUARD_REDIRECT_HEADER));
+}
+
+/**
+ * For Server Actions: the signed-in, active user with one of `roles`. Anyone else
+ * is redirected with `redirect()`, which Next delivers as a proper Server Action
+ * redirect: a session that ended (idle or maximum length, blocked, signed out)
+ * lands on /login with the reason, a pending gate on that gate, another role on
+ * its own portal. Never call it inside try/catch: redirect() works by throwing.
+ */
+export async function currentActor(
+  roles: Role | Role[],
+  options: { allowGate?: "/change-password" | "/setup" } = {},
+): Promise<CurrentUser> {
   const user = await getCurrentUser();
-  if (!user || blockReason(user)) return null;
-  const gate = gatePath(user);
-  if (gate && gate !== options.allowGate) return null;
   const allowed = Array.isArray(roles) ? roles : [roles];
-  return allowed.includes(user.role) ? user : null;
+  if (user && !blockReason(user)) {
+    const gate = gatePath(user);
+    if ((!gate || gate === options.allowGate) && allowed.includes(user.role)) return user;
+  }
+  redirect((await guardRedirect()) ?? actionRedirectTarget(user, options.allowGate));
 }

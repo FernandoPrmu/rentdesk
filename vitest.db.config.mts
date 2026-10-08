@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
 
 // Database tests (RLS, workflow functions) against the linked Supabase dev project.
@@ -10,6 +12,9 @@ try {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
   test: {
     environment: "node",
     include: ["supabase/tests/**/*.db.test.ts"],

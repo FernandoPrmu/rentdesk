@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  actionRedirectTarget,
   authenticatedAtFromClaims,
   blockReason,
+  isServerActionRequest,
   isSignOutReason,
   parseLastSeen,
   routeDecision,
+  safeInternalPath,
   type SessionState,
   sessionTimeout,
 } from "./session-policy";
@@ -132,5 +135,34 @@ describe("session cookies and claims", () => {
     ).toEqual(new Date(900_000));
     expect(authenticatedAtFromClaims({ iat: 2000, amr: ["password"] })).toEqual(new Date(2_000_000));
     expect(authenticatedAtFromClaims({})).toBeNull();
+  });
+});
+
+describe("Server Action requests in the proxy", () => {
+  it("recognises a Server Action by POST + Next-Action", () => {
+    expect(isServerActionRequest("POST", new Headers({ "next-action": "abc" }))).toBe(true);
+    expect(isServerActionRequest("POST", new Headers())).toBe(false);
+    expect(isServerActionRequest("GET", new Headers({ "next-action": "abc" }))).toBe(false);
+  });
+
+  it("only accepts same-site paths as redirect targets", () => {
+    expect(safeInternalPath("/login?reason=idle")).toBe("/login?reason=idle");
+    expect(safeInternalPath("/setup")).toBe("/setup");
+    for (const bad of ["https://evil.example", "//evil.example", "/\\evil.example", "login", "", null, undefined]) {
+      expect(safeInternalPath(bad)).toBeNull();
+    }
+  });
+});
+
+describe("actionRedirectTarget (action guard without a proxy hint)", () => {
+  it("sends each kind of user to the right page", () => {
+    expect(actionRedirectTarget(null)).toBe("/login");
+    expect(actionRedirectTarget(session({ status: "SUSPENDED" }))).toBe("/login?reason=suspended");
+    expect(actionRedirectTarget(session({ owner_status: "SUSPENDED" }))).toBe("/login?reason=owner_inactive");
+    expect(actionRedirectTarget(session({ must_change_password: true }))).toBe("/change-password");
+    expect(actionRedirectTarget(session({ role: "OWNER", owner_id: null, onboarded: false }))).toBe("/setup");
+    // The action is allowed at its own gate; the user only has the wrong role.
+    expect(actionRedirectTarget(session({ role: "OWNER", owner_id: null, onboarded: false }), "/setup")).toBe("/owner");
+    expect(actionRedirectTarget(session())).toBe("/customer");
   });
 });

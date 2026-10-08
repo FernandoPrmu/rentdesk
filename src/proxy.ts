@@ -4,7 +4,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import {
   authenticatedAtFromClaims,
   blockReason,
+  GUARD_REDIRECT_HEADER,
   isPublicPath,
+  isServerActionRequest,
   LAST_SEEN_COOKIE,
   LAST_SEEN_REFRESH_MS,
   lastSeenCookieOptions,
@@ -27,6 +29,11 @@ import type { Database } from "@/types/db";
  *      (idle / maximum session length): sign out and explain on /login (AUTH-09/10);
  *   4. forced password change, then owner setup, then role portals (AUTH-03/06, BRD-01).
  * Pages and Server Actions check again through src/lib/auth/current-user.ts.
+ *
+ * Server Action requests (POST + Next-Action) never get a redirect or an error page
+ * from here: React's action client accepts only an action response. They pass
+ * through (after any forced sign-out, so the action sees no session) with the
+ * target page in GUARD_REDIRECT_HEADER; currentActor() then redirects properly.
  */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -47,14 +54,14 @@ export async function proxy(request: NextRequest) {
   });
 
   const { pathname, search } = request.nextUrl;
+  const isAction = isServerActionRequest(request.method, request.headers);
   const { data } = await supabase.auth.getClaims();
   const claims = data?.claims;
 
-  // Redirect while keeping any cookies written above (refreshed or cleared session).
-  const redirectTo = (path: string) => {
-    const target = NextResponse.redirect(new URL(path, request.url));
+  // Keep any cookies written above (refreshed or cleared session) on the new response.
+  const withSessionCookies = (target: NextResponse) => {
     for (const cookie of response.cookies.getAll()) target.cookies.set(cookie);
-    // Auth cookie writes come with no-store headers; a redirect that sets cookies must not be cached either.
+    // Auth cookie writes come with no-store headers; a response that sets cookies must not be cached either.
     for (const key of ["cache-control", "expires", "pragma"]) {
       const value = response.headers.get(key);
       if (value) target.headers.set(key, value);
@@ -62,14 +69,29 @@ export async function proxy(request: NextRequest) {
     return target;
   };
 
+  // Server Action: pass through to the action, telling it where the user must go
+  // (null = allowed). A client-sent header of the same name is always dropped.
+  const forwardAction = (path: string | null) => {
+    const headers = new Headers(request.headers);
+    headers.delete(GUARD_REDIRECT_HEADER);
+    if (path) headers.set(GUARD_REDIRECT_HEADER, path);
+    return withSessionCookies(NextResponse.next({ request: { headers } }));
+  };
+
+  const redirectTo = (path: string) =>
+    isAction ? forwardAction(path) : withSessionCookies(NextResponse.redirect(new URL(path, request.url)));
+  const allow = () => (isAction ? forwardAction(null) : response);
+
   if (!claims?.sub) {
-    if (isPublicPath(pathname)) return response;
+    if (isPublicPath(pathname)) return allow();
     return redirectTo(`${LOGIN_PATH}?next=${encodeURIComponent(pathname + search)}`);
   }
 
   const { data: stateData, error } = await loadState(claims.sub);
   if (error) {
     console.error("[proxy] session state:", error.message);
+    // An action checks the session again itself and reports a failure in its own response.
+    if (isAction) return forwardAction(null);
     return new NextResponse("Service unavailable. Please try again in a moment.", { status: 503 });
   }
   const state = (stateData as SessionState | null) ?? null;
@@ -99,7 +121,7 @@ export async function proxy(request: NextRequest) {
   }
 
   const target = routeDecision(state, pathname);
-  return target ? redirectTo(target) : response;
+  return target ? redirectTo(target) : allow();
 }
 
 /** Account state, retried once when the network to Supabase drops a request. */

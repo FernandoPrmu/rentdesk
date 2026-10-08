@@ -16,7 +16,6 @@ const schema = z.object({
 /** AUTH-03: forced (first sign-in / after reset) or voluntary password change. */
 export async function changePasswordAction(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const user = await currentActor(["ADMIN", "OWNER", "CUSTOMER"], { allowGate: "/change-password" });
-  if (!user) return fail("Your session has ended. Please sign in again.");
   const parsed = schema.safeParse({
     currentPassword: formData.get("currentPassword") ?? undefined,
     newPassword: formData.get("newPassword") ?? "",

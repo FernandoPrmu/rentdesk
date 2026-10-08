@@ -11,11 +11,9 @@ import { currentActor } from "@/lib/auth/current-user";
 
 /** Admin portal: owner accounts (ADM-01..03). The rpc functions re-check the role. */
 
-const SIGNED_OUT = "Your session has ended. Please sign in again.";
 
 export async function createOwnerAction(_prev: CreateAccountResult | null, formData: FormData): Promise<CreateAccountResult> {
   const actor = await currentActor("ADMIN");
-  if (!actor) return fail(SIGNED_OUT);
   const parsed = ownerSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail("Please check the highlighted fields.", fieldErrorsFrom(parsed.error.issues));
   return createOwner(actor, parsed.data);
@@ -23,7 +21,6 @@ export async function createOwnerAction(_prev: CreateAccountResult | null, formD
 
 export async function updateOwnerAction(ownerId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const actor = await currentActor("ADMIN");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(ownerId).success) return fail("Owner not found.");
   const parsed = ownerSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail("Please check the highlighted fields.", fieldErrorsFrom(parsed.error.issues));
@@ -34,7 +31,6 @@ export async function updateOwnerAction(ownerId: string, _prev: ActionResult | n
 
 export async function setOwnerStatusAction(ownerId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const actor = await currentActor("ADMIN");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(ownerId).success) return fail("Owner not found.");
   const parsed = statusChangeSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail(parsed.error.issues[0].message, fieldErrorsFrom(parsed.error.issues));
@@ -45,7 +41,6 @@ export async function setOwnerStatusAction(ownerId: string, _prev: ActionResult 
 
 export async function resetOwnerPasswordAction(ownerId: string): Promise<ActionResult<ShownCredentials>> {
   const actor = await currentActor("ADMIN");
-  if (!actor) return fail(SIGNED_OUT);
   if (!uuidSchema.safeParse(ownerId).success) return fail("Owner not found.");
   const result = await resetAccountPassword(actor, ownerId);
   if (!result.ok) return result;

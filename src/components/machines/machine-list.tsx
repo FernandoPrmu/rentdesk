@@ -1,39 +1,43 @@
 import { ChevronRight, Search } from "lucide-react";
 import Link from "next/link";
 
+import { ChoiceSelect } from "@/components/forms/choice-select";
 import { MachineStatusBadge, MachineTypeBadge } from "@/components/machines/machine-badges";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { MachineListRow } from "@/lib/machines/queries";
 import { MACHINE_STATUS_LABEL, MACHINE_STATUSES, MACHINE_TYPE_LABEL, MACHINE_TYPES, type MachineListFilter } from "@/lib/machines/schemas";
 
-const selectClass = "h-12 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-base sm:w-40 sm:flex-none";
-
-/** Search (brand, model, serial) + type and status filters. A plain GET form. */
+/**
+ * Search (brand, model, serial) + type and status filters. A plain GET form, keyed
+ * by the URL filters so it remounts with the right values when they change.
+ */
 export function MachineFilters({ filter }: { filter: MachineListFilter }) {
   return (
-    <form method="get" role="search" className="mb-4 flex flex-col gap-2 lg:flex-row">
+    <form key={JSON.stringify(filter)} method="get" role="search" className="mb-4 grid gap-2 lg:flex lg:flex-row">
       <div className="relative flex-1">
         <Search className="pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2 text-muted-foreground" aria-hidden />
         <Input name="q" defaultValue={filter.q} placeholder="Brand, model or serial number" aria-label="Search" className="h-12 pl-10 text-base" />
       </div>
-      <div className="flex gap-2">
-        <select name="type" defaultValue={filter.type ?? ""} aria-label="Type" className={selectClass}>
-          <option value="">All types</option>
-          {MACHINE_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {MACHINE_TYPE_LABEL[t]}
-            </option>
-          ))}
-        </select>
-        <select name="status" defaultValue={filter.status ?? ""} aria-label="Status" className={selectClass}>
-          <option value="">All statuses</option>
-          {MACHINE_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {MACHINE_STATUS_LABEL[s]}
-            </option>
-          ))}
-        </select>
+      <div className="grid gap-2 sm:grid-cols-2 lg:flex">
+        <div className="lg:w-44">
+          <ChoiceSelect
+            name="type"
+            ariaLabel="Type"
+            defaultValue={filter.type}
+            emptyLabel="All types"
+            options={MACHINE_TYPES.map((t) => ({ value: t, label: MACHINE_TYPE_LABEL[t] }))}
+          />
+        </div>
+        <div className="lg:w-44">
+          <ChoiceSelect
+            name="status"
+            ariaLabel="Status"
+            defaultValue={filter.status}
+            emptyLabel="All statuses"
+            options={MACHINE_STATUSES.map((s) => ({ value: s, label: MACHINE_STATUS_LABEL[s] }))}
+          />
+        </div>
       </div>
       <Button type="submit" variant="secondary" className="h-12 px-5 text-base">
         Search

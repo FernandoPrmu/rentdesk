@@ -19,6 +19,13 @@ let agreementUrl = "";
 /** 100 days ago: a rental that is already running when it is entered. */
 const pastStart = new Date(Date.now() - 100 * 86_400_000).toISOString().slice(0, 10);
 
+/** Picks an option in a shadcn (Base UI) Select by its accessible name. */
+async function choose(page: Page, combobox: string, option: string) {
+  await page.getByRole("combobox", { name: combobox, exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+  await expect(page.getByRole("combobox", { name: combobox, exact: true })).toContainText(option);
+}
+
 const signInOwner = (page: Page) => signInAndWait(page, DEMO.ownerLanka.username, DEMO.ownerLanka.password, /\/owner$/);
 
 test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
@@ -34,7 +41,7 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
     await page.getByLabel("Model").fill("MP 2555");
     await page.getByLabel("Serial number").fill(serial);
     // Next keeps the previous page (with its "Type" filter) hidden in the DOM; roles skip hidden elements.
-    await page.getByRole("combobox", { name: "Type" }).selectOption("MONO");
+    await choose(page, "Type", "Mono (B&W)");
     // No counter maximum: a lower closing reading cannot pass as a rollover below.
     await page.getByRole("button", { name: "Register machine" }).click();
 
@@ -53,7 +60,7 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
     await page.goto(machineUrl);
     await page.getByRole("link", { name: "Assign to a customer" }).click();
 
-    await page.getByLabel("Customer", { exact: true }).selectOption({ label: "Silva Stationers" });
+    await choose(page, "Customer", "Silva Stationers");
     await page.getByLabel("Installation location").fill("Front office");
     // A rental that is already running: start in the past, first billing date stays in the future.
     await page.getByLabel("Start date").fill(pastStart);
@@ -131,6 +138,51 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
     await expect(page.getByText("The machine was returned and is available again.")).toBeVisible();
     await expect(page.getByText("Available", { exact: true }).filter({ visible: true })).toBeVisible();
     await expect(page.getByText("Closing B&W 13,100")).toBeVisible();
+  });
+
+  test("list filters use the URL and reset cleanly from the nav (no dev-overlay errors)", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error") errors.push(m.text());
+    });
+    await signInOwner(page);
+    await page.goto("/owner/machines");
+    await page.getByLabel("Search").fill(serial);
+    await choose(page, "Status", "Available");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page).toHaveURL(new RegExp(`q=${serial}.*status=AVAILABLE`));
+    await expect(page.getByRole("list", { name: "Machines" }).getByRole("link")).toHaveCount(1);
+
+    // Same page without filters: the form shows the new (empty) values.
+    await page.getByRole("link", { name: "Machines", exact: true }).first().click();
+    await expect(page).toHaveURL(/\/owner\/machines$/);
+    await expect(page.getByLabel("Search")).toHaveValue("");
+    await expect(page.getByRole("combobox", { name: "Status", exact: true })).toContainText("All statuses");
+
+    // Customer list balance filter.
+    await page.getByRole("link", { name: "Customers", exact: true }).first().click();
+    await choose(page, "Balance", "Has balance due");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page).toHaveURL(/balance=due/);
+    await page.getByRole("link", { name: "Customers", exact: true }).first().click();
+    await expect(page).toHaveURL(/\/owner\/customers$/);
+    await expect(page.getByRole("combobox", { name: "Balance", exact: true })).toContainText("Any balance");
+
+    expect(errors).toEqual([]);
+  });
+
+  test("owner changes the machine status with a reason (MAC-03)", async ({ page }) => {
+    await signInOwner(page);
+    await page.goto(machineUrl);
+    await page.getByRole("button", { name: "Change status" }).click();
+    const dialog = page.getByRole("alertdialog");
+    // The select popup opens on top of the modal dialog.
+    await choose(page, "New status", "Under repair");
+    await dialog.getByLabel("Reason").fill("Fuser unit replaced");
+    await dialog.getByRole("button", { name: "Change status" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText("Under repair", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Assign to a customer" })).toHaveCount(0);
   });
 
   test("return is blocked while a billing ticket is open", async ({ page }) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accountListFilterSchema, customerSchema, ownerSchema, statusChangeSchema } from "./schemas";
+import { accountListFilterSchema, customerListFilterSchema, customerSchema, ownerSchema, statusChangeSchema } from "./schemas";
 
 describe("ownerSchema", () => {
   it("accepts a complete owner and normalises optional fields", () => {
@@ -57,5 +57,12 @@ describe("accountListFilterSchema", () => {
   it("ignores unknown filter values instead of failing", () => {
     expect(accountListFilterSchema.parse({ q: " lanka ", status: "SUSPENDED" })).toEqual({ q: "lanka", status: "SUSPENDED" });
     expect(accountListFilterSchema.parse({ q: ["a", "b"], status: "nope" })).toEqual({ q: undefined, status: undefined });
+  });
+});
+
+describe("customerListFilterSchema", () => {
+  it("accepts the balance filter and ignores unknown values", () => {
+    expect(customerListFilterSchema.parse({ q: "silva", balance: "due" })).toEqual({ q: "silva", status: undefined, balance: "due" });
+    expect(customerListFilterSchema.parse({ balance: "lots" }).balance).toBeUndefined();
   });
 });

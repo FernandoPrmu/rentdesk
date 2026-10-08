@@ -63,6 +63,13 @@ export const accountListFilterSchema = z.object({
   status: z.enum(ACCOUNT_STATUSES).optional().catch(undefined),
 });
 
+export const BALANCE_FILTERS = ["due", "clear"] as const;
+
+/** Owner's customer list: adds the outstanding balance filter (CUS-05). */
+export const customerListFilterSchema = accountListFilterSchema.extend({
+  balance: z.enum(BALANCE_FILTERS).optional().catch(undefined),
+});
+
 /** Reads a FormData into a plain object of strings (files are ignored). */
 export function formValues(formData: FormData): Record<string, string> {
   const out: Record<string, string> = {};

@@ -14,7 +14,7 @@ export const DEFAULT_CYCLE_LENGTH = 30;
 export const DEFAULT_DUE_DAYS = 7;
 
 /** Not shown for a mono machine: whatever is sent becomes null. */
-const ignored = z.unknown().transform(() => null);
+const ignored = z.unknown().optional().transform(() => null);
 
 /** Colour values exist only on colour machines. Field-level, so every error shows at once. */
 function colourCount(type: MachineType, label: string) {

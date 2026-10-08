@@ -27,7 +27,8 @@ const machineFields = {
   serial_no: requiredText("Serial number", 60),
   purchase_date: z
     .string()
-    .trim()
+    .default("")
+    .pipe(z.string().trim())
     .transform((v) => (v === "" ? null : v))
     .pipe(isoDate("Purchase date").nullable()),
   bw_counter_max: optionalCount("B&W counter maximum"),

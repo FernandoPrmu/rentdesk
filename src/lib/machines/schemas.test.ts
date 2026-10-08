@@ -27,6 +27,11 @@ describe("machine schemas", () => {
     });
   });
 
+  it("treats fields the form does not render as empty (no colour counter on a mono machine)", () => {
+    const mono = { brand: "Ricoh", model: "MP 2555", serial_no: "E2E-1", type: "MONO", bw_counter_max: "" };
+    expect(machineCreateSchema.parse(mono)).toMatchObject({ type: "MONO", colour_counter_max: null, purchase_date: null, notes: null });
+  });
+
   it("rejects bad input", () => {
     const result = machineCreateSchema.safeParse({ ...form, brand: "", type: "LASER", purchase_date: "2025-02-30", bw_counter_max: "0" });
     const fields = (result.error?.issues ?? []).map((i) => i.path[0]);

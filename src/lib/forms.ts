@@ -14,12 +14,16 @@ export const MAX_COUNT = 999_999_999_999;
 export const requiredText = (label: string, max = 120) =>
   z.string().trim().min(1, `${label} is required.`).max(max, `${label} is too long.`);
 
+/**
+ * Optional fields: a missing field (not rendered, e.g. colour inputs on a mono
+ * machine) counts as empty, and empty becomes null.
+ */
+const absentAsEmpty = () => z.string().default("");
+
 /** Empty input becomes null, so optional fields can be cleared. */
 export const optionalText = (label: string, max = 500) =>
-  z
-    .string()
-    .trim()
-    .max(max, `${label} is too long.`)
+  absentAsEmpty()
+    .pipe(z.string().trim().max(max, `${label} is too long.`))
     .transform((v) => (v === "" ? null : v));
 
 function parseCount(value: string): number | null {
@@ -40,7 +44,7 @@ export const count = (label: string) =>
   });
 
 export const optionalCount = (label: string) =>
-  z.string().transform((value, ctx) => {
+  absentAsEmpty().transform((value, ctx) => {
     if (value.trim() === "") return null;
     const n = parseCount(value);
     if (n === null || n > MAX_COUNT) {
@@ -62,7 +66,7 @@ export const rupees = (label: string) =>
   });
 
 export const optionalRupees = (label: string) =>
-  z.string().transform((value, ctx) => {
+  absentAsEmpty().transform((value, ctx) => {
     if (value.trim() === "") return null;
     const cents = rupeesToCents(value);
     if (cents === null) {
@@ -79,9 +83,8 @@ export const isoDate = (label: string) =>
     .refine((v) => isIsoDate(v), `${label}: enter a valid date.`);
 
 export const optionalIsoDate = (label: string) =>
-  z
-    .string()
-    .trim()
+  absentAsEmpty()
+    .pipe(z.string().trim())
     .refine((v) => v === "" || isIsoDate(v), `${label}: enter a valid date.`)
     .transform((v) => (v === "" ? null : v));
 

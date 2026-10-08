@@ -126,7 +126,8 @@ export function TermsEditForm({
     );
   });
   return (
-    <form onSubmit={onSubmit} className="space-y-4" noValidate>
+    // Saved values come back as new defaults: remount so the inputs pick them up.
+    <form key={JSON.stringify({ defaults, location, endDate })} onSubmit={onSubmit} className="space-y-4" noValidate>
       <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm" data-testid="terms-effective-note">
         Price changes apply <strong>from the next cycle</strong>: cycle {nextCycle.cycleNo}, due {formatDate(nextCycle.date)}. Open
         and earlier invoices keep their prices.

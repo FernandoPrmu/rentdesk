@@ -45,6 +45,13 @@ describe("assignmentSchema", () => {
     });
   });
 
+  it("accepts a mono form that has no colour inputs at all", () => {
+    const { colour_included: _a, colour_rate: _b, initial_colour: _c, ...rendered } = monoForm;
+    void [_a, _b, _c];
+    expect(assignmentSchema("MONO", TODAY).safeParse(rendered).success).toBe(true);
+    expect(returnSchema("MONO").safeParse({ closing_bw: "1", reason: "Ended" }).success).toBe(true);
+  });
+
   it("drops colour values sent for a mono machine", () => {
     const parsed = assignmentSchema("MONO", TODAY).parse({ ...monoForm, colour_included: "500", colour_rate: "10", initial_colour: "9" });
     expect([parsed.colour_included, parsed.colour_rate, parsed.initial_colour]).toEqual([null, null, null]);

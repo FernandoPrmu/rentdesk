@@ -1791,6 +1791,10 @@ export type Database = {
           id: boolean
           late_fee_cents: number
           late_fee_enabled: boolean
+          login_ip_max_failures: number
+          login_ip_window_minutes: number
+          login_lockout_minutes: number
+          login_max_failures: number
           max_meter_rejections: number
           meter_deadline_days: number
           meter_reminder_days: number[]
@@ -1807,6 +1811,8 @@ export type Database = {
           service_ack_hours_urgent: number
           service_admin_escalation_hours_normal: number
           service_admin_escalation_hours_urgent: number
+          session_idle_minutes: number
+          session_max_hours: number
           slip_review_deadline_hours: number
           slip_review_escalation_hours: number
           slip_review_reminder_hours: number[]
@@ -1820,6 +1826,10 @@ export type Database = {
           id?: boolean
           late_fee_cents?: number
           late_fee_enabled?: boolean
+          login_ip_max_failures?: number
+          login_ip_window_minutes?: number
+          login_lockout_minutes?: number
+          login_max_failures?: number
           max_meter_rejections?: number
           meter_deadline_days?: number
           meter_reminder_days?: number[]
@@ -1836,6 +1846,8 @@ export type Database = {
           service_ack_hours_urgent?: number
           service_admin_escalation_hours_normal?: number
           service_admin_escalation_hours_urgent?: number
+          session_idle_minutes?: number
+          session_max_hours?: number
           slip_review_deadline_hours?: number
           slip_review_escalation_hours?: number
           slip_review_reminder_hours?: number[]
@@ -1849,6 +1861,10 @@ export type Database = {
           id?: boolean
           late_fee_cents?: number
           late_fee_enabled?: boolean
+          login_ip_max_failures?: number
+          login_ip_window_minutes?: number
+          login_lockout_minutes?: number
+          login_max_failures?: number
           max_meter_rejections?: number
           meter_deadline_days?: number
           meter_reminder_days?: number[]
@@ -1865,6 +1881,8 @@ export type Database = {
           service_ack_hours_urgent?: number
           service_admin_escalation_hours_normal?: number
           service_admin_escalation_hours_urgent?: number
+          session_idle_minutes?: number
+          session_max_hours?: number
           slip_review_deadline_hours?: number
           slip_review_escalation_hours?: number
           slip_review_reminder_hours?: number[]
@@ -2463,9 +2481,14 @@ export type Database = {
       }
     }
     Functions: {
+      custom_access_token_hook: { Args: { event: Json }; Returns: Json }
       rpc_assign_invoice_number: {
         Args: { p_invoice_id: string }
         Returns: string
+      }
+      rpc_complete_password_change: {
+        Args: { p_user_id: string }
+        Returns: Json
       }
       rpc_confirm_meter_submission: {
         Args: {
@@ -2477,6 +2500,10 @@ export type Database = {
           p_submission_id: string
           p_ticket_id: string
         }
+        Returns: Json
+      }
+      rpc_login_gate_state: {
+        Args: { p_ip: unknown; p_username: string }
         Returns: Json
       }
       rpc_open_billing_cycle: {
@@ -2501,6 +2528,16 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_record_login_attempt: {
+        Args: {
+          p_ip: unknown
+          p_reason?: string
+          p_success: boolean
+          p_user_agent?: string
+          p_username: string
+        }
+        Returns: Json
+      }
       rpc_reject_meter_submission: {
         Args: {
           p_actor_id: string
@@ -2510,6 +2547,24 @@ export type Database = {
           p_stage_due_at: string
           p_submission_id: string
           p_ticket_id: string
+        }
+        Returns: Json
+      }
+      rpc_reset_account_password: {
+        Args: { p_actor_id: string; p_target_id: string }
+        Returns: Json
+      }
+      rpc_save_company_profile: {
+        Args: { p_details: Json; p_owner_id: string }
+        Returns: Json
+      }
+      rpc_session_state: { Args: { p_user_id: string }; Returns: Json }
+      rpc_set_account_status: {
+        Args: {
+          p_actor_id: string
+          p_reason: string
+          p_status: Database["public"]["Enums"]["account_status"]
+          p_target_id: string
         }
         Returns: Json
       }
@@ -2555,6 +2610,14 @@ export type Database = {
           p_ticket_id: string
           p_to: Database["public"]["Enums"]["ticket_status"]
         }
+        Returns: Json
+      }
+      rpc_update_customer: {
+        Args: { p_actor_id: string; p_customer_id: string; p_details: Json }
+        Returns: Json
+      }
+      rpc_update_owner: {
+        Args: { p_actor_id: string; p_details: Json; p_owner_id: string }
         Returns: Json
       }
       rpc_verify_payment: {

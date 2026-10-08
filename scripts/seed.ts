@@ -9,14 +9,18 @@
  * Safe to re-run: auth users are looked up by email, rows use fixed ids derived from
  * names, and each ticket is only advanced from its current status toward its target.
  *
- * Self-contained on purpose: Node runs this file with built-in TypeScript support,
- * which cannot resolve the app's "@/" path alias. Only a type import is shared.
+ * Node runs this file with built-in TypeScript support, which cannot resolve the
+ * app's "@/" path alias. It shares only the billing engine (src/lib/billing, which
+ * uses relative ".ts" imports for this reason) and the database types.
  * Never run it against production: the demo passwords below are public.
  */
 import { createHash } from "node:crypto";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { loadMeterContext } from "../src/lib/billing/context.ts";
+import { buildMeterSubmission } from "../src/lib/billing/meter-invoice.ts";
+import { previousReading } from "../src/lib/billing/usage.ts";
 import type { Database, Json } from "../src/types/db";
 
 type Admin = SupabaseClient<Database>;
@@ -357,14 +361,15 @@ async function seedMachinesAndAgreements(ids: Record<string, string>) {
   // Agreements are created by each owner (audited as that owner). The service role
   // writes them directly to keep stable ids; the same triggers apply as for
   // rpc_assign_machine (terms version 1, machine RENTED, cycle calendar).
+  // Only missing ones are inserted: the insert trigger refuses an already rented
+  // machine before ON CONFLICT could skip the row, so an upsert breaks re-runs.
+  const existing = new Set(
+    check(await admin.from("rental_agreements").select("id").in("id", rows.map((r) => r.id)), "existing agreements").map((r) => r.id),
+  );
   for (const owner of ["ownerA", "ownerB"]) {
-    check(
-      await actingAs(ids[owner]).from("rental_agreements").upsert(
-        rows.filter((r) => r.owner_id === ids[owner]),
-        { onConflict: "id", ignoreDuplicates: true },
-      ),
-      `agreements ${owner}`,
-    );
+    const missing = rows.filter((r) => r.owner_id === ids[owner] && !existing.has(r.id));
+    if (missing.length === 0) continue;
+    check(await actingAs(ids[owner]).from("rental_agreements").insert(missing), `agreements ${owner}`);
   }
 }
 
@@ -395,60 +400,18 @@ async function openDueCycles(ids: Record<string, string>) {
   }
 }
 
-async function lastVerifiedReadings(ticket: Ticket, agreement: AgreementDef) {
-  const initial = check(
-    await admin.from("rental_agreements").select("initial_bw_reading, initial_colour_reading").eq("id", ticket.agreement_id).single(),
-    "agreement readings",
-  );
-  const readings = { BW: initial.initial_bw_reading, COLOUR: initial.initial_colour_reading ?? 0 };
-
-  const earlier = check(
-    await admin.from("billing_cycle_tickets").select("id").eq("agreement_id", ticket.agreement_id).lt("cycle_no", ticket.cycle_no),
-    `earlier tickets ${agreement.key}`,
-  );
-  if (earlier.length === 0) return readings;
-  const confirmed = check(
-    await admin
-      .from("meter_submissions")
-      .select("id, submitted_at")
-      .in("ticket_id", earlier.map((t) => t.id))
-      .eq("status", "CONFIRMED")
-      .order("submitted_at", { ascending: false })
-      .limit(1),
-    "confirmed submissions",
-  );
-  if (confirmed.length === 0) return readings;
-  const values = check(
-    await admin.from("meter_readings").select("counter_type, current_value").eq("submission_id", confirmed[0].id),
-    "readings",
-  );
-  for (const v of values) readings[v.counter_type] = v.current_value;
-  return readings;
-}
-
 async function submitMeter(ticket: Ticket, agreement: AgreementDef, ids: Record<string, string>) {
-  const previous = await lastVerifiedReadings(ticket, agreement);
+  // The billing engine is the only place amounts are calculated (migration 0015
+  // refuses anything else); the seed uses the same loader and engine as the app.
+  const context = await loadMeterContext(admin, ticket.id);
+  const previous = (counter: "BW" | "COLOUR") => previousReading(context.counters[counter]!.known).value;
   const colour = ticket.machine_type === "COLOUR";
-  const bwUsed = colour ? USAGE.BW_COLOUR : USAGE.BW_MONO;
-  const readings = [{ counter_type: "BW", previous_value: previous.BW, current_value: previous.BW + bwUsed }];
-  if (colour) readings.push({ counter_type: "COLOUR", previous_value: previous.COLOUR, current_value: previous.COLOUR + USAGE.COLOUR });
-
-  // Same rule as the billing engine (spec 6.2); integer cents only.
-  const lines = [
-    { line_type: "COMMITMENT", description: "Monthly commitment", quantity: 1, rate_cents: ticket.commitment_cents, amount_cents: ticket.commitment_cents },
-  ];
-  const bwExtra = Math.max(0, bwUsed - ticket.bw_included);
-  if (bwExtra > 0) {
-    lines.push({ line_type: "BW_EXCESS", description: `B&W copies above ${ticket.bw_included}`, quantity: bwExtra, rate_cents: ticket.bw_rate_cents, amount_cents: bwExtra * ticket.bw_rate_cents });
-  }
-  if (colour) {
-    const colourExtra = Math.max(0, USAGE.COLOUR - (ticket.colour_included ?? 0));
-    if (colourExtra > 0) {
-      const rate = ticket.colour_rate_cents ?? 0;
-      lines.push({ line_type: "COLOUR_EXCESS", description: `Colour copies above ${ticket.colour_included}`, quantity: colourExtra, rate_cents: rate, amount_cents: colourExtra * rate });
-    }
-  }
-  const total = lines.reduce((sum, l) => sum + l.amount_cents, 0);
+  // Copies per cycle from spec 6.3 (colour case 2, mono case 2), times the cycles covered.
+  const perCycle = { BW: colour ? USAGE.BW_COLOUR : USAGE.BW_MONO, COLOUR: USAGE.COLOUR };
+  const submission = buildMeterSubmission(context, {
+    BW: previous("BW") + perCycle.BW * context.cyclesCovered,
+    COLOUR: colour ? previous("COLOUR") + perCycle.COLOUR * context.cyclesCovered : null,
+  });
 
   const photoPath = `${ticket.owner_id}/${ticket.id}/seed-meter.jpg`;
   check(await admin.storage.from("meter-photos").upload(photoPath, JPEG, { contentType: "image/jpeg", upsert: true }), "upload meter photo");
@@ -459,9 +422,10 @@ async function submitMeter(ticket: Ticket, agreement: AgreementDef, ids: Record<
       p_actor_id: ticket.customer_id,
       p_idempotency_key: stableId(`meter:${ticket.id}`),
       p_source: "CUSTOMER",
-      p_readings: readings,
+      p_readings: submission.readings as unknown as Json,
       p_photo: { storage_path: photoPath, captured_at: new Date().toISOString() },
-      p_invoice: { subtotal_cents: total, total_cents: total, lines },
+      p_invoice: submission.invoice as unknown as Json,
+      p_anomaly_flag: submission.anomalyFlag ?? undefined,
       p_stage_due_at: inDays(2),
       p_notifications: [{ user_id: ids[agreement.owner], event: "meter.submitted", title: "Meter reading submitted" }],
     }),

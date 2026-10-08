@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import type pg from "pg";
 
+import type { Terms } from "../../src/lib/billing/invoice.ts";
+import { buildMeterSubmission } from "../../src/lib/billing/meter-invoice.ts";
+
 /**
  * Two-tenant fixture built through the real workflow functions (as `postgres`).
  *
@@ -54,24 +57,32 @@ export interface Fixture extends FixtureIds {
 
 const SHA = "a".repeat(64);
 
-const COLOUR_INVOICE = {
-  subtotal_cents: 1_280_000,
-  total_cents: 1_280_000,
-  lines: [
-    { line_type: "COMMITMENT", description: "Monthly commitment", quantity: 1, rate_cents: 1_000_000, amount_cents: 1_000_000 },
-    { line_type: "BW_EXCESS", description: "B&W excess", quantity: 400, rate_cents: 200, amount_cents: 80_000 },
-    { line_type: "COLOUR_EXCESS", description: "Colour excess", quantity: 200, rate_cents: 1_000, amount_cents: 200_000 },
-  ],
+/**
+ * Invoices are built by the billing engine (the only place amounts are calculated);
+ * migration 0015 refuses anything else. Spec 6.3 colour case 2 (Rs. 12,800) and
+ * mono case 2 (Rs. 6,500), from the initial readings of the fixture agreements.
+ */
+const COLOUR_TERMS: Terms = {
+  machineType: "COLOUR",
+  commitmentCents: 1_000_000,
+  bwIncluded: 3000,
+  bwRateCents: 200,
+  colourIncluded: 500,
+  colourRateCents: 1000,
+  cycleLengthDays: 30,
 };
+const MONO_TERMS: Terms = { ...COLOUR_TERMS, machineType: "MONO", commitmentCents: 500_000, bwIncluded: 2000, bwRateCents: 250, colourIncluded: null, colourRateCents: null };
 
-const MONO_INVOICE = {
-  subtotal_cents: 650_000,
-  total_cents: 650_000,
-  lines: [
-    { line_type: "COMMITMENT", description: "Monthly commitment", quantity: 1, rate_cents: 500_000, amount_cents: 500_000 },
-    { line_type: "BW_EXCESS", description: "B&W excess", quantity: 600, rate_cents: 250, amount_cents: 150_000 },
-  ],
-};
+const firstReading = (value: number) => ({ known: [{ value, at: "2026-01-01T00:00:00Z", source: "INITIAL" as const }], counterMax: null, history: [] });
+
+export const COLOUR_SUBMISSION = buildMeterSubmission(
+  { terms: COLOUR_TERMS, cyclesCovered: 1, counters: { BW: firstReading(1000), COLOUR: firstReading(200) }, estimateCredits: [] },
+  { BW: 4400, COLOUR: 900 },
+);
+export const MONO_SUBMISSION = buildMeterSubmission(
+  { terms: MONO_TERMS, cyclesCovered: 1, counters: { BW: firstReading(5000) }, estimateCredits: [] },
+  { BW: 7600 },
+);
 
 const json = (value: unknown) => `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`;
 
@@ -140,21 +151,18 @@ export async function createFixture(db: pg.Client, options: { storage?: boolean 
     b1Mono: ticketOf(f.agrB1Mono),
   };
 
-  const monoReading = json([{ counter_type: "BW", previous_value: 5000, current_value: 7600 }]);
-  const colourReading = json([
-    { counter_type: "BW", previous_value: 1000, current_value: 4400 },
-    { counter_type: "COLOUR", previous_value: 200, current_value: 900 },
-  ]);
+  const monoReading = json(MONO_SUBMISSION.readings);
+  const colourReading = json(COLOUR_SUBMISSION.readings);
   const photo = (owner: string, ticket: string, n: number) =>
     json({ storage_path: `${owner}/${ticket}/photo-${n}.jpg`, captured_at: new Date().toISOString() });
 
   await db.query(`
     select app.submit_meter_reading('${tickets.a1Colour}', '${f.custA1}', '${f.keyA1Colour}', 'CUSTOMER',
-      ${colourReading}, ${photo(f.ownerA, tickets.a1Colour, 1)}, ${json(COLOUR_INVOICE)}, now() + interval '2 days', null, null,
+      ${colourReading}, ${photo(f.ownerA, tickets.a1Colour, 1)}, ${json(COLOUR_SUBMISSION.invoice)}, now() + interval '2 days', null, null,
       ${json([{ user_id: f.ownerA, event: "meter.submitted", title: "Meter submitted" }])});
 
     select app.submit_meter_reading('${tickets.a2Mono}', '${f.custA2}', '${f.keyA2Mono}', 'CUSTOMER',
-      ${monoReading}, ${photo(f.ownerA, tickets.a2Mono, 2)}, ${json(MONO_INVOICE)}, now() + interval '2 days');
+      ${monoReading}, ${photo(f.ownerA, tickets.a2Mono, 2)}, ${json(MONO_SUBMISSION.invoice)}, now() + interval '2 days');
     select app.confirm_meter_submission('${tickets.a2Mono}',
       (select id from public.meter_submissions where idempotency_key = '${f.keyA2Mono}'),
       '${f.ownerA}', current_date + 7, now() + interval '7 days', null,
@@ -165,7 +173,7 @@ export async function createFixture(db: pg.Client, options: { storage?: boolean 
       now() + interval '2 days');
 
     select app.submit_meter_reading('${tickets.b1Mono}', '${f.custB1}', '${f.keyB1Mono}', 'CUSTOMER',
-      ${monoReading}, ${photo(f.ownerB, tickets.b1Mono, 3)}, ${json(MONO_INVOICE)}, now() + interval '2 days');
+      ${monoReading}, ${photo(f.ownerB, tickets.b1Mono, 3)}, ${json(MONO_SUBMISSION.invoice)}, now() + interval '2 days');
     select app.confirm_meter_submission('${tickets.b1Mono}',
       (select id from public.meter_submissions where idempotency_key = '${f.keyB1Mono}'),
       '${f.ownerB}', current_date + 7, now() + interval '7 days');

@@ -733,6 +733,7 @@ export type Database = {
           agreement_id: string
           amount_paid_cents: number
           branding_snapshot: Json | null
+          calculation: Json | null
           cancel_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
@@ -765,6 +766,7 @@ export type Database = {
           agreement_id: string
           amount_paid_cents?: number
           branding_snapshot?: Json | null
+          calculation?: Json | null
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -797,6 +799,7 @@ export type Database = {
           agreement_id?: string
           amount_paid_cents?: number
           branding_snapshot?: Json | null
+          calculation?: Json | null
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -1128,6 +1131,8 @@ export type Database = {
           owner_id: string
           previous_value: number
           rolled_over: boolean
+          rollover_confirmed_at: string | null
+          rollover_confirmed_by: string | null
           submission_id: string
         }
         Insert: {
@@ -1142,6 +1147,8 @@ export type Database = {
           owner_id: string
           previous_value: number
           rolled_over?: boolean
+          rollover_confirmed_at?: string | null
+          rollover_confirmed_by?: string | null
           submission_id: string
         }
         Update: {
@@ -1156,6 +1163,8 @@ export type Database = {
           owner_id?: string
           previous_value?: number
           rolled_over?: boolean
+          rollover_confirmed_at?: string | null
+          rollover_confirmed_by?: string | null
           submission_id?: string
         }
         Relationships: [
@@ -1178,6 +1187,13 @@ export type Database = {
             columns: ["owner_id"]
             isOneToOne: false
             referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meter_readings_rollover_confirmed_by_fkey"
+            columns: ["rollover_confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -2623,6 +2639,7 @@ export type Database = {
           p_branding_snapshot?: Json
           p_due_date: string
           p_notifications?: Json
+          p_rollover_confirmed?: boolean
           p_stage_due_at: string
           p_submission_id: string
           p_ticket_id: string

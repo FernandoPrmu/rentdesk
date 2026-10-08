@@ -1,15 +1,31 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { buildMeterSubmission } from "../../src/lib/billing/meter-invoice.ts";
+
 import { APPLY_MIGRATIONS, asPostgres, asService, begin, connect, count, DB_URL, isolated, sqlError } from "./db";
 import { createFixture, deleteFixture, type Fixture } from "./fixtures";
 
-const MONO_INVOICE = JSON.stringify({
-  subtotal_cents: 500_000,
-  total_cents: 500_000,
-  lines: [{ line_type: "COMMITMENT", description: "Monthly commitment", quantity: 1, rate_cents: 500_000, amount_cents: 500_000 }],
-});
-const MONO_READING = JSON.stringify([{ counter_type: "BW", previous_value: 5000, current_value: 6000 }]);
+// Built by the billing engine, like every invoice (migration 0015): 5,000 -> 6,000 copies.
+const MONO_SUBMISSION = buildMeterSubmission(
+  {
+    terms: {
+      machineType: "MONO",
+      commitmentCents: 500_000,
+      bwIncluded: 2000,
+      bwRateCents: 250,
+      colourIncluded: null,
+      colourRateCents: null,
+      cycleLengthDays: 30,
+    },
+    cyclesCovered: 1,
+    counters: { BW: { known: [{ value: 5000, at: "2026-01-01T00:00:00Z", source: "INITIAL" }], counterMax: null, history: [] } },
+    estimateCredits: [],
+  },
+  { BW: 6000 },
+);
+const MONO_INVOICE = JSON.stringify(MONO_SUBMISSION.invoice);
+const MONO_READING = JSON.stringify(MONO_SUBMISSION.readings);
 
 async function ticketStatus(db: pg.Client, ticketId: string): Promise<string> {
   const { rows } = await db.query("select status from public.billing_cycle_tickets where id = $1", [ticketId]);
@@ -112,8 +128,9 @@ describe.skipIf(!DB_URL)("workflow functions (linked dev database, rolled back)"
       expect((await sqlError(db, submit, [f.tickets.a1Mono, f.custA1, MONO_READING, wrongPath, MONO_INVOICE]))?.code).toBe("RD400");
       const badTotal = JSON.stringify({ ...JSON.parse(MONO_INVOICE), total_cents: 1 });
       expect((await sqlError(db, submit, [f.tickets.a1Mono, f.custA1, MONO_READING, photo, badTotal]))?.code).toBe("RD400");
-      const lower = JSON.stringify([{ counter_type: "BW", previous_value: 5000, current_value: 4000 }]);
-      expect((await sqlError(db, submit, [f.tickets.a1Mono, f.custA1, lower, photo, MONO_INVOICE]))?.code).toBe("23514");
+      // Readings that differ from the engine's calculation are refused before anything is written.
+      const lower = JSON.stringify([{ counter_type: "BW", previous_value: 5000, current_value: 4000, rolled_over: false }]);
+      expect((await sqlError(db, submit, [f.tickets.a1Mono, f.custA1, lower, photo, MONO_INVOICE]))?.code).toBe("RD400");
       // Another customer, and a ticket not waiting for a reading.
       expect((await sqlError(db, submit, [f.tickets.a1Mono, f.custA2, MONO_READING, photo, MONO_INVOICE]))?.code).toBe("RD403");
       expect((await sqlError(db, submit, [f.tickets.a2Mono, f.custA2, MONO_READING, photo, MONO_INVOICE]))?.code).toBe("RD409");

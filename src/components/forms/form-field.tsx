@@ -1,5 +1,6 @@
 import type { ChangeEvent, ReactNode } from "react";
 
+import { type ChoiceOption, ChoiceSelect } from "@/components/forms/choice-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -109,7 +110,7 @@ export function FormField({
   );
 }
 
-/** Native select (large, works everywhere) with the same label and error layout. */
+/** shadcn Select (touch-sized) with the same label and error layout; `name` submits the value. */
 export function SelectField({
   name,
   label,
@@ -124,7 +125,7 @@ export function SelectField({
 }: {
   name: string;
   label: string;
-  options: { value: string; label: string }[];
+  options: ChoiceOption[];
   required?: boolean;
   defaultValue?: string;
   value?: string;
@@ -136,23 +137,18 @@ export function SelectField({
   const id = `field-${name}`;
   return (
     <FieldShell id={id} label={label} required={required} error={error} hint={hint}>
-      <select
+      <ChoiceSelect
         id={id}
         name={name}
-        {...(value !== undefined ? { value } : { defaultValue: defaultValue ?? "" })}
-        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        options={options}
+        defaultValue={defaultValue}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
         required={required}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy(id, error, hint)}
-        className="h-12 w-full rounded-lg border border-input bg-background px-3 text-base"
-      >
-        {placeholder !== undefined && <option value="">{placeholder}</option>}
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+        invalid={Boolean(error)}
+        describedBy={describedBy(id, error, hint)}
+      />
     </FieldShell>
   );
 }

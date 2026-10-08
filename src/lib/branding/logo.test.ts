@@ -16,7 +16,8 @@ describe("sniffLogoType", () => {
     expect(sniffLogoType(await image("png", 4, 4))).toBe("png");
     expect(sniffLogoType(await image("jpeg", 4, 4))).toBe("jpeg");
     expect(sniffLogoType(text(SVG))).toBe("svg");
-    expect(sniffLogoType(text(`﻿<?xml version="1.0"?>\n<!-- logo -->\n${SVG}`))).toBe("svg");
+    const BOM = String.fromCharCode(0xfeff);
+    expect(sniffLogoType(text(`${BOM}<?xml version="1.0"?>\n<!-- logo -->\n${SVG}`))).toBe("svg");
   });
 
   it("rejects other files", () => {

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { blockReason, isSignOutReason, routeDecision, type SessionState, sessionTimeout } from "./session-policy";
+import {
+  authenticatedAtFromClaims,
+  blockReason,
+  isSignOutReason,
+  parseLastSeen,
+  routeDecision,
+  type SessionState,
+  sessionTimeout,
+} from "./session-policy";
 
 function session(overrides: Partial<SessionState> = {}): SessionState {
   return {
@@ -107,5 +115,22 @@ describe("routeDecision (AUTH-03, AUTH-06, BRD-01)", () => {
     const done = session({ role: "OWNER" });
     expect(routeDecision(done, "/setup")).toBe("/owner");
     expect(routeDecision(done, "/change-password")).toBeNull();
+  });
+});
+
+describe("session cookies and claims", () => {
+  it("parses the last-seen cookie", () => {
+    expect(parseLastSeen("1760000000000")).toEqual(new Date(1760000000000));
+    expect(parseLastSeen(undefined)).toBeNull();
+    expect(parseLastSeen("garbage")).toBeNull();
+  });
+
+  it("reads the sign-in time from amr, falling back to iat", () => {
+    expect(authenticatedAtFromClaims({ iat: 2000, amr: [{ method: "password", timestamp: 1000 }] })).toEqual(new Date(1_000_000));
+    expect(
+      authenticatedAtFromClaims({ amr: [{ method: "otp", timestamp: 500 }, { method: "password", timestamp: 900 }] }),
+    ).toEqual(new Date(900_000));
+    expect(authenticatedAtFromClaims({ iat: 2000, amr: ["password"] })).toEqual(new Date(2_000_000));
+    expect(authenticatedAtFromClaims({})).toBeNull();
   });
 });

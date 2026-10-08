@@ -130,3 +130,37 @@ export function routeDecision(state: SessionState, pathname: string): string | n
   }
   return null;
 }
+
+/** Last request time (ms since epoch), written by the proxy for the idle timeout. */
+export const LAST_SEEN_COOKIE = "rd_seen";
+/** Rewrite the cookie at most once a minute. */
+export const LAST_SEEN_REFRESH_MS = 60_000;
+
+export function lastSeenCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    // Outlives any session (a missing cookie would hide idleness); the value decides.
+    maxAge: 60 * 60 * 24 * 30,
+  };
+}
+
+export function parseLastSeen(value: string | undefined): Date | null {
+  const ms = Number(value);
+  return value && Number.isFinite(ms) && ms > 0 ? new Date(ms) : null;
+}
+
+/**
+ * When the user signed in, from verified JWT claims: the password entry of `amr`
+ * (kept across token refreshes), else the earliest `amr` time, else `iat`.
+ */
+export function authenticatedAtFromClaims(claims: { iat?: number; amr?: unknown }): Date | null {
+  const entries = Array.isArray(claims.amr) ? claims.amr : [];
+  const times = entries
+    .filter((e): e is { method?: string; timestamp: number } => typeof e === "object" && e !== null && typeof e.timestamp === "number")
+    .sort((a, b) => Number(b.method === "password") - Number(a.method === "password") || a.timestamp - b.timestamp);
+  if (times.length > 0) return new Date(times[0].timestamp * 1000);
+  return typeof claims.iat === "number" ? new Date(claims.iat * 1000) : null;
+}

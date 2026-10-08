@@ -25,7 +25,8 @@ function startsWith(bytes: Uint8Array, magic: number[]): boolean {
 
 /** Text of an SVG file without BOM, XML declaration and leading comments. */
 function svgBody(text: string): string {
-  let s = text.replace(/^﻿/, "").trimStart();
+  const BOM = 0xfeff;
+  let s = (text.charCodeAt(0) === BOM ? text.slice(1) : text).trimStart();
   for (;;) {
     if (s.startsWith("<?xml")) {
       const end = s.indexOf("?>");
@@ -69,10 +70,10 @@ export function svgSafetyProblem(text: string): string | null {
     if (pattern.test(text)) return what;
   }
   // Every href / xlink:href / src must point inside the file or be embedded image data.
-  for (const m of text.matchAll(/(?:^|[\s"'])(?:xlink:)?(?:href|src)\s*=\s*(["'])(.*?)\1/gis)) {
+  for (const m of text.matchAll(/(?:^|[\s"'])(?:xlink:)?(?:href|src)\s*=\s*(["'])([\s\S]*?)\1/gi)) {
     if (!isAllowedReference(m[2])) return "links to outside files";
   }
-  for (const m of text.matchAll(/url\(\s*(["']?)(.*?)\1\s*\)/gis)) {
+  for (const m of text.matchAll(/url\(\s*(["']?)([\s\S]*?)\1\s*\)/gi)) {
     if (!isAllowedReference(m[2])) return "links to outside files";
   }
   return null;

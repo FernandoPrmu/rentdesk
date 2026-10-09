@@ -69,18 +69,17 @@ const COLOUR_TERMS: Terms = {
   bwRateCents: 200,
   colourIncluded: 500,
   colourRateCents: 1000,
-  cycleLengthDays: 30,
 };
 const MONO_TERMS: Terms = { ...COLOUR_TERMS, machineType: "MONO", commitmentCents: 500_000, bwIncluded: 2000, bwRateCents: 250, colourIncluded: null, colourRateCents: null };
 
 const firstReading = (value: number) => ({ known: [{ value, at: "2026-01-01T00:00:00Z", source: "INITIAL" as const }], counterMax: null, history: [] });
 
 export const COLOUR_SUBMISSION = buildMeterSubmission(
-  { terms: COLOUR_TERMS, cyclesCovered: 1, counters: { BW: firstReading(1000), COLOUR: firstReading(200) }, estimateCredits: [] },
+  { terms: COLOUR_TERMS, cyclesCovered: 1, counters: { BW: firstReading(1000), COLOUR: firstReading(200) }, estimateCredits: [], credits: [] },
   { BW: 4400, COLOUR: 900 },
 );
 export const MONO_SUBMISSION = buildMeterSubmission(
-  { terms: MONO_TERMS, cyclesCovered: 1, counters: { BW: firstReading(5000) }, estimateCredits: [] },
+  { terms: MONO_TERMS, cyclesCovered: 1, counters: { BW: firstReading(5000) }, estimateCredits: [], credits: [] },
   { BW: 7600 },
 );
 
@@ -240,6 +239,8 @@ export async function deleteFixture(db: pg.Client, f: Fixture) {
       "ticket_comments",
       "ticket_events",
       "payment_slips",
+      "deposit_transactions",
+      "invoice_lines",
       "credits",
       "disputes",
       "payments",
@@ -252,7 +253,6 @@ export async function deleteFixture(db: pg.Client, f: Fixture) {
     await db.query("update public.meter_submissions set invoice_id = null where owner_id = any($1::uuid[])", [owners]);
     for (const table of [
       "meter_submissions",
-      "invoice_lines",
       "invoices",
       "billing_cycle_tickets",
       "service_request_history",

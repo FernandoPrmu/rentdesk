@@ -5,6 +5,7 @@ import { addDays, cycleInProgress } from "@/lib/agreements/cycle-calendar";
 
 import { asPostgres, asService, asUser, begin, connect, count, DB_URL, isolated, sqlError } from "./db";
 import { createFixture, type Fixture } from "./fixtures";
+import { returnPayload } from "./returns";
 
 /** Machines and agreements workflow from migration 0014 (MAC-01..04, AGR-01..03). */
 describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled back)", () => {
@@ -33,7 +34,6 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
   const monoTerms = (overrides: Record<string, unknown> = {}) => ({
     start_date: addDays(today, -100),
     first_billing_date: addDays(today, 5),
-    cycle_length_days: 30,
     due_days: 7,
     monthly_commitment_cents: 500_000,
     bw_included: 2000,
@@ -224,37 +224,66 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
     });
   });
 
-  describe("return and reassign (MAC-04)", () => {
-    it("is blocked while a ticket is open or an invoice is unpaid", async () => {
+  describe("return and reassign (MAC-04, RET-01)", () => {
+    const returnRpc = (actor: string, agreementId: string, payload: object) =>
+      sqlError(db, "select public.rpc_return_machine($1, $2, $3::jsonb, $4::date)", [actor, agreementId, JSON.stringify(payload), today]);
+    const returnWith = async (actor: string, agreementId: string, o: Parameters<typeof returnPayload>[3]) =>
+      returnRpc(actor, agreementId, (await returnPayload(db, agreementId, today, o)).payload);
+
+    it("is blocked only while a meter reading waits for the owner's review", async () => {
       await isolated(db, async () => {
         await asService(db);
-        const open = await returnError(f.ownerA, f.agrA1Mono, { bw: 9000 });
-        expect(open?.code).toBe("RD409");
-        expect(open?.message).toMatch(/^RETURN_BLOCKED:/);
-        const blockers = JSON.parse(open!.message.slice("RETURN_BLOCKED:".length));
-        expect(blockers).toEqual([expect.objectContaining({ kind: "ticket", cycle_no: 1, status: "METER_REQUESTED" })]);
-
-        const unpaid = await returnError(f.ownerA, f.agrA2Mono, { bw: 9000 });
-        const kinds = JSON.parse(unpaid!.message.slice("RETURN_BLOCKED:".length)).map((b: { kind: string }) => b.kind);
-        expect(kinds.sort()).toEqual(["invoice", "ticket"]);
-
+        // A1 colour: PENDING_OWNER_REVIEW.
+        const pending = await returnWith(f.ownerA, f.agrA1Colour, { closing: { bw: 9000, colour: 2000 } });
+        expect(pending?.code).toBe("RD409");
+        expect(pending?.message).toMatch(/^RETURN_BLOCKED:/);
+        const blockers = JSON.parse(pending!.message.slice("RETURN_BLOCKED:".length));
+        expect(blockers).toEqual([expect.objectContaining({ kind: "ticket", cycle_no: 1, status: "PENDING_OWNER_REVIEW" })]);
         await asPostgres(db);
-        expect((await agreement(f.agrA1Mono)).status).toBe("ACTIVE");
-        expect(await machineStatus(f.machineAMono1)).toBe("RENTED");
+        expect((await agreement(f.agrA1Colour)).status).toBe("ACTIVE");
+        expect(await machineStatus(f.machineAColour)).toBe("RENTED");
+
+        // A2 mono has a slip waiting and an unpaid invoice: the return goes ahead.
+        await asService(db);
+        expect(await returnWith(f.ownerA, f.agrA2Mono, { closing: { bw: 9000 } })).toBeNull();
       });
     });
 
-    it("terminates the agreement with closing readings and frees the machine", async () => {
+    it("terminates the agreement with closing readings, issues the final invoice and frees the machine", async () => {
       await isolated(db, async () => {
         await asService(db);
         const { agreement_id: id } = await assign(f.ownerA, f.machineASpare, f.custA2, monoTerms());
 
-        expect((await returnError(f.ownerA, id, { bw: 999 }))?.code, "below the initial reading").toBe("RD400");
-        expect((await returnError(f.ownerA, id, {}))?.code, "missing reading").toBe("RD400");
-        expect((await returnError(f.ownerA, id, { bw: 1500 }, " "))?.code, "missing reason").toBe("RD400");
-        expect((await returnError(f.ownerB, id, { bw: 1500 }))?.code, "other owner").toBe("RD403");
-        expect(await returnError(f.ownerA, id, { bw: 1500 })).toBeNull();
-        expect((await returnError(f.ownerA, id, { bw: 1600 }))?.code, "already returned").toBe("RD409");
+        // Below the initial reading: the engine refuses it, and so does the database.
+        await expect(returnPayload(db, id, today, { closing: { bw: 999 } })).rejects.toThrow(/lower than the previous reading/);
+        const below = { ...(await returnPayload(db, id, today, { closing: { bw: 1500 } })).payload, closing: { bw: 999 } };
+        expect((await returnRpc(f.ownerA, id, below))?.message, "below the initial reading").toMatch(/lower than the last reading/);
+        expect((await returnWith(f.ownerB, id, { closing: { bw: 1500 } }))?.code, "other owner").toBe("RD403");
+        const noReason = (await returnPayload(db, id, today, { closing: { bw: 1500 }, reason: " " })).payload;
+        expect((await returnRpc(f.ownerA, id, noReason))?.code, "missing reason").toBe("RD400");
+        const noInvoice = { ...(await returnPayload(db, id, today, { closing: { bw: 1500 } })).payload, final: null };
+        expect((await returnRpc(f.ownerA, id, noInvoice))?.message, "final invoice required").toMatch(/final invoice is required/);
+
+        const { payload, submission } = await returnPayload(db, id, today, { closing: { bw: 1500 } });
+        // A tampered amount is refused: the database only stores what the engine calculated.
+        const tampered = {
+          ...payload,
+          final: { ...payload.final!, invoice: { ...payload.final!.invoice, total_cents: payload.final!.invoice.total_cents - 1 } },
+        };
+        expect((await returnRpc(f.ownerA, id, tampered))?.code).toBe("RD400");
+        // Other closing readings than the invoice's.
+        expect((await returnRpc(f.ownerA, id, { ...payload, closing: { bw: 1600 } }))?.message).toMatch(/closing readings/);
+
+        expect(await returnRpc(f.ownerA, id, payload)).toBeNull();
+        // A retry with the same key returns the first result instead of failing.
+        const replay = await rpc<{ replayed: boolean }>("public.rpc_return_machine($1, $2, $3::jsonb, $4::date)", [
+          f.ownerA,
+          id,
+          JSON.stringify(payload),
+          today,
+        ]);
+        expect(replay.replayed).toBe(true);
+        expect((await returnWith(f.ownerA, id, { closing: { bw: 1600 } }))?.code, "already returned").toBe("RD409");
 
         await asPostgres(db);
         expect(await agreement(id)).toMatchObject({
@@ -265,8 +294,31 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
           end_date: today,
         });
         expect(await machineStatus(f.machineASpare)).toBe("AVAILABLE");
+
+        // The final invoice: issued with a number, prorated by the real days of the cycle.
+        const { rows: inv } = await db.query(
+          `select i.invoice_no, i.status, i.total_cents::int, i.due_date::text, i.calculation -> 'partial' as partial,
+                  t.status as ticket_status, t.cycle_length_days, s.source, s.status as reading_status
+           from public.invoices i join public.billing_cycle_tickets t on t.id = i.ticket_id
+           join public.meter_submissions s on s.invoice_id = i.id where i.agreement_id = $1`,
+          [id],
+        );
+        expect(inv).toHaveLength(1);
+        expect(inv[0]).toMatchObject({
+          status: "AWAITING_PAYMENT",
+          ticket_status: "AWAITING_PAYMENT",
+          total_cents: submission!.invoice.total_cents,
+          due_date: addDays(today, 7),
+          source: "OWNER_MANUAL",
+          reading_status: "CONFIRMED",
+          partial: { rule: "PRORATED", days_used: submission!.result.cyclesCovered === 1 ? expect.any(Number) : 0, days_in_cycle: expect.any(Number) },
+        });
+        expect(inv[0].invoice_no).toMatch(/^INV-/);
+        expect(inv[0].cycle_length_days).toBe(inv[0].partial.days_in_cycle);
+
         const { rows } = await db.query("select details from public.audit_logs where entity_id = $1 and action = 'MACHINE_RETURNED'", [id]);
-        expect(rows[0].details).toMatchObject({ closing_bw_reading: 1500, reason: "Customer closed the branch" });
+        expect(rows[0].details).toMatchObject({ closing_bw_reading: 1500, reason: "Customer closed the branch", final_invoice_no: inv[0].invoice_no });
+        expect(await count(db, "select 1 from public.notifications where user_id = $1 and event = 'invoice.issued' and entity_id = $2", [f.custA2, id])).toBe(1);
 
         // A terminated agreement stays terminated.
         expect((await sqlError(db, "update public.rental_agreements set status = 'ACTIVE' where id = $1", [id]))?.code).toBe("RD409");
@@ -282,10 +334,20 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
           f.custA2,
           monoTerms({ colour_included: 500, colour_rate_cents: 1000, initial_bw_reading: 5000, initial_colour_reading: 990_000 }),
         );
-        // B&W has no maximum: lower is refused. Colour has 999,999: lower is a rollover.
-        expect((await returnError(f.ownerA, id, { bw: 4000, colour: 1000 }))?.code).toBe("RD400");
-        expect((await returnError(f.ownerA, id, { bw: 6000 }))?.code, "colour reading required").toBe("RD400");
-        expect(await returnError(f.ownerA, id, { bw: 6000, colour: 1000 })).toBeNull();
+        // B&W has no maximum: lower is refused (by the engine and by the database).
+        await expect(returnPayload(db, id, today, { closing: { bw: 4000, colour: 1000 } })).rejects.toThrow(/lower/);
+        const raw = { ...(await returnPayload(db, id, today, { closing: { bw: 6000, colour: 1000 } })).payload, closing: { bw: 4000, colour: 1000 } };
+        expect((await returnRpc(f.ownerA, id, raw))?.code).toBe("RD400");
+        // Colour has 999,999: lower is a rollover, billed and confirmed by the owner who typed it.
+        expect(await returnWith(f.ownerA, id, { closing: { bw: 6000, colour: 1000 } })).toBeNull();
+        await asPostgres(db);
+        const { rows } = await db.query(
+          `select r.rolled_over, r.rollover_confirmed_by from public.meter_readings r
+           join public.meter_submissions s on s.id = r.submission_id join public.billing_cycle_tickets t on t.id = s.ticket_id
+           where t.agreement_id = $1 and r.counter_type = 'COLOUR'`,
+          [id],
+        );
+        expect(rows[0]).toEqual({ rolled_over: true, rollover_confirmed_by: f.ownerA });
       });
     });
 
@@ -293,12 +355,11 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
       await isolated(db, async () => {
         await asService(db);
         const { agreement_id: id } = await assign(f.ownerA, f.machineASpare, f.custA2, monoTerms());
-        const reassign = (customer: string) =>
-          sqlError(db, "select public.rpc_reassign_machine($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7::date)", [
+        const reassign = async (customer: string) =>
+          sqlError(db, "select public.rpc_reassign_machine($1, $2, $3::jsonb, $4, $5::jsonb, $6::date)", [
             f.ownerA,
             id,
-            JSON.stringify({ bw: 1200 }),
-            "Moved to another customer",
+            JSON.stringify((await returnPayload(db, id, today, { closing: { bw: 1200 }, reason: "Moved to another customer" })).payload),
             customer,
             JSON.stringify(monoTerms({ initial_bw_reading: 1200 })),
             today,
@@ -308,12 +369,14 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
         await asPostgres(db);
         expect((await agreement(id)).status).toBe("ACTIVE");
         expect(await machineStatus(f.machineASpare)).toBe("RENTED");
+        expect(await count(db, "select 1 from public.invoices where agreement_id = $1", [id])).toBe(0);
 
         await asService(db);
         expect(await reassign(f.custA1)).toBeNull();
         await asPostgres(db);
         expect((await agreement(id)).status).toBe("TERMINATED");
         expect(await machineStatus(f.machineASpare)).toBe("RENTED");
+        expect(await count(db, "select 1 from public.invoices where agreement_id = $1 and status = 'AWAITING_PAYMENT'", [id])).toBe(1);
         expect(
           await count(db, "select 1 from public.rental_agreements where machine_id = $1 and customer_id = $2 and status = 'ACTIVE'", [
             f.machineASpare,
@@ -338,11 +401,9 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
         expect(r.effective_from_cycle_no).toBe(3);
 
         await asPostgres(db);
-        const a = await db.query("select first_billing_date::text as fbd, cycle_length_days as len from public.rental_agreements where id = $1", [
-          f.agrA1Mono,
-        ]);
+        const a = await db.query("select first_billing_date::text as fbd from public.rental_agreements where id = $1", [f.agrA1Mono]);
         // Same answer as the TypeScript calendar.
-        expect(cycleInProgress(a.rows[0].fbd, a.rows[0].len, today) + 1).toBe(3);
+        expect(cycleInProgress(a.rows[0].fbd, today) + 1).toBe(3);
         expect((await agreement(f.agrA1Mono)).monthly_commitment_cents).toBe(500_000); // current terms unchanged
         expect(
           (await db.query("select commitment_cents::int as c from public.billing_cycle_tickets where id = $1", [f.tickets.a1Mono])).rows[0].c,

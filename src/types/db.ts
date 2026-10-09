@@ -51,6 +51,8 @@ export type Database = {
           due_days: number
           effective_from_cycle_no: number
           id: string
+          late_fee_cents: number | null
+          late_fee_mode: Database["public"]["Enums"]["late_fee_mode"]
           monthly_commitment_cents: number
           note: string | null
           owner_id: string
@@ -67,6 +69,8 @@ export type Database = {
           due_days: number
           effective_from_cycle_no: number
           id?: string
+          late_fee_cents?: number | null
+          late_fee_mode?: Database["public"]["Enums"]["late_fee_mode"]
           monthly_commitment_cents: number
           note?: string | null
           owner_id: string
@@ -83,6 +87,8 @@ export type Database = {
           due_days?: number
           effective_from_cycle_no?: number
           id?: string
+          late_fee_cents?: number | null
+          late_fee_mode?: Database["public"]["Enums"]["late_fee_mode"]
           monthly_commitment_cents?: number
           note?: string | null
           owner_id?: string
@@ -176,6 +182,8 @@ export type Database = {
           id: string
           is_late: boolean
           last_reminder_at: string | null
+          late_fee_cents: number | null
+          late_fee_mode: Database["public"]["Enums"]["late_fee_mode"]
           machine_id: string
           machine_type: Database["public"]["Enums"]["machine_type"]
           owner_id: string
@@ -211,6 +219,8 @@ export type Database = {
           id?: string
           is_late?: boolean
           last_reminder_at?: string | null
+          late_fee_cents?: number | null
+          late_fee_mode?: Database["public"]["Enums"]["late_fee_mode"]
           machine_id: string
           machine_type: Database["public"]["Enums"]["machine_type"]
           owner_id: string
@@ -246,6 +256,8 @@ export type Database = {
           id?: string
           is_late?: boolean
           last_reminder_at?: string | null
+          late_fee_cents?: number | null
+          late_fee_mode?: Database["public"]["Enums"]["late_fee_mode"]
           machine_id?: string
           machine_type?: Database["public"]["Enums"]["machine_type"]
           owner_id?: string
@@ -315,6 +327,7 @@ export type Database = {
       }
       credits: {
         Row: {
+          agreement_id: string | null
           amount_cents: number
           applied_at: string | null
           applied_to_invoice_id: string | null
@@ -323,8 +336,11 @@ export type Database = {
           customer_id: string
           id: string
           kind: Database["public"]["Enums"]["credit_kind"]
+          method: Database["public"]["Enums"]["payment_method"] | null
           owner_id: string
           reason: string
+          received_on: string | null
+          reference: string | null
           refunded_at: string | null
           source_invoice_id: string | null
           source_payment_id: string | null
@@ -332,6 +348,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          agreement_id?: string | null
           amount_cents: number
           applied_at?: string | null
           applied_to_invoice_id?: string | null
@@ -340,8 +357,11 @@ export type Database = {
           customer_id: string
           id?: string
           kind: Database["public"]["Enums"]["credit_kind"]
+          method?: Database["public"]["Enums"]["payment_method"] | null
           owner_id: string
           reason: string
+          received_on?: string | null
+          reference?: string | null
           refunded_at?: string | null
           source_invoice_id?: string | null
           source_payment_id?: string | null
@@ -349,6 +369,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          agreement_id?: string | null
           amount_cents?: number
           applied_at?: string | null
           applied_to_invoice_id?: string | null
@@ -357,8 +378,11 @@ export type Database = {
           customer_id?: string
           id?: string
           kind?: Database["public"]["Enums"]["credit_kind"]
+          method?: Database["public"]["Enums"]["payment_method"] | null
           owner_id?: string
           reason?: string
+          received_on?: string | null
+          reference?: string | null
           refunded_at?: string | null
           source_invoice_id?: string | null
           source_payment_id?: string | null
@@ -366,6 +390,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "credits_agreement_fkey"
+            columns: ["agreement_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "rental_agreements"
+            referencedColumns: ["id", "owner_id"]
+          },
           {
             foreignKeyName: "credits_applied_to_fkey"
             columns: ["applied_to_invoice_id", "owner_id"]
@@ -471,6 +502,107 @@ export type Database = {
             columns: ["id", "owner_id"]
             isOneToOne: true
             referencedRelation: "profiles"
+            referencedColumns: ["id", "owner_id"]
+          },
+        ]
+      }
+      deposit_transactions: {
+        Row: {
+          agreement_id: string
+          amount_cents: number
+          created_at: string
+          created_by: string | null
+          customer_id: string
+          id: string
+          invoice_id: string | null
+          kind: Database["public"]["Enums"]["deposit_transaction_kind"]
+          method: Database["public"]["Enums"]["payment_method"] | null
+          note: string | null
+          occurred_on: string
+          owner_id: string
+          payment_id: string | null
+          reference: string | null
+        }
+        Insert: {
+          agreement_id: string
+          amount_cents: number
+          created_at?: string
+          created_by?: string | null
+          customer_id: string
+          id?: string
+          invoice_id?: string | null
+          kind: Database["public"]["Enums"]["deposit_transaction_kind"]
+          method?: Database["public"]["Enums"]["payment_method"] | null
+          note?: string | null
+          occurred_on: string
+          owner_id: string
+          payment_id?: string | null
+          reference?: string | null
+        }
+        Update: {
+          agreement_id?: string
+          amount_cents?: number
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string
+          id?: string
+          invoice_id?: string | null
+          kind?: Database["public"]["Enums"]["deposit_transaction_kind"]
+          method?: Database["public"]["Enums"]["payment_method"] | null
+          note?: string | null
+          occurred_on?: string
+          owner_id?: string
+          payment_id?: string | null
+          reference?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deposit_transactions_agreement_fkey"
+            columns: ["agreement_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "rental_agreements"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_invoice_fkey"
+            columns: ["invoice_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_payment_fkey"
+            columns: ["payment_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
             referencedColumns: ["id", "owner_id"]
           },
         ]
@@ -671,6 +803,7 @@ export type Database = {
         Row: {
           amount_cents: number
           created_at: string
+          credit_id: string | null
           description: string
           id: string
           invoice_id: string
@@ -683,6 +816,7 @@ export type Database = {
         Insert: {
           amount_cents: number
           created_at?: string
+          credit_id?: string | null
           description: string
           id?: string
           invoice_id: string
@@ -695,6 +829,7 @@ export type Database = {
         Update: {
           amount_cents?: number
           created_at?: string
+          credit_id?: string | null
           description?: string
           id?: string
           invoice_id?: string
@@ -705,6 +840,13 @@ export type Database = {
           sort_order?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "invoice_lines_credit_fkey"
+            columns: ["credit_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "credits"
+            referencedColumns: ["id", "owner_id"]
+          },
           {
             foreignKeyName: "invoice_lines_invoice_fkey"
             columns: ["invoice_id", "owner_id"]
@@ -1523,7 +1665,6 @@ export type Database = {
       owner_settings: {
         Row: {
           created_at: string
-          default_cycle_length_days: number | null
           estimated_billing_enabled: boolean | null
           grace_period_days: number | null
           late_fee_cents: number | null
@@ -1553,7 +1694,6 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          default_cycle_length_days?: number | null
           estimated_billing_enabled?: boolean | null
           grace_period_days?: number | null
           late_fee_cents?: number | null
@@ -1583,7 +1723,6 @@ export type Database = {
         }
         Update: {
           created_at?: string
-          default_cycle_length_days?: number | null
           estimated_billing_enabled?: boolean | null
           grace_period_days?: number | null
           late_fee_cents?: number | null
@@ -1884,7 +2023,6 @@ export type Database = {
       }
       platform_settings: {
         Row: {
-          default_cycle_length_days: number
           estimated_billing_enabled: boolean
           grace_period_days: number
           id: boolean
@@ -1919,7 +2057,6 @@ export type Database = {
           weekly_summary_dow: number
         }
         Insert: {
-          default_cycle_length_days?: number
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -1954,7 +2091,6 @@ export type Database = {
           weekly_summary_dow?: number
         }
         Update: {
-          default_cycle_length_days?: number
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -2071,7 +2207,6 @@ export type Database = {
           colour_rate_cents: number | null
           created_at: string
           customer_id: string
-          cycle_length_days: number
           due_days: number
           end_date: string | null
           first_billing_date: string
@@ -2079,11 +2214,14 @@ export type Database = {
           initial_bw_reading: number
           initial_colour_reading: number | null
           installation_location: string | null
+          late_fee_cents: number | null
+          late_fee_mode: Database["public"]["Enums"]["late_fee_mode"]
           machine_id: string
           monthly_commitment_cents: number
           next_cycle_date: string
           next_cycle_no: number
           owner_id: string
+          return_idempotency_key: string | null
           start_date: string
           status: Database["public"]["Enums"]["agreement_status"]
           terminated_at: string | null
@@ -2100,7 +2238,6 @@ export type Database = {
           colour_rate_cents?: number | null
           created_at?: string
           customer_id: string
-          cycle_length_days?: number
           due_days?: number
           end_date?: string | null
           first_billing_date: string
@@ -2108,11 +2245,14 @@ export type Database = {
           initial_bw_reading?: number
           initial_colour_reading?: number | null
           installation_location?: string | null
+          late_fee_cents?: number | null
+          late_fee_mode?: Database["public"]["Enums"]["late_fee_mode"]
           machine_id: string
           monthly_commitment_cents: number
           next_cycle_date?: string
           next_cycle_no?: number
           owner_id: string
+          return_idempotency_key?: string | null
           start_date: string
           status?: Database["public"]["Enums"]["agreement_status"]
           terminated_at?: string | null
@@ -2129,7 +2269,6 @@ export type Database = {
           colour_rate_cents?: number | null
           created_at?: string
           customer_id?: string
-          cycle_length_days?: number
           due_days?: number
           end_date?: string | null
           first_billing_date?: string
@@ -2137,11 +2276,14 @@ export type Database = {
           initial_bw_reading?: number
           initial_colour_reading?: number | null
           installation_location?: string | null
+          late_fee_cents?: number | null
+          late_fee_mode?: Database["public"]["Enums"]["late_fee_mode"]
           machine_id?: string
           monthly_commitment_cents?: number
           next_cycle_date?: string
           next_cycle_no?: number
           owner_id?: string
+          return_idempotency_key?: string | null
           start_date?: string
           status?: Database["public"]["Enums"]["agreement_status"]
           terminated_at?: string | null
@@ -2542,6 +2684,48 @@ export type Database = {
       }
     }
     Views: {
+      agreement_deposit_balances: {
+        Row: {
+          agreement_id: string | null
+          customer_id: string | null
+          deducted_cents: number | null
+          held_cents: number | null
+          owner_id: string | null
+          received_cents: number | null
+          refunded_cents: number | null
+          retained_cents: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deposit_transactions_agreement_fkey"
+            columns: ["agreement_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "rental_agreements"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "deposit_transactions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_balances: {
         Row: {
           customer_id: string | null
@@ -2575,7 +2759,6 @@ export type Database = {
       }
       owner_settings_effective: {
         Row: {
-          default_cycle_length_days: number | null
           estimated_billing_enabled: boolean | null
           grace_period_days: number | null
           late_fee_cents: number | null
@@ -2676,9 +2859,8 @@ export type Database = {
         Args: {
           p_actor_id: string
           p_agreement_id: string
-          p_closing: Json
           p_customer_id: string
-          p_reason: string
+          p_return: Json
           p_terms: Json
           p_today: string
         }
@@ -2714,8 +2896,7 @@ export type Database = {
         Args: {
           p_actor_id: string
           p_agreement_id: string
-          p_closing: Json
-          p_reason: string
+          p_return: Json
           p_today: string
         }
         Returns: Json
@@ -2734,12 +2915,32 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_set_invoice_credit: {
+        Args: {
+          p_actor_id: string
+          p_credit_id: string
+          p_include: boolean
+          p_invoice: Json
+          p_invoice_id: string
+          p_note: string
+        }
+        Returns: Json
+      }
       rpc_set_machine_status: {
         Args: {
           p_actor_id: string
           p_machine_id: string
           p_reason: string
           p_status: Database["public"]["Enums"]["machine_status"]
+        }
+        Returns: Json
+      }
+      rpc_settle_deposit: {
+        Args: {
+          p_actor_id: string
+          p_agreement_id: string
+          p_settlement: Json
+          p_today: string
         }
         Returns: Json
       }
@@ -2841,6 +3042,11 @@ export type Database = {
         | "ADVANCE"
         | "MANUAL"
       credit_status: "AVAILABLE" | "APPLIED" | "REFUNDED"
+      deposit_transaction_kind:
+        | "RECEIVED"
+        | "DEDUCTED"
+        | "REFUNDED"
+        | "RETAINED"
       dispute_status: "OPEN" | "RESOLVED" | "REJECTED"
       idempotency_scope:
         | "METER_SUBMISSION"
@@ -2865,6 +3071,7 @@ export type Database = {
         | "REJECTED"
         | "CANCELLED"
       invoice_type: "NORMAL" | "ESTIMATED"
+      late_fee_mode: "OWNER_DEFAULT" | "CUSTOM" | "NONE"
       machine_status: "AVAILABLE" | "RENTED" | "UNDER_REPAIR" | "RETIRED"
       machine_type: "MONO" | "COLOUR"
       meter_submission_status:
@@ -2881,6 +3088,7 @@ export type Database = {
         | "CHEQUE"
         | "ONLINE"
         | "OTHER"
+        | "SECURITY_DEPOSIT"
       payment_source: "CUSTOMER_SLIP" | "OWNER_MANUAL"
       payment_status: "SUBMITTED" | "ACCEPTED" | "REJECTED" | "PARTIAL"
       reading_source: "CUSTOMER" | "OWNER_MANUAL"
@@ -3062,6 +3270,12 @@ export const Constants = {
         "MANUAL",
       ],
       credit_status: ["AVAILABLE", "APPLIED", "REFUNDED"],
+      deposit_transaction_kind: [
+        "RECEIVED",
+        "DEDUCTED",
+        "REFUNDED",
+        "RETAINED",
+      ],
       dispute_status: ["OPEN", "RESOLVED", "REJECTED"],
       idempotency_scope: [
         "METER_SUBMISSION",
@@ -3089,6 +3303,7 @@ export const Constants = {
         "CANCELLED",
       ],
       invoice_type: ["NORMAL", "ESTIMATED"],
+      late_fee_mode: ["OWNER_DEFAULT", "CUSTOM", "NONE"],
       machine_status: ["AVAILABLE", "RENTED", "UNDER_REPAIR", "RETIRED"],
       machine_type: ["MONO", "COLOUR"],
       meter_submission_status: [
@@ -3106,6 +3321,7 @@ export const Constants = {
         "CHEQUE",
         "ONLINE",
         "OTHER",
+        "SECURITY_DEPOSIT",
       ],
       payment_source: ["CUSTOMER_SLIP", "OWNER_MANUAL"],
       payment_status: ["SUBMITTED", "ACCEPTED", "REJECTED", "PARTIAL"],

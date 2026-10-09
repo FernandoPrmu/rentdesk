@@ -16,11 +16,11 @@ const MONO_SUBMISSION = buildMeterSubmission(
       bwRateCents: 250,
       colourIncluded: null,
       colourRateCents: null,
-      cycleLengthDays: 30,
     },
     cyclesCovered: 1,
     counters: { BW: { known: [{ value: 5000, at: "2026-01-01T00:00:00Z", source: "INITIAL" }], counterMax: null, history: [] } },
     estimateCredits: [],
+    credits: [],
   },
   { BW: 6000 },
 );
@@ -63,12 +63,14 @@ describe.skipIf(!DB_URL)("workflow functions (linked dev database, rolled back)"
       const replay = await db.query("select app.open_billing_cycle($1, 1, now()) as r", [f.agrA1Mono]);
       expect(replay.rows[0].r).toMatchObject({ ticket_id: f.tickets.a1Mono, replayed: true });
 
-      // The calendar moved on by exactly one cycle (30 days), independent of when tickets close.
+      // The calendar moved on by exactly one cycle (one month), independent of when tickets close.
       const { rows } = await db.query(
-        "select next_cycle_no, next_cycle_date - start_date as days from public.rental_agreements where id = $1",
+        `select next_cycle_no, next_cycle_date::text as next, (first_billing_date + interval '1 month')::date::text as expected
+         from public.rental_agreements where id = $1`,
         [f.agrA1Mono],
       );
-      expect(rows[0]).toMatchObject({ next_cycle_no: 2, days: 60 });
+      expect(rows[0].next_cycle_no).toBe(2);
+      expect(rows[0].next).toBe(rows[0].expected);
     });
   });
 

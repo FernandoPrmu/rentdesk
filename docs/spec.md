@@ -915,3 +915,16 @@ Ciigus Software  |  Confidential  |  Page
 | BRD-07 | Owner can preview a sample invoice before saving template changes. | Should |
 
 Note: tenant isolation stays as one shared schema with owner_id + RLS (no per-company schemas).
+
+# 18. Additional Requirements (Client decisions)
+
+Agreed with the client on 9 October 2026 after reviewing `docs/decisions.md`. They also change three earlier rules: billing cycles are **monthly** on the day of the first billing date, using the last day of shorter months without drifting (decision 1; replaces "every 30 days" in 4.6 TKT-01 and 5.5); customer credits are **added automatically** to every new invoice and the owner may remove one before confirming (decision 13; PAY-12); and a proration on return uses the real number of days of that cycle (decision 5).
+
+| ID | Requirement | Priority |
+| --- | --- | --- |
+| DEP-01 | When assigning a machine, the owner can record money received upfront (optional section): type (security deposit or advance payment), amount, date received (past dates allowed for rentals already running), payment method, reference and note; several entries per agreement. A security deposit is held separately, never as a credit and never applied to normal bills; "Deposit held: Rs. X" is shown on the agreement, the owner's customer profile and the customer's Machines tab. | Must |
+| DEP-02 | An advance payment becomes a customer credit (kind Advance) and is taken off the next invoices automatically; the owner sees it in review and can remove it from a draft before confirming (it stays available), recorded in the audit log. | Must |
+| DEP-03 | On return the owner sees the deposit held and the unpaid balance and can, in one atomic, audited step: pay the unpaid balance from the deposit (recorded as payments of method "From security deposit" against those invoices), refund the remainder (refund date, method, reference) and keep part of it with a required reason. Pay + refund + keep must always equal the deposit held. The owner may instead keep holding the deposit. | Must |
+| DEP-04 | A deposit kept at return can be settled later from the agreement page with the same rules and checks. Returned agreements whose deposit is still held are listed as "Deposits to settle" on the owner dashboard and the customer profile. | Must |
+| LATE-01 | Each agreement has a late fee setting: use the owner's default (default), a custom amount, or no late fee. It can be set on the assign form and the agreement page and is kept in the terms history. The effective late fee is the agreement's setting, then the owner's settings, then the platform default; it stays a fixed amount charged once per unpaid invoice after the grace period, never while a slip awaits verification or the invoice is disputed. | Should |
+| RET-01 | A machine can be returned (or reassigned) while invoices are unpaid. The owner enters the closing readings; the system creates the final invoice with the billing engine (prorated by the real days of the cycle, or the full month, as the owner chooses) and the machine becomes Available. Unpaid invoices stay on the customer's account; the customer can still sign in, see the balance and upload payment slips. A return is blocked, with a clear message, only while a meter reading is waiting for the owner's review. | Must |

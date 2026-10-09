@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0014`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0017`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -33,8 +33,8 @@ and workflow functions. It is **not** exposed through the Data API.
 | Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee, login lockout and session timeout |
 | | `owner_settings` | Per-owner overrides (null = inherit); view `owner_settings_effective` merges them |
 | Fleet | `machines` | Brand, model, serial, `MONO`/`COLOUR`, status, counter maximum (rollover) |
-| | `rental_agreements` | Current terms, installation, initial/closing readings, `first_billing_date`, cycle calendar (`next_cycle_no/date`). `billing_day` is **unused** (cycles run every `cycle_length_days`) |
-| | `agreement_terms_history` | Every version of the pricing terms (commitment, included copies, rates, due days), who changed it, when, and the cycle it applies from. Append-only |
+| | `rental_agreements` | Current terms, installation, initial/closing readings, `first_billing_date`, cycle calendar (`next_cycle_no/date`), `billing_day` (the first billing date's day of the month; cycles are monthly), late fee setting, return idempotency key |
+| | `agreement_terms_history` | Every version of the pricing terms (commitment, included copies, rates, due days, late fee setting), who changed it, when, and the cycle it applies from. Append-only |
 | | `meter_baselines` | New baseline after a meter reset or replacement |
 | Billing cycle | `billing_cycle_tickets` | One per agreement per cycle (unique `(agreement_id, cycle_no)`); terms snapshot |
 | | `ticket_events` | Every transition: actor, from, to, reason |
@@ -47,7 +47,8 @@ and workflow functions. It is **not** exposed through the Data API.
 | Payments | `payments` | Customer slips and owner-recorded cash/cheque; duplicate flag |
 | | `payment_slips` | File path, SHA-256, MIME type, size, retention |
 | | `disputes` | Invoice disputes |
-| | `credits` | Overpayments, credits from cancelled invoices, advances |
+| | `credits` | Overpayments, credits from cancelled invoices, advances (with agreement, date received, method, reference). CREDIT invoice lines point at the credit they use (`invoice_lines.credit_id`) |
+| | `deposit_transactions` | Security deposit ledger per agreement: received, deducted (paid an invoice), refunded, retained. Append-only, never below zero |
 | Service | `service_requests` / `service_request_history` | Requests and their status trail (trigger-written) |
 | Cross-cutting | `notifications` | In-app centre and email/SMS outbox (delivery status) |
 | | `notification_templates` | Global (`owner_id` null) and per-owner templates |
@@ -55,6 +56,7 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `login_attempts` | Rate limiting / lockout input |
 | | `audit_logs` | Append-only audit trail, written by triggers and `app.write_audit()` |
 | Views | `customer_balances` | Outstanding amount per customer: issued, unpaid invoices minus `amount_paid_cents` (security invoker, so RLS applies). Credits are not netted yet |
+| | `agreement_deposit_balances` | Deposit received / deducted / refunded / retained / held per agreement (security invoker) |
 
 ```mermaid
 erDiagram
@@ -111,6 +113,7 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | meter photos (rows and files) | rows only | read | — | — |
 | invoices, lines | read all | read | read own, **not DRAFT/REJECTED** | — |
 | payments, slips, disputes, credits | read all | read | read own | — |
+| deposit transactions, deposit balances (view) | read all | read | read own | — |
 | service requests + history | read all | read | read own | — |
 | notifications | read all | read tenant delivery log | read own; set `read_at` | — |
 | templates | read all; manage global | read global + own; manage own | — | — |
@@ -126,6 +129,7 @@ using the service role:
 - meter submissions, readings and photos
 - invoices, invoice lines and invoice counters
 - payments, payment slips, disputes and credits
+- deposit transactions (append-only even for the service role)
 - service requests and their history
 - inserts into `notifications`
 - `idempotency_keys`, `login_attempts` and `audit_logs`
@@ -153,7 +157,7 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 
 | Function | Effect |
 | --- | --- |
-| `open_billing_cycle` | Creates ticket + event + notifications; advances the cycle calendar; replays safely |
+| `open_billing_cycle` | Creates ticket + event + notifications; snapshots terms, late fee and the real days of the cycle; advances the monthly calendar; replays safely |
 | `submit_meter_reading` | Submission + readings + photo row + draft invoice/lines → `PENDING_OWNER_REVIEW` (idempotent) |
 | `confirm_meter_submission` | Assigns the invoice number, issues the invoice, marks the photo for deletion → `AWAITING_PAYMENT` |
 | `reject_meter_submission` | Reason required; draft → `REJECTED`; → `METER_REQUESTED` |
@@ -172,10 +176,12 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `update_owner` / `update_customer` | Account details with the same parent rule |
 | `save_company_profile` | Owner only. Upserts branding; the first save sets `onboarding_completed_at` (BRD-01) |
 | `assign_machine` | Owner of both the machine and the customer (another tenant's customer is "not found"). Machine `AVAILABLE`, customer `ACTIVE`, first billing date ≥ today (passed in) and after the start date, colour terms only for colour machines, whole non-negative readings. Creates the agreement (terms version 1 by trigger), machine → `RENTED`, `next_cycle_no = 1`, `next_cycle_date = first_billing_date`, audit `MACHINE_ASSIGNED`, customer notified |
-| `return_machine` | Reason and closing reading(s) required; lower than the last known reading only on a counter with a maximum (rollover). `RD409 RETURN_BLOCKED:[…]` while a ticket is open or an invoice is unpaid. Agreement → `TERMINATED`, machine → `AVAILABLE`, audit `MACHINE_RETURNED` with the reason |
-| `reassign_machine` | `return_machine` + `assign_machine` in one transaction |
+| `return_machine` | Reason and closing reading(s) required; lower than the last known reading only on a counter with a maximum (rollover). `RD409 RETURN_BLOCKED:[…]` only while a meter reading waits for review (unpaid invoices do not block, RET-01). Issues the final invoice built by the billing engine (`app.final_cycle` facts, `app.verify_final_invoice`; closing readings stored as a confirmed owner reading), cancels open meter requests billed in it, settles the deposit or keeps holding it, agreement → `TERMINATED`, machine → `AVAILABLE`, audit `MACHINE_RETURNED`. Replays a retried request (`return_idempotency_key`) |
+| `reassign_machine` | `return_machine` (same rules) + `assign_machine` in one transaction |
 | `update_agreement_terms` | New terms version from the cycle after the one in progress (`app.cycle_in_progress + 1`); installation location and end date change at once; customer notified |
 | `set_machine_status` | `AVAILABLE` / `UNDER_REPAIR` / `RETIRED` with a reason (audit). Never `RENTED`, never while rented |
+| `settle_deposit` | Returned agreement only (settle later, DEP-04). Same rules as at return (`apply_deposit_settlement`): deduct + refund + retain = held; deductions pay the agreement's unpaid invoices (no slip waiting, not disputed) oldest due first as accepted payments of method `SECURITY_DEPOSIT`, closing paid tickets; refund needs date and method; retain needs a reason. Audit `DEPOSIT_SETTLED`, customer notified |
+| `set_invoice_credit` | Rule 13: the owner removes a credit from a draft (or adds it back). Takes the engine's recalculation, checks only the customer-credit lines changed, swaps them; audit `INVOICE_CREDIT_REMOVED` / `RESTORED` |
 
 Audit triggers record the actor:
 
@@ -250,11 +256,12 @@ app's own per-account and per-IP limits above protect logins instead.
 
 ## Machines and agreements (migration 0014)
 
-- **Cycle calendar.** Cycle *n* is due on `first_billing_date + (n − 1) × cycle_length_days` and covers the
-  `cycle_length_days` before that date (cycle 1 never starts before `start_date`). The start date may be
-  in the past (existing rentals being migrated); the first billing date must be today or later, so no
-  ticket is ever opened for a period before it. `app.cycle_date` and `app.cycle_in_progress` mirror
-  `src/lib/agreements/cycle-calendar.ts`. `billing_day` is unused.
+- **Cycle calendar (monthly since 0017).** Cycle *n* is due on `first_billing_date + (n − 1) months`, on the same
+  day of the month (the last day of shorter months, then back to the original day: no drift). It covers the
+  days from cycle *n − 1*'s date to the day before its own (cycle 1 never starts before `start_date`). The
+  start date may be in the past (existing rentals being migrated); the first billing date must be today or
+  later. `app.cycle_date`, `app.cycle_days`, `app.cycle_in_progress` and `app.final_cycle` mirror
+  `src/lib/agreements/cycle-calendar.ts`. `billing_day` = the first billing date's day.
 - **Terms changes (AGR-02).** The agreement row holds the terms in force. An edit writes a new
   `agreement_terms_history` version effective from the next cycle; `open_billing_cycle` snapshots the
   latest version effective for the cycle it opens (and copies it onto the agreement). Open tickets keep
@@ -263,6 +270,26 @@ app's own per-account and per-IP limits above protect logins instead.
   agreement ends; its type and tenant cannot change once rented. An agreement needs an `AVAILABLE`
   machine; customer, machine, start date, first billing date, cycle length and initial readings are fixed;
   a terminated agreement stays terminated. One live agreement per machine (partial unique index).
+
+## Client decisions (migrations 0016–0017)
+
+- **Payment method `SECURITY_DEPOSIT`** ("From security deposit") for invoices paid from a deposit; `DEPOSIT`
+  stays a cash deposit at the bank. Own migration (0016): a new enum value is usable only once committed.
+- **Credits (rule 13).** `app.available_credits(customer, exclude_invoice)`: credits with something left, oldest
+  first; what is left = amount − CREDIT lines on live invoices (drafts reserve). Every new invoice must list
+  exactly that set minus the credits the owner removed (`calculation.credits` / `credits_excluded`), or it is
+  refused with `RD409` (recalculate); the customer's credit rows are locked while checking. A trigger keeps
+  `credits.status` in step: `APPLIED` once issued invoices use all of it, `AVAILABLE` again if such an invoice
+  is cancelled.
+- **Late fee (LATE-01).** `late_fee_mode` (`OWNER_DEFAULT` / `CUSTOM` / `NONE`) + `late_fee_cents` on the
+  agreement, every terms version and every ticket. The amount in force is resolved in TypeScript
+  (`resolveLateFee`); the daily job that charges it is still to come.
+- **Deposits.** `deposit_transactions` (RLS: owner own tenant, customer own, admin all; clients read only;
+  service role select + insert, no update/delete). A trigger refuses an entry for another customer than the
+  agreement's, or one that would take the balance below zero. Upfront money is recorded by `assign_machine`
+  (`p_terms.upfront`): `SECURITY_DEPOSIT` → `RECEIVED` entry, `ADVANCE_PAYMENT` → `credits` row of kind `ADVANCE`.
+- **Service-role reads.** New tables get no automatic grants in this project; 0017 grants the service role
+  `select` on `agreement_terms_history` (the return loader reads the terms in force) and on the deposit tables.
 
 ## Storage
 

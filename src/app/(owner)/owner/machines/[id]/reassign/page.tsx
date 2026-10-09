@@ -9,14 +9,16 @@ import { PageHeader } from "@/components/portal/portal-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { listCustomers } from "@/lib/accounts/queries";
 import { uuidSchema } from "@/lib/accounts/schemas";
-import { todayInColombo } from "@/lib/agreements/cycle-calendar";
-import { getAgreement, getLastKnownReadings, getReturnBlockers } from "@/lib/agreements/queries";
+import { getAgreement, getReturnBlockers } from "@/lib/agreements/queries";
+import { getReturnFormData } from "@/lib/agreements/return-form";
 import { requireUser } from "@/lib/auth/current-user";
 import { getMachine } from "@/lib/machines/queries";
+import { getLateFeeSources } from "@/lib/settings/billing";
+import { describeOwnerDefault } from "@/lib/settings/billing-schema";
 
 export const metadata: Metadata = { title: "Reassign machine" };
 
-/** MAC-04: return + new assignment in one guided form, saved in one transaction. */
+/** MAC-04: return (same rules as a return: final invoice, deposit) + new assignment, saved in one transaction. */
 export default async function ReassignMachinePage({ params }: PageProps<"/owner/machines/[id]/reassign">) {
   await requireUser("OWNER");
   const { id } = await params;
@@ -35,27 +37,24 @@ export default async function ReassignMachinePage({ params }: PageProps<"/owner/
     );
   }
 
-  const [blockers, lastReadings, customers] = await Promise.all([
-    getReturnBlockers(agreement.id),
-    getLastKnownReadings(agreement),
-    listCustomers({ status: "ACTIVE" }),
-  ]);
+  const blockers = await getReturnBlockers(agreement.id);
+  const [data, customers, lateFee] =
+    blockers.length > 0 ? [null, [], null] : await Promise.all([getReturnFormData(agreement), listCustomers({ status: "ACTIVE" }), getLateFeeSources()]);
 
   return (
     <div className="max-w-2xl space-y-4">
       <BackLink href={`/owner/machines/${id}`} label={title} />
       <PageHeader title="Reassign machine" description={`${title} · ${machine.serial_no}`} />
-      {blockers.length > 0 ? (
+      {!data || !lateFee ? (
         <ReturnBlockers blockers={blockers} />
       ) : (
         <Card>
           <CardContent>
             <ReassignForm
-              type={machine.type}
-              today={todayInColombo()}
+              data={data}
               currentCustomer={agreement.customer.name}
               customers={customers.filter((c) => c.id !== agreement.customer_id).map((c) => ({ id: c.id, name: c.name }))}
-              lastReadings={lastReadings}
+              ownerLateFee={describeOwnerDefault(lateFee)}
               action={reassignMachineAction.bind(null, id, agreement.id)}
             />
           </CardContent>

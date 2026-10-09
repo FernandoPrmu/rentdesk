@@ -8,13 +8,14 @@ import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
-import { getAgreement, getLastKnownReadings, getReturnBlockers } from "@/lib/agreements/queries";
+import { type AgreementDetail, getAgreement, getReturnBlockers } from "@/lib/agreements/queries";
+import { getReturnFormData } from "@/lib/agreements/return-form";
 import { requireUser } from "@/lib/auth/current-user";
 import { getMachine } from "@/lib/machines/queries";
 
 export const metadata: Metadata = { title: "Return machine" };
 
-/** MAC-04: closing readings + reason; blocked while billing is open. */
+/** MAC-04 / RET-01: closing readings, the final invoice and the deposit; blocked only while a meter reading waits for review. */
 export default async function ReturnMachinePage({ params }: PageProps<"/owner/machines/[id]/return">) {
   await requireUser("OWNER");
   const { id } = await params;
@@ -36,13 +37,14 @@ export default async function ReturnMachinePage({ params }: PageProps<"/owner/ma
   );
 }
 
-async function ReturnBody({ agreement }: { agreement: NonNullable<Awaited<ReturnType<typeof getAgreement>>> }) {
-  const [blockers, lastReadings] = await Promise.all([getReturnBlockers(agreement.id), getLastKnownReadings(agreement)]);
+async function ReturnBody({ agreement }: { agreement: AgreementDetail }) {
+  const blockers = await getReturnBlockers(agreement.id);
   if (blockers.length > 0) return <ReturnBlockers blockers={blockers} />;
+  const data = await getReturnFormData(agreement);
   return (
     <Card>
       <CardContent>
-        <ReturnForm type={agreement.machine.type} lastReadings={lastReadings} action={returnMachineAction.bind(null, agreement.id)} />
+        <ReturnForm data={data} action={returnMachineAction.bind(null, agreement.id)} />
       </CardContent>
     </Card>
   );

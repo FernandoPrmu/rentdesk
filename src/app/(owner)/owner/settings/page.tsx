@@ -1,4 +1,4 @@
-import { Building2, ChevronRight, KeyRound } from "lucide-react";
+import { Building2, ChevronRight, KeyRound, Receipt } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -10,6 +10,7 @@ export const metadata: Metadata = { title: "Settings" };
 
 const LINKS = [
   { href: "/owner/settings/company", label: "Company details and logo", icon: Building2 },
+  { href: "/owner/settings/billing", label: "Billing: late fee", icon: Receipt },
   { href: "/change-password", label: "Change password", icon: KeyRound },
 ];
 

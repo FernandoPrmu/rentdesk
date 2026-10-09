@@ -2,10 +2,12 @@ import { Plus, Users } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { DepositsToSettle } from "@/components/deposits/deposits-to-settle";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
+import { listDepositsToSettle } from "@/lib/deposits/queries";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Home" };
@@ -13,6 +15,7 @@ export const metadata: Metadata = { title: "Home" };
 // Placeholder dashboard: the owner dashboard (RPT-01) comes with billing cycles.
 export default async function OwnerHomePage() {
   const user = await requireUser("OWNER");
+  const deposits = await listDepositsToSettle();
   return (
     <>
       <PageHeader title={`Hello, ${user.full_name || user.username}`} description="Your rental business at a glance" />
@@ -29,6 +32,15 @@ export default async function OwnerHomePage() {
             <Link href="/owner/customers/new" className={cn(buttonVariants(), "h-12 gap-2 text-base")}>
               <Plus className="size-5" aria-hidden /> New customer
             </Link>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Deposits to settle</CardTitle>
+            <CardDescription>Security deposits kept when a machine came back.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <DepositsToSettle items={deposits} empty="Nothing to settle." />
           </CardContent>
         </Card>
         <Card>

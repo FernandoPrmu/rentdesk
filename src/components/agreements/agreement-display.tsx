@@ -6,7 +6,7 @@ import type { ReturnBlocker, TermsVersion } from "@/lib/agreements/queries";
 import { describeVersions } from "@/lib/agreements/terms";
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
-import { INVOICE_STATUS_LABEL, TICKET_STATUS_LABEL } from "@/lib/status-labels";
+import { TICKET_STATUS_LABEL } from "@/lib/status-labels";
 
 /** Label / value pairs: stacked on a phone, two columns from sm up. */
 export function Facts({ items }: { items: [string, ReactNode][] }) {
@@ -29,9 +29,18 @@ export interface TermsValues {
   colour_included: number | null;
   colour_rate_cents: number | null;
   due_days: number;
+  late_fee_mode: string;
+  late_fee_cents: number | null;
 }
 
-export function termsFacts(t: TermsValues): [string, ReactNode][] {
+/** LATE-01 in words; `ownerDefault` explains "use my default". */
+export function lateFeeText(t: { late_fee_mode: string; late_fee_cents: number | null }, ownerDefault?: string): string {
+  if (t.late_fee_mode === "NONE") return "No late fee";
+  if (t.late_fee_mode === "CUSTOM" && t.late_fee_cents !== null) return `${formatRupees(t.late_fee_cents)} (this agreement)`;
+  return ownerDefault ? `Owner default: ${ownerDefault}` : "Owner default";
+}
+
+export function termsFacts(t: TermsValues, ownerDefault?: string): [string, ReactNode][] {
   const items: [string, ReactNode][] = [
     ["Monthly commitment", formatRupees(t.monthly_commitment_cents)],
     ["Included B&W copies", formatCount(t.bw_included)],
@@ -42,6 +51,7 @@ export function termsFacts(t: TermsValues): [string, ReactNode][] {
     items.push(["Colour excess rate", `${formatRupees(t.colour_rate_cents)} per copy`]);
   }
   items.push(["Days to pay", `${t.due_days} days`]);
+  items.push(["Late fee", lateFeeText(t, ownerDefault)]);
   return items;
 }
 
@@ -54,6 +64,7 @@ function versionTerms(v: TermsVersion) {
     parts.push(`${formatCount(v.colour_included)} colour incl., ${formatRupees(v.colour_rate_cents)} extra`);
   }
   parts.push(`pay in ${v.due_days} days`);
+  parts.push(`late fee: ${lateFeeText(v).toLowerCase()}`);
   return parts.join(" · ");
 }
 
@@ -92,7 +103,7 @@ export function TermsHistory({
   );
 }
 
-/** MAC-04: what must be resolved before a return, in plain words. */
+/** RET-01: only a meter reading waiting for review blocks a return. */
 export function ReturnBlockers({ blockers }: { blockers: ReturnBlocker[] }) {
   return (
     <div role="alert" className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
@@ -100,11 +111,14 @@ export function ReturnBlockers({ blockers }: { blockers: ReturnBlocker[] }) {
         <AlertTriangle className="size-5" aria-hidden />
         This machine cannot be returned yet
       </p>
-      <p>Resolve these first. Billing tickets and invoices are handled in the billing cycle screens.</p>
+      <p>
+        A meter reading is waiting for your review. Confirm or correct it first, so the final bill uses confirmed numbers. Unpaid invoices do not
+        stop a return.
+      </p>
       <ul className="list-disc space-y-1 pl-5">
         {blockers.map((b) => (
-          <li key={`${b.kind}-${b.id}`}>
-            {b.label}: {(b.kind === "ticket" ? TICKET_STATUS_LABEL : INVOICE_STATUS_LABEL)[b.status] ?? b.status}
+          <li key={b.id}>
+            {b.label}: {TICKET_STATUS_LABEL[b.status] ?? b.status}
           </li>
         ))}
       </ul>

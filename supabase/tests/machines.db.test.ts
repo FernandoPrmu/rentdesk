@@ -64,14 +64,6 @@ describe.skipIf(!DB_URL)("machines and agreements (linked dev database, rolled b
       JSON.stringify(terms),
       today,
     ]);
-  const returnError = (actor: string, agreement: string, closing: object, reason = "Customer closed the branch") =>
-    sqlError(db, "select public.rpc_return_machine($1, $2, $3::jsonb, $4, $5::date)", [
-      actor,
-      agreement,
-      JSON.stringify(closing),
-      reason,
-      today,
-    ]);
 
   async function agreement(id: string) {
     const { rows } = await db.query(

@@ -24,3 +24,35 @@ export const INVOICE_STATUS_LABEL: Record<string, string> = {
   REJECTED: "Rejected",
   CANCELLED: "Cancelled",
 };
+
+/** How money was paid (payments, refunds, money received upfront). */
+export const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  BANK_TRANSFER: "Bank transfer",
+  DEPOSIT: "Cash deposit at the bank",
+  CASH: "Cash",
+  CHEQUE: "Cheque",
+  ONLINE: "Online payment",
+  OTHER: "Other",
+  SECURITY_DEPOSIT: "From security deposit",
+};
+
+/** LATE-01: the agreement's late fee setting. */
+export const LATE_FEE_MODE_LABEL: Record<string, string> = {
+  OWNER_DEFAULT: "Use my default",
+  CUSTOM: "Custom amount",
+  NONE: "No late fee",
+};
+
+/** DEP-01/02: money received at assignment. */
+export const UPFRONT_TYPE_LABEL: Record<string, string> = {
+  SECURITY_DEPOSIT: "Security deposit",
+  ADVANCE_PAYMENT: "Advance payment",
+};
+
+/** Deposit ledger entries (DEP-03/04). */
+export const DEPOSIT_KIND_LABEL: Record<string, string> = {
+  RECEIVED: "Received",
+  DEDUCTED: "Paid an invoice",
+  REFUNDED: "Refunded",
+  RETAINED: "Kept",
+};

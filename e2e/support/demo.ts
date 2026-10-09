@@ -110,17 +110,23 @@ export async function deleteE2eAccounts(): Promise<void> {
 export const E2E_SERIAL_PREFIX = "E2E-";
 
 /**
- * Deletes machines the e2e tests registered (serial `E2E-*`) with their agreements,
- * terms history and notifications. Audit entries stay.
+ * Deletes machines the e2e tests registered (serial `E2E-*`) with everything their
+ * agreements produced: tickets, readings, invoices (final invoices on return),
+ * payments, deposit entries, advance credits, terms history and notifications.
+ * Credits of seed customers that an e2e invoice used become available again.
+ * Audit entries stay.
  */
-export async function deleteE2eMachines(): Promise<void> {
+export async function deleteE2eMachines(serial?: string): Promise<void> {
   const url = process.env.SUPABASE_DB_URL;
   if (!url) throw new Error("e2e: SUPABASE_DB_URL must be set (.env.local) to clean up test machines");
   const db = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
   await db.connect();
   try {
     await db.query("begin");
-    const { rows } = await db.query<{ id: string }>("select id from public.machines where serial_no like $1", [`${E2E_SERIAL_PREFIX}%`]);
+    // One spec cleans up only its own machine: spec files run in parallel.
+    const { rows } = serial
+      ? await db.query<{ id: string }>("select id from public.machines where serial_no = $1", [serial])
+      : await db.query<{ id: string }>("select id from public.machines where serial_no like $1", [`${E2E_SERIAL_PREFIX}%`]);
     const machines = rows.map((r) => r.id);
     if (machines.length > 0) {
       const { rows: agreementRows } = await db.query<{ id: string }>(
@@ -128,7 +134,30 @@ export async function deleteE2eMachines(): Promise<void> {
         [machines],
       );
       const agreements = agreementRows.map((r) => r.id);
-      await db.query("delete from public.notifications where entity_id = any($1)", [agreements]);
+      const tickets = (await db.query<{ id: string }>("select id from public.billing_cycle_tickets where agreement_id = any($1)", [agreements])).rows.map((r) => r.id);
+      const invoices = (await db.query<{ id: string }>("select id from public.invoices where agreement_id = any($1)", [agreements])).rows.map((r) => r.id);
+      await db.query("delete from public.notifications where entity_id = any($1) or entity_id = any($2)", [agreements, tickets]);
+      await db.query("delete from public.deposit_transactions where agreement_id = any($1)", [agreements]);
+      await db.query("delete from public.payment_slips where payment_id in (select id from public.payments where invoice_id = any($1))", [invoices]);
+      await db.query("update public.credits set source_payment_id = null where source_payment_id in (select id from public.payments where invoice_id = any($1))", [invoices]);
+      await db.query("delete from public.payments where invoice_id = any($1)", [invoices]);
+      await db.query("delete from public.invoice_lines where invoice_id = any($1)", [invoices]);
+      await db.query(
+        "update public.credits set status = 'AVAILABLE', applied_to_invoice_id = null, applied_at = null where applied_to_invoice_id = any($1)",
+        [invoices],
+      );
+      await db.query("delete from public.credits where agreement_id = any($1) or source_invoice_id = any($2)", [agreements, invoices]);
+      await db.query("update public.billing_cycle_tickets set current_invoice_id = null where id = any($1)", [tickets]);
+      await db.query("update public.meter_submissions set invoice_id = null where ticket_id = any($1)", [tickets]);
+      await db.query("delete from public.disputes where ticket_id = any($1)", [tickets]);
+      await db.query("delete from public.invoices where id = any($1)", [invoices]);
+      await db.query("delete from public.meter_photos where submission_id in (select id from public.meter_submissions where ticket_id = any($1))", [tickets]);
+      await db.query("delete from public.meter_readings where submission_id in (select id from public.meter_submissions where ticket_id = any($1))", [tickets]);
+      await db.query("delete from public.meter_submissions where ticket_id = any($1)", [tickets]);
+      await db.query("delete from public.ticket_comments where ticket_id = any($1)", [tickets]);
+      await db.query("delete from public.ticket_events where ticket_id = any($1)", [tickets]);
+      await db.query("delete from public.billing_cycle_tickets where id = any($1)", [tickets]);
+      await db.query("delete from public.meter_baselines where agreement_id = any($1)", [agreements]);
       await db.query("delete from public.agreement_terms_history where agreement_id = any($1)", [agreements]);
       await db.query("delete from public.rental_agreements where id = any($1)", [agreements]);
       await db.query("delete from public.machines where id = any($1)", [machines]);

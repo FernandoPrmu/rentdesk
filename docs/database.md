@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0017`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0019`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -36,7 +36,7 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `rental_agreements` | Current terms, installation, initial/closing readings, `first_billing_date`, cycle calendar (`next_cycle_no/date`), `billing_day` (the first billing date's day of the month; cycles are monthly), late fee setting, return idempotency key |
 | | `agreement_terms_history` | Every version of the pricing terms (commitment, included copies, rates, due days, late fee setting), who changed it, when, and the cycle it applies from. Append-only |
 | | `meter_baselines` | New baseline after a meter reset or replacement |
-| Billing cycle | `billing_cycle_tickets` | One per agreement per cycle (unique `(agreement_id, cycle_no)`); terms snapshot |
+| Billing cycle | `billing_cycle_tickets` | One per agreement per cycle (unique `(agreement_id, cycle_no)`); terms snapshot; stage clock (`stage_entered_at`, `stage_due_at`, `reminder_count`, `escalation_level`, `paused_at`) |
 | | `ticket_events` | Every transition: actor, from, to, reason |
 | | `ticket_comments` | Customer/owner comments |
 | | `meter_submissions` | Each reading attempt (idempotency key, server timestamp, review outcome) |
@@ -55,6 +55,7 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `idempotency_keys` | Request de-duplication for server actions |
 | | `login_attempts` | Rate limiting / lockout input |
 | | `audit_logs` | Append-only audit trail, written by triggers and `app.write_audit()` |
+| | `cron_runs` | One row per run of the daily job: trigger, the "now" used (simulated outside production), status, counts, errors, work remaining |
 | Views | `customer_balances` | Outstanding amount per customer: issued, unpaid invoices minus `amount_paid_cents` (security invoker, so RLS applies). Credits are not netted yet |
 | | `agreement_deposit_balances` | Deposit received / deducted / refunded / retained / held per agreement (security invoker) |
 
@@ -118,6 +119,7 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | notifications | read all | read tenant delivery log | read own; set `read_at` | — |
 | templates | read all; manage global | read global + own; manage own | — | — |
 | audit logs | read all | read own tenant | — | — |
+| cron runs | read all | — | — | — |
 | login_attempts, idempotency_keys | — | — | — | — |
 
 **Server-write-only.** Clients have no write grants on these tables. Writes come only from server code
@@ -132,7 +134,7 @@ using the service role:
 - deposit transactions (append-only even for the service role)
 - service requests and their history
 - inserts into `notifications`
-- `idempotency_keys`, `login_attempts` and `audit_logs`
+- `idempotency_keys`, `login_attempts`, `audit_logs` and `cron_runs`
 
 Customers write only through server actions. Clients have no DELETE grants except on an owner's own
 notification templates. `audit_logs` is append-only even for the service role.
@@ -157,13 +159,17 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 
 | Function | Effect |
 | --- | --- |
-| `open_billing_cycle` | Creates ticket + event + notifications; snapshots terms, late fee and the real days of the cycle; advances the monthly calendar; replays safely |
-| `submit_meter_reading` | Submission + readings + photo row + draft invoice/lines → `PENDING_OWNER_REVIEW` (idempotent) |
-| `confirm_meter_submission` | Assigns the invoice number, issues the invoice, marks the photo for deletion → `AWAITING_PAYMENT` |
-| `reject_meter_submission` | Reason required; draft → `REJECTED`; → `METER_REQUESTED` |
+| `open_billing_cycle` | Creates ticket + event + notifications at the job's `p_now`; snapshots terms, late fee and the real days of the cycle; advances the monthly calendar; flags an earlier ticket still waiting for its reading as Overdue (11.6, owner notified); replays safely |
+| `submit_meter_reading` | Submission + readings + photo row + draft invoice/lines → `PENDING_OWNER_REVIEW` (idempotent). Closes the older meter-stage tickets of the cycles it bills ("Billed in the cycle N invoice", rule 25); refused (`PREVIOUS_REVIEW_PENDING`) while an older reading waits for review |
+| `confirm_meter_submission` | Assigns the invoice number, issues the invoice, marks the photo for deletion → `AWAITING_PAYMENT`. `p_submission_id` null = the ticket's estimated draft |
+| `reject_meter_submission` | Reason required; draft → `REJECTED`; → `METER_REQUESTED`. `p_submission_id` null = reject the estimated draft (no second estimate for that ticket) |
 | `submit_payment` | Payment + slip, duplicate flag → `PAYMENT_SUBMITTED` (idempotent) |
 | `verify_payment` | Accept → `CLOSED`, or partial → `PARTIALLY_PAID`, or reject (reason). An overpayment becomes a credit |
-| `transition_ticket` | Overdue, cancel (reason), reopen (reason), return from overdue or dispute; the invoice follows |
+| `transition_ticket` | Cancel (reason; supersedes a pending reading, ends an open dispute), reopen (reason), back to payment, clear an overdue payment (reason + `p_due_date`); the invoice follows. Disputes use their own functions |
+| `raise_dispute` / `resolve_dispute` | Customer disputes an issued invoice (reason) → `DISPUTED`; owner rejects or resolves it (explanation) → `AWAITING_PAYMENT` (invoice partially paid if part was paid) |
+| `create_estimated_invoice` | Daily job (rule 22): after the meter deadline, when the owner bills estimates, a draft estimated invoice from the engine (`verify_estimated_invoice`, credits checked) → `PENDING_OWNER_REVIEW`; once per ticket |
+| `mark_ticket_overdue`, `record_ticket_reminder`, `escalate_ticket`, `apply_late_fee`, `set_ticket_pause` | Daily job steps (rules 20-24). Compare-and-set under the ticket lock: a step already done returns `{skipped}`. `apply_late_fee` re-checks the amount (ticket snapshot → owner → platform), the grace period, once only, never with a slip waiting or a dispute |
+| `cron_begin_run` / `cron_finish_run`, `cron_context`, `cron_due_agreements`, `cron_ticket_candidates`, `cron_pause_candidates`, `cron_expired_photos`, `mark_photos_deleted`, `cron_overdue_summaries`, `notify_once` | The daily job's run record (10-minute lease), its reads (keyset pages) and the photo / weekly-summary steps |
 | `assign_invoice_number` | Per-owner counter row lock. Rolls back with the transaction, so numbering is gap-free |
 | `provision_account` | Profile + owner/customer rows; enforces Admin → Owner → Customer |
 | `write_audit` | Explicit audit entries (logins, resets) |
@@ -283,13 +289,29 @@ app's own per-account and per-IP limits above protect logins instead.
   is cancelled.
 - **Late fee (LATE-01).** `late_fee_mode` (`OWNER_DEFAULT` / `CUSTOM` / `NONE`) + `late_fee_cents` on the
   agreement, every terms version and every ticket. The amount in force is resolved in TypeScript
-  (`resolveLateFee`); the daily job that charges it is still to come.
+  (`resolveLateFee`) and charged by the daily job (`app.apply_late_fee`, 0019).
 - **Deposits.** `deposit_transactions` (RLS: owner own tenant, customer own, admin all; clients read only;
   service role select + insert, no update/delete). A trigger refuses an entry for another customer than the
   agreement's, or one that would take the balance below zero. Upfront money is recorded by `assign_machine`
   (`p_terms.upfront`): `SECURITY_DEPOSIT` → `RECEIVED` entry, `ADVANCE_PAYMENT` → `credits` row of kind `ADVANCE`.
 - **Service-role reads.** New tables get no automatic grants in this project; 0017 grants the service role
   `select` on `agreement_terms_history` (the return loader reads the terms in force) and on the deposit tables.
+
+## Tickets and the daily job (migrations 0018–0019)
+
+- **Event types** `PAUSED`, `RESUMED`, `LATE_FEE` (0018, its own migration: a new enum value is usable only once committed).
+- **Stage clock.** `stage_entered_at` is set whenever the status changes (`app.enter_stage`, or `app.enter_stage_at` with
+  the job's time). Reminders and escalation count from it; `reminder_count` / `escalation_level` reset with each stage.
+- **Daily job** (`src/lib/cron/daily.ts`, `/api/cron/daily`): pause/resume → open due cycles (catch-up) → ticket sweep
+  (overdue, estimate, reminders, admin escalation, late fee) → meter photo purge → weekly overdue summaries. Pure
+  decisions in `src/lib/cron/decide.ts`. All database access goes through the `rpc_*` wrappers, so `cron.db.test.ts`
+  runs the same code with `pg` inside the test transaction and a simulated clock.
+- **Idempotency.** Each write is a compare-and-set under the ticket lock (expected status, `reminder_count`,
+  `escalation_level`, `late_fee_cents = 0`, one estimate per ticket); `open_billing_cycle` replays. `cron_begin_run`
+  takes an advisory lock and gives a running run a 10-minute lease.
+- **Notifications** are built by `src/lib/notifications/service.ts` (in-app rows today; email is added there).
+- **Time override** (non-production only): `x-rentdesk-now` header or `?now=` on `/api/cron/daily`
+  (`npm run cron:run -- --now=2026-11-01T01:00:00+05:30`). Production builds ignore it (`src/lib/cron/time.ts`).
 
 ## Storage
 
@@ -317,6 +339,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
   only for `cust.bandara`) and owner B (`owner.ceylon`) as not onboarded.
 - The seed writes its agreements with the service role (stable ids, backdated first billing dates to create
   tickets in several stages); the same triggers apply as for `rpc_assign_machine`.
-- `npm run test:e2e` signs in with the seed accounts. Its global setup and teardown restore them
+- `cron.db.test.ts` runs the daily job with simulated dates in 2024-2025, when no seed or fixture agreement is due.
+- `npm run test:e2e` runs on a production build (`next build` + `next start`, port 3100); `npm run test:e2e:dev`
+  uses `next dev`. It signs in with the seed accounts. Its global setup and teardown restore them
   and delete the `owner.e2e-*` / `cust.e2e-*` accounts and the `E2E-*` machines (with their agreements) the
   tests create (needs `SUPABASE_DB_URL`).

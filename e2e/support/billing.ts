@@ -77,3 +77,34 @@ export async function issueFirstInvoice(agreementId: string, used: number): Prom
   ) as { invoice_no: string };
   return { invoiceNo: confirmed.invoice_no, totalCents: s.invoice.total_cents };
 }
+
+/** Assigns an E2E machine through the same rpc as the assign form; first billing date `firstBilling`. */
+export async function assignMachine(ownerId: string, machineId: string, customerId: string, today: string, firstBilling = today): Promise<string> {
+  const row = check(
+    await service().rpc("rpc_assign_machine", {
+      p_actor_id: ownerId,
+      p_machine_id: machineId,
+      p_customer_id: customerId,
+      p_terms: {
+        // Started ten days ago (an existing rental being moved to RentDesk): the start must be before the first billing date.
+        start_date: new Date(Date.parse(`${today}T00:00:00Z`) - 10 * 86_400_000).toISOString().slice(0, 10),
+        first_billing_date: firstBilling,
+        due_days: 7,
+        monthly_commitment_cents: 500_000,
+        bw_included: 2000,
+        bw_rate_cents: 250,
+        installation_location: "Front desk",
+        initial_bw_reading: 1000,
+      },
+      p_today: today,
+    }),
+    "assign machine",
+  ) as { agreement_id: string };
+  return row.agreement_id;
+}
+
+/** Ticket ids of an agreement, oldest cycle first. */
+export async function ticketIds(agreementId: string): Promise<string[]> {
+  const rows = check(await service().from("billing_cycle_tickets").select("id").eq("agreement_id", agreementId).order("cycle_no"), "tickets");
+  return rows!.map((r) => r.id);
+}

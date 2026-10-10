@@ -19,6 +19,8 @@ import { buildReturnInvoice } from "@/lib/billing/return-invoice";
 import { type DbError, dbErrorMessage } from "@/lib/db-errors";
 import { getDepositState } from "@/lib/deposits/queries";
 import { planSettlement } from "@/lib/deposits/settlement";
+import { BRANDING_SNAPSHOT_COLUMNS, brandingSnapshot } from "@/lib/invoices/branding-snapshot";
+import { onInvoiceChanged } from "@/lib/invoices/issued";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/types/db";
 
@@ -47,6 +49,7 @@ export async function assignMachine(
     p_today: todayInColombo(),
   });
   if (error) return fail(message(error));
+  await onInvoiceChanged(finalInvoiceId(data));
   return ok({ agreementId: (data as { agreement_id: string }).agreement_id });
 }
 
@@ -89,7 +92,7 @@ async function returnPayload(actor: CurrentUser, agreementId: string, input: Ret
     const checked = await checkSettlement(agreementId, input.deposit, submission?.invoice.total_cents ?? 0);
     if (!checked.ok) return checked;
   }
-  const { data: branding } = await admin.from("owner_company_profiles").select("*").eq("owner_id", actor.id).maybeSingle();
+  const { data: branding } = await admin.from("owner_company_profiles").select(BRANDING_SNAPSHOT_COLUMNS).eq("owner_id", actor.id).maybeSingle();
   const dueDate = addDays(today, context.dueDays);
   return ok({
     idempotency_key: input.idempotency_key,
@@ -102,7 +105,7 @@ async function returnPayload(actor: CurrentUser, agreementId: string, input: Ret
       anomaly_flag: submission.anomalyFlag,
       due_date: dueDate,
       stage_due_at: `${dueDate}T23:59:59+05:30`,
-      branding_snapshot: branding,
+      branding_snapshot: brandingSnapshot(branding, new Date()),
     },
     deposit: input.deposit && settlementPayload(input.deposit),
   } as unknown as Json);
@@ -111,13 +114,22 @@ async function returnPayload(actor: CurrentUser, agreementId: string, input: Ret
 export async function returnMachine(actor: CurrentUser, agreementId: string, input: ReturnInput): Promise<ActionResult> {
   const payload = await returnPayload(actor, agreementId, input);
   if (!payload.ok) return payload;
-  const { error } = await createAdminClient().rpc("rpc_return_machine", {
+  const { data, error } = await createAdminClient().rpc("rpc_return_machine", {
     p_actor_id: actor.id,
     p_agreement_id: agreementId,
     p_return: payload.data,
     p_today: todayInColombo(),
   });
-  return error ? fail(message(error)) : ok(undefined);
+  if (error) return fail(message(error));
+  // INV-09: the final invoice's PDF (the daily job retries if this fails).
+  await onInvoiceChanged(finalInvoiceId(data));
+  return ok(undefined);
+}
+
+/** The final invoice issued by a return (or the return part of a reassign). */
+function finalInvoiceId(result: unknown): string | null {
+  const r = result as { final_invoice_id?: string | null; returned?: { final_invoice_id?: string | null } } | null;
+  return r?.final_invoice_id ?? r?.returned?.final_invoice_id ?? null;
 }
 
 /** Return + new assignment in one transaction: both happen or neither does. */
@@ -138,6 +150,7 @@ export async function reassignMachine(
     p_today: todayInColombo(),
   });
   if (error) return fail(message(error));
+  await onInvoiceChanged(finalInvoiceId(data));
   return ok({ agreementId: (data as { agreement_id: string }).agreement_id });
 }
 

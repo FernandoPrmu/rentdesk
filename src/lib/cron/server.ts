@@ -2,6 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { generateInvoicePdf } from "@/lib/invoices/pdf-job";
+import { supabaseInvoiceFiles } from "@/lib/invoices/pdf-server";
+import { loadInvoiceFonts } from "@/lib/invoices/pdf/fonts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { type Rpc, RpcError } from "@/lib/tickets/transitions";
 import type { Database } from "@/types/db";
@@ -34,5 +37,9 @@ export function meterPhotoStorage(client: SupabaseClient<Database>): PhotoStorag
 
 export function runDailyJobNow(options: DailyJobOptions): Promise<DailyJobResult> {
   const admin = createAdminClient();
-  return runDailyJob(supabaseRpc(admin), meterPhotoStorage(admin), options);
+  const rpc = supabaseRpc(admin);
+  const files = supabaseInvoiceFiles(admin);
+  return runDailyJob(rpc, meterPhotoStorage(admin), options, {
+    generate: (invoiceId, now) => generateInvoicePdf(rpc, files, () => loadInvoiceFonts(), invoiceId, now),
+  });
 }

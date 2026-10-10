@@ -19,10 +19,17 @@ import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { addMonths } from "../src/lib/agreements/cycle-calendar.ts";
+import { logoFilePath } from "../src/lib/branding/files.ts";
 import { loadMeterContext } from "../src/lib/billing/context.ts";
 import { buildMeterSubmission } from "../src/lib/billing/meter-invoice.ts";
 import { previousReading } from "../src/lib/billing/usage.ts";
+import { BRANDING_SNAPSHOT_COLUMNS, brandingSnapshot } from "../src/lib/invoices/branding-snapshot.ts";
+import { generateInvoicePdf, INVOICE_BUCKET, type InvoiceFiles } from "../src/lib/invoices/pdf-job.ts";
+import { loadInvoiceFonts } from "../src/lib/invoices/pdf/fonts.ts";
+import type { Rpc } from "../src/lib/tickets/transitions.ts";
 import type { Database, Json } from "../src/types/db";
+
+import { demoLogo, demoMeterPhoto } from "./demo-meter-photo.ts";
 
 type Admin = SupabaseClient<Database>;
 type Ticket = Database["public"]["Tables"]["billing_cycle_tickets"]["Row"];
@@ -83,14 +90,6 @@ function check<T>(result: Result<T>, what: string): NonNullable<T> {
 }
 
 // Tiny valid files for storage.
-const JPEG = Buffer.from(
-  "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
-  "base64",
-);
-const PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64",
-);
 const slipPdf = (label: string) => Buffer.from(`%PDF-1.4\n% RentDesk demo payment slip ${label}\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n`);
 
 // ---------------------------------------------------------------------------
@@ -293,9 +292,11 @@ async function seedPlansTemplatesAndBranding(ids: Record<string, string>) {
   // undoes a setup done while testing, so the onboarding gate can be shown again).
   check(await admin.from("owner_company_profiles").delete().eq("owner_id", ids.ownerB), "reset owner B setup");
   check(await admin.storage.from("branding").remove([`${ids.ownerB}/logo.png`]), "reset owner B logo");
-  const logoPath = `${ids.ownerA}/logo.png`;
+  // Logos are immutable files at content-hash paths (decision 35).
+  const logo = await demoLogo("LCS");
+  const logoPath = logoFilePath(ids.ownerA, logo);
   check(
-    await admin.storage.from("branding").upload(logoPath, PNG, { contentType: "image/png", upsert: true }),
+    await admin.storage.from("branding").upload(logoPath, logo, { contentType: "image/png", upsert: true }),
     "upload logo",
   );
   check(
@@ -311,13 +312,14 @@ async function seedPlansTemplatesAndBranding(ids: Record<string, string>) {
         bank_branch: "Kollupitiya",
         bank_account_name: "Lanka Copy Solutions (Pvt) Ltd",
         bank_account_no: "0001234567",
-        letterhead_layout: { preset: "default" },
         onboarding_completed_at: new Date().toISOString(),
       }],
       { onConflict: "owner_id", ignoreDuplicates: true },
     ),
     "company profile",
   );
+  // A re-run moves owner A from the old 1-pixel logo to the generated one (new invoices only).
+  check(await actingAs(ids.ownerA).from("owner_company_profiles").update({ logo_path: logoPath }).eq("owner_id", ids.ownerA), "logo path");
 }
 
 async function seedMachinesAndAgreements(ids: Record<string, string>) {
@@ -467,7 +469,8 @@ async function submitMeter(ticket: Ticket, agreement: AgreementDef, ids: Record<
   });
 
   const photoPath = `${ticket.owner_id}/${ticket.id}/seed-meter.jpg`;
-  check(await admin.storage.from("meter-photos").upload(photoPath, JPEG, { contentType: "image/jpeg", upsert: true }), "upload meter photo");
+  const photo = await demoPhotoFor(ticket.machine_id, submission.readings);
+  check(await admin.storage.from("meter-photos").upload(photoPath, photo, { contentType: "image/jpeg", upsert: true }), "upload meter photo");
 
   check(
     await admin.rpc("rpc_submit_meter_reading", {
@@ -491,9 +494,9 @@ async function confirmMeter(ticket: Ticket, agreement: AgreementDef) {
     await admin.from("meter_submissions").select("id").eq("ticket_id", ticket.id).eq("status", "PENDING_REVIEW").single(),
     "pending submission",
   );
-  const branding = checkMaybe(
-    await admin.from("owner_company_profiles").select("*").eq("owner_id", ticket.owner_id).maybeSingle(),
-    "branding",
+  const branding = brandingSnapshot(
+    checkMaybe(await admin.from("owner_company_profiles").select(BRANDING_SNAPSHOT_COLUMNS).eq("owner_id", ticket.owner_id).maybeSingle(), "branding"),
+    new Date(),
   );
   const result = check(
     await admin.rpc("rpc_confirm_meter_submission", {
@@ -560,6 +563,56 @@ async function verifyPayment(ticket: Ticket, agreement: AgreementDef) {
     }),
     `verify payment ${agreement.key}#${ticket.cycle_no}`,
   );
+}
+
+/** A meter photo showing these readings (demo data; decision 37 asks for a real-looking frame). */
+async function demoPhotoFor(machineId: string, readings: { counter_type: string; current_value: number }[]): Promise<Buffer> {
+  const machine = check(await admin.from("machines").select("brand, model, serial_no").eq("id", machineId).single(), "photo machine");
+  const value = (c: string) => readings.find((r) => r.counter_type === c)?.current_value ?? null;
+  return demoMeterPhoto({ machine: `${machine.brand} ${machine.model}`, serialNo: machine.serial_no, bw: value("BW") ?? 0, colour: value("COLOUR") });
+}
+
+/** A re-run replaces every demo photo still waiting for review with the generated one. */
+async function refreshDemoPhotos(ids: Record<string, string>) {
+  const photos = check(
+    await admin
+      .from("meter_photos")
+      .select("storage_path, submission:meter_submissions!meter_photos_submission_fkey(ticket:billing_cycle_tickets!meter_submissions_ticket_fkey(machine_id), readings:meter_readings!meter_readings_submission_fkey(counter_type, current_value))")
+      .in("owner_id", [ids.ownerA, ids.ownerB])
+      .is("deleted_at", null)
+      .like("storage_path", "%/seed-meter.jpg"),
+    "demo photos",
+  ) as unknown as { storage_path: string; submission: { ticket: { machine_id: string }; readings: { counter_type: string; current_value: number }[] } }[];
+  for (const p of photos) {
+    const photo = await demoPhotoFor(p.submission.ticket.machine_id, p.submission.readings);
+    check(await admin.storage.from("meter-photos").upload(p.storage_path, photo, { contentType: "image/jpeg", upsert: true }), "refresh meter photo");
+  }
+  return photos.length;
+}
+
+/** INV-09: PDFs of the demo invoices, through the same job as the app and the daily job. */
+async function makeInvoicePdfs(ids: Record<string, string>) {
+  const rpc: Rpc = async (fn, args) => {
+    const { data, error } = await admin.rpc(fn as never, args as never);
+    if (error) throw new Error(`${fn}: ${error.message}`);
+    return data;
+  };
+  const files: InvoiceFiles = {
+    async readBranding(path) {
+      const { data, error } = await admin.storage.from("branding").download(path);
+      if (error) return null;
+      return new Uint8Array(await data.arrayBuffer());
+    },
+    async writeInvoicePdf(path, bytes) {
+      check(await admin.storage.from(INVOICE_BUCKET).upload(path, bytes, { contentType: "application/pdf", upsert: true }), "upload invoice pdf");
+    },
+  };
+  const pending = check(
+    await admin.from("invoices").select("id").in("owner_id", [ids.ownerA, ids.ownerB]).eq("pdf_status", "PENDING"),
+    "pending pdfs",
+  );
+  for (const inv of pending) await generateInvoicePdf(rpc, files, () => loadInvoiceFonts(), inv.id);
+  return pending.length;
 }
 
 /** Moves a ticket from wherever it is toward its target, one workflow step at a time. */
@@ -661,6 +714,8 @@ async function main() {
     }
   }
   await seedServiceRequests(ids);
+  console.log(`  demo meter photos refreshed: ${await refreshDemoPhotos(ids)}`);
+  console.log(`  invoice PDFs made: ${await makeInvoicePdfs(ids)}`);
 
   const tickets = check(
     await admin

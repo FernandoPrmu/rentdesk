@@ -99,3 +99,26 @@ export function a4Check(width: number, height: number): { ok: boolean; landscape
   const ratio = height / width;
   return { ok: Math.abs(ratio - A4_RATIO) / A4_RATIO <= A4_TOLERANCE, landscape: width > height, ratio };
 }
+
+export type Corner = "nw" | "ne" | "sw" | "se";
+
+/** Drags the whole area by (dx, dy) percent; it stays on the page. */
+export function moveArea(start: Area, dx: number, dy: number): Area {
+  return clampArea({ ...start, x: start.x + dx, y: start.y + dy });
+}
+
+/**
+ * Drags one corner by (dx, dy) percent. The opposite corner stays put; the area
+ * never gets smaller than the minimum or leaves the page.
+ */
+export function resizeArea(start: Area, corner: Corner, dx: number, dy: number): Area {
+  let left = start.x;
+  let top = start.y;
+  let right = start.x + start.w;
+  let bottom = start.y + start.h;
+  if (corner === "nw" || corner === "sw") left = Math.min(Math.max(0, left + dx), right - MIN_AREA.w);
+  else right = Math.max(Math.min(100, right + dx), left + MIN_AREA.w);
+  if (corner === "nw" || corner === "ne") top = Math.min(Math.max(0, top + dy), bottom - MIN_AREA.h);
+  else bottom = Math.max(Math.min(100, bottom + dy), top + MIN_AREA.h);
+  return clampArea({ x: left, y: top, w: right - left, h: bottom - top });
+}

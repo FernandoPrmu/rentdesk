@@ -49,24 +49,26 @@ export async function checkLetterhead(bytes: Uint8Array): Promise<LetterheadChec
   if (!type) return { ok: false, error: "Use a PDF, JPG or PNG file." };
 
   if (type === "pdf") {
+    const unreadable = { ok: false as const, error: "This PDF could not be read. Try saving it again as a PDF." };
     let doc: PDFDocument;
     try {
       doc = await PDFDocument.load(bytes, { updateMetadata: false });
     } catch (error) {
       const encrypted = error instanceof Error && /encrypt/i.test(error.message);
-      return { ok: false, error: encrypted ? "This PDF is password-protected. Upload one without a password." : "This PDF could not be read. Try saving it again as a PDF." };
+      return encrypted ? { ok: false, error: "This PDF is password-protected. Upload one without a password." } : unreadable;
     }
-    if (doc.getPageCount() !== 1) return { ok: false, error: "The PDF must have exactly 1 page." };
     try {
+      // A broken file can load and still fail here (no page tree).
+      if (doc.getPageCount() !== 1) return { ok: false, error: "The PDF must have exactly 1 page." };
       await (await PDFDocument.create()).embedPdf(bytes, [0]);
+      const page = doc.getPage(0);
+      const { width, height } = page.getSize();
+      const turned = page.getRotation().angle % 180 !== 0;
+      const [w, h] = turned ? [height, width] : [width, height];
+      return { ok: true, bytes, ext: "pdf", kind: "PDF", width: w, height: h, warning: a4Warning(w, h) };
     } catch {
-      return { ok: false, error: "This PDF could not be used as a letterhead. Try saving it again as a PDF." };
+      return unreadable;
     }
-    const page = doc.getPage(0);
-    const { width, height } = page.getSize();
-    const turned = page.getRotation().angle % 180 !== 0;
-    const [w, h] = turned ? [height, width] : [width, height];
-    return { ok: true, bytes, ext: "pdf", kind: "PDF", width: w, height: h, warning: a4Warning(w, h) };
   }
 
   try {

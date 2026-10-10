@@ -120,4 +120,26 @@ describe("buildEstimate (11.6, rule 13)", () => {
     expect(e.lines.map((l) => l.line_type)).toEqual(["COMMITMENT", "CREDIT"]);
     expect(e.calculation).toMatchObject({ type: "ESTIMATED", counters: [] });
   });
+
+  it("makes the pending invoice PDFs last, once each per run; a failure stays pending and is reported", async () => {
+    const generate = vi.fn(async (id: string) => {
+      if (id === "inv-2") throw new Error("storage down");
+      return { status: "CREATED" as const };
+    });
+    // A failed invoice stays pending, so the database keeps returning it.
+    const { rpc, calls } = fakeRpc({ rpc_cron_pending_invoice_pdfs: () => ["inv-1", "inv-2"] });
+    const result = await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" }, { generate });
+    expect(generate.mock.calls.map(([id]) => id)).toEqual(["inv-1", "inv-2"]);
+    expect(result.counts.pdfs).toBe(1);
+    expect(result.status).toBe("PARTIAL");
+    expect(result.errors).toEqual([expect.objectContaining({ step: "invoice pdf", id: "inv-2", message: "storage down" })]);
+    const steps = calls.map(([fn]) => fn);
+    expect(steps.indexOf("rpc_cron_pending_invoice_pdfs")).toBeGreaterThan(steps.indexOf("rpc_cron_overdue_summaries"));
+  });
+
+  it("without a PDF port the step is skipped", async () => {
+    const { rpc, calls } = fakeRpc({});
+    await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });
+    expect(calls.some(([fn]) => fn === "rpc_cron_pending_invoice_pdfs")).toBe(false);
+  });
 });

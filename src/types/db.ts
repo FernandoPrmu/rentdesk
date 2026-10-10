@@ -2899,6 +2899,19 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_correct_meter_reading: {
+        Args: {
+          p_actor_id: string
+          p_anomaly_flag: string
+          p_invoice: Json
+          p_note: string
+          p_notifications?: Json
+          p_readings: Json
+          p_submission_id: string
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       rpc_create_estimated_invoice: {
         Args: {
           p_invoice: Json
@@ -2937,6 +2950,10 @@ export type Database = {
           p_status: string
         }
         Returns: undefined
+      }
+      rpc_cron_orphan_photos: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
       }
       rpc_cron_overdue_summaries: { Args: { p_today: string }; Returns: Json }
       rpc_cron_pause_candidates: {

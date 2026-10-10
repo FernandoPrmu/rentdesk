@@ -29,6 +29,8 @@ export interface StageSettings {
   estimated_billing_enabled: boolean;
   weekly_summary_dow: number;
   rejected_photo_retention_days: number;
+  /** Spec 11.3 / rule 28: after this many rejections the owner enters the reading. */
+  max_meter_rejections: number;
 }
 
 /** The platform defaults (platform_settings, spec 5.4 and 8.3); tests and fallbacks. */
@@ -49,6 +51,7 @@ export const PLATFORM_DEFAULTS: StageSettings = {
   estimated_billing_enabled: false,
   weekly_summary_dow: 1,
   rejected_photo_retention_days: 7,
+  max_meter_rejections: 3,
 };
 
 const HOUR_MS = 3_600_000;

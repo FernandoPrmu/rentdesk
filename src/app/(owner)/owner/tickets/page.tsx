@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 
+import Link from "next/link";
+
 import { PageHeader } from "@/components/portal/portal-shell";
+import { buttonVariants } from "@/components/ui/button";
 import { TicketFilters, TicketList } from "@/components/tickets/ticket-display";
 import { requireUser } from "@/lib/auth/current-user";
-import { listOwnerTickets, TICKET_FILTERS, ticketFilterSchema } from "@/lib/tickets/queries";
+import { countApprovals, listOwnerTickets, TICKET_FILTERS, ticketFilterSchema } from "@/lib/tickets/queries";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Tickets" };
 
@@ -14,12 +18,20 @@ export const metadata: Metadata = { title: "Tickets" };
 export default async function OwnerTicketsPage({ searchParams }: PageProps<"/owner/tickets">) {
   await requireUser("OWNER");
   const { status } = ticketFilterSchema.parse(await searchParams);
-  const tickets = await listOwnerTickets(status);
+  const [tickets, approvals] = await Promise.all([listOwnerTickets(status), countApprovals()]);
   const now = new Date();
 
   return (
     <>
-      <PageHeader title="Billing tickets" description="One ticket per machine per month: meter reading, invoice, payment." />
+      <PageHeader
+        title="Billing tickets"
+        description="One ticket per machine per month: meter reading, invoice, payment."
+        action={
+          <Link href="/owner/approvals" className={cn(buttonVariants({ variant: approvals > 0 ? "default" : "outline" }), "h-12 px-5 text-base")}>
+            Approvals ({approvals})
+          </Link>
+        }
+      />
       <TicketFilters filter={status} options={TICKET_FILTERS} />
       <TicketList
         tickets={tickets}

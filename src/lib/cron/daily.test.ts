@@ -93,6 +93,16 @@ describe("runDailyJob", () => {
   });
 });
 
+describe("orphan meter photos (rule 30)", () => {
+  it("deletes uploaded photos no submission recorded, one batch per run", async () => {
+    const removed: string[][] = [];
+    const { rpc } = fakeRpc({ rpc_cron_orphan_photos: () => ["o/t/a.jpg", "o/t/b.jpg"] });
+    const result = await runDailyJob(rpc, { removeMeterPhotos: async (p) => void removed.push(p) }, { now: NOW, trigger: "CRON" });
+    expect(removed).toEqual([["o/t/a.jpg", "o/t/b.jpg"]]);
+    expect(result.counts.photosDeleted).toBe(2);
+  });
+});
+
 describe("buildEstimate (11.6, rule 13)", () => {
   it("bills the commitment only and takes customer credits off automatically", () => {
     const t = {

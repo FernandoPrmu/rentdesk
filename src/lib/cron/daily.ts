@@ -268,6 +268,19 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
       if (photos.length < batch) break;
     }
 
+    // Rule 30: photos uploaded but never submitted, older than 2 days. One batch per run:
+    // nothing records them, so a failed removal must not be retried in a loop.
+    checkTime();
+    const orphans = (await rpc("rpc_cron_orphan_photos", { p_now: now.toISOString(), p_limit: batch })) as string[];
+    if (orphans.length > 0) {
+      try {
+        await storage.removeMeterPhotos(orphans);
+        counts.photosDeleted += orphans.length;
+      } catch (error) {
+        record(errorEntry("orphan photos", undefined, error));
+      }
+    }
+
     // Weekly overdue summary to owners (spec 5.4, 8.3).
     checkTime();
     const summaries = (await rpc("rpc_cron_overdue_summaries", { p_today: today })) as {

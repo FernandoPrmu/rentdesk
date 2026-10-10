@@ -100,7 +100,7 @@ function TaskCard({ task }: { task: CustomerTask }) {
             {meter ? "This reading is late. Please send it as soon as you can." : "This bill is overdue. Please pay as soon as you can."}
           </p>
         )}
-        <Link href={`/customer/tickets/${task.ticketId}`} className={cn(buttonVariants(), "h-12 w-full text-base")}>
+        <Link href={meter ? `/customer/tickets/${task.ticketId}/meter` : `/customer/tickets/${task.ticketId}`} className={cn(buttonVariants(), "h-12 w-full text-base")}>
           {meter ? "Enter meter reading" : "Pay and send slip"}
         </Link>
       </CardContent>

@@ -212,11 +212,12 @@ function readingArgs(ticket: TicketSnapshot, actor: Actor, i: z.output<typeof re
     p_stage_due_at: iso(i.stageDueAt),
     p_note: i.note ?? null,
     p_anomaly_flag: i.anomalyFlag,
-    p_notifications: notificationsFor(
-      "meter.submitted",
-      [owner(ticket.owner_id)],
-      context(ticket, { amountCents: i.invoice.total_cents, months: i.invoice.cycles_covered }),
-    ),
+    // The hand-over goes to whoever acts next: the owner reviews a customer's reading;
+    // the customer is told when the owner entered it (INV-12).
+    p_notifications:
+      source === "CUSTOMER"
+        ? notificationsFor("meter.submitted", [owner(ticket.owner_id)], context(ticket, { amountCents: i.invoice.total_cents, months: i.invoice.cycles_covered }))
+        : notificationsFor("meter.entered", [customer(ticket.customer_id)], context(ticket, { reason: i.note })),
   };
 }
 
@@ -264,7 +265,7 @@ export async function confirmInvoice(rpc: Rpc, actor: Actor, ticket: TicketSnaps
       [customer(ticket.customer_id)],
       context(ticket, { amountCents: i.totalCents, dueDate: i.dueDate, invoiceNo: i.invoiceNo ?? null }),
     ),
-  })) as { invoice_no: string; photo_paths: string[] };
+  })) as { invoice_id: string; invoice_no: string; photo_paths: string[]; photo_ids: string[] };
 }
 
 const rejectReadingSchema = z.object({
@@ -272,6 +273,8 @@ const rejectReadingSchema = z.object({
   reason: reasonText,
   stageDueAt: z.date(),
   photoExpiresAt: z.date(),
+  /** The rejection limit is reached (rule 28): the owner will enter the reading. */
+  final: z.boolean().default(false),
 });
 
 /** INV-07 / 11.3: back to the customer with a mandatory reason. */
@@ -285,8 +288,38 @@ export async function rejectReading(rpc: Rpc, actor: Actor, ticket: TicketSnapsh
     p_reason: i.reason,
     p_stage_due_at: iso(i.stageDueAt),
     p_photo_expires_at: iso(i.photoExpiresAt),
-    p_notifications: notificationsFor("meter.rejected", [customer(ticket.customer_id)], context(ticket, { reason: i.reason })),
+    p_notifications: notificationsFor(i.final ? "meter.rejected_final" : "meter.rejected", [customer(ticket.customer_id)], context(ticket, { reason: i.reason })),
   });
+}
+
+const correctSchema = z.object({
+  submissionId: z.uuid(),
+  readings: z.custom<MeterReadingRow[]>((v) => Array.isArray(v) && v.length > 0, { message: "The readings are required" }),
+  invoice: z.custom<InvoicePayload>((v) => typeof v === "object" && v !== null, { message: "The invoice is required" }),
+  anomalyFlag: z.enum(["HIGH", "LOW", "ZERO"]).nullable().default(null),
+  note: reasonText,
+  /** "B&W 12,500 → 12,050" for the customer. */
+  changes: z.string().min(1),
+});
+
+/** INV-08 / 11.3: the owner corrects a mistyped reading with a note; the draft is recalculated, the customer told. */
+export async function correctReading(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof correctSchema>) {
+  assertTransition("correctReading", actor, ticket);
+  const i = parse(correctSchema, input);
+  return (await rpc("rpc_correct_meter_reading", {
+    p_ticket_id: ticket.id,
+    p_submission_id: i.submissionId,
+    p_actor_id: actorId(actor),
+    p_readings: i.readings,
+    p_invoice: i.invoice,
+    p_anomaly_flag: i.anomalyFlag,
+    p_note: i.note,
+    p_notifications: notificationsFor(
+      "meter.corrected",
+      [customer(ticket.customer_id)],
+      context(ticket, { reason: i.note, changes: i.changes, amountCents: i.invoice.total_cents }),
+    ),
+  })) as { changes: { counter_type: string; from: number; to: number }[]; total_cents: number };
 }
 
 // -----------------------------------------------------------------------------

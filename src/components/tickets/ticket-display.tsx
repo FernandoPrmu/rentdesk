@@ -65,7 +65,7 @@ function amountText(t: OwnerTicketRow) {
 }
 
 /** TKT-06: cards on a phone, a table from md up. */
-export function TicketList({ tickets, now, empty }: { tickets: OwnerTicketRow[]; now: Date; empty: string }) {
+export function TicketList({ tickets, now, empty, hrefSuffix = "" }: { tickets: OwnerTicketRow[]; now: Date; empty: string; hrefSuffix?: string }) {
   if (tickets.length === 0) {
     return <p className="rounded-xl border border-dashed bg-background p-6 text-center text-muted-foreground">{empty}</p>;
   }
@@ -76,7 +76,7 @@ export function TicketList({ tickets, now, empty }: { tickets: OwnerTicketRow[];
           const step = nextStep(t);
           return (
             <li key={t.id} data-testid="ticket-card">
-              <Link href={`/owner/tickets/${t.id}`} className="flex min-h-16 items-center gap-3 px-4 py-3 hover:bg-muted/60">
+              <Link href={`/owner/tickets/${t.id}${hrefSuffix}`} className="flex min-h-16 items-center gap-3 px-4 py-3 hover:bg-muted/60">
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="truncate font-medium">{t.customer.name}</span>
@@ -118,7 +118,7 @@ export function TicketList({ tickets, now, empty }: { tickets: OwnerTicketRow[];
               return (
                 <tr key={t.id} className="hover:bg-muted/40">
                   <td className="px-4 py-3">
-                    <Link href={`/owner/tickets/${t.id}`} className="font-medium hover:underline">
+                    <Link href={`/owner/tickets/${t.id}${hrefSuffix}`} className="font-medium hover:underline">
                       {t.customer.name}
                     </Link>
                   </td>

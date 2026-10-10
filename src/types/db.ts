@@ -193,6 +193,7 @@ export type Database = {
           rejection_count: number
           reminder_count: number
           stage_due_at: string | null
+          stage_entered_at: string
           status: Database["public"]["Enums"]["ticket_status"]
           status_before_overdue:
             | Database["public"]["Enums"]["ticket_status"]
@@ -230,6 +231,7 @@ export type Database = {
           rejection_count?: number
           reminder_count?: number
           stage_due_at?: string | null
+          stage_entered_at?: string
           status?: Database["public"]["Enums"]["ticket_status"]
           status_before_overdue?:
             | Database["public"]["Enums"]["ticket_status"]
@@ -267,6 +269,7 @@ export type Database = {
           rejection_count?: number
           reminder_count?: number
           stage_due_at?: string | null
+          stage_entered_at?: string
           status?: Database["public"]["Enums"]["ticket_status"]
           status_before_overdue?:
             | Database["public"]["Enums"]["ticket_status"]
@@ -445,6 +448,62 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "payments"
             referencedColumns: ["id", "owner_id"]
+          },
+        ]
+      }
+      cron_runs: {
+        Row: {
+          counts: Json
+          errors: Json
+          finished_at: string | null
+          id: string
+          job: string
+          remaining: boolean
+          run_date: string
+          run_now: string
+          simulated: boolean
+          started_at: string
+          status: string
+          trigger: string
+          triggered_by: string | null
+        }
+        Insert: {
+          counts?: Json
+          errors?: Json
+          finished_at?: string | null
+          id?: string
+          job?: string
+          remaining?: boolean
+          run_date: string
+          run_now: string
+          simulated?: boolean
+          started_at?: string
+          status?: string
+          trigger: string
+          triggered_by?: string | null
+        }
+        Update: {
+          counts?: Json
+          errors?: Json
+          finished_at?: string | null
+          id?: string
+          job?: string
+          remaining?: boolean
+          run_date?: string
+          run_now?: string
+          simulated?: boolean
+          started_at?: string
+          status?: string
+          trigger?: string
+          triggered_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cron_runs_triggered_by_fkey"
+            columns: ["triggered_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -2798,6 +2857,17 @@ export type Database = {
     }
     Functions: {
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      rpc_apply_late_fee: {
+        Args: {
+          p_invoice_id: string
+          p_line: Json
+          p_notifications?: Json
+          p_now: string
+          p_ticket_id: string
+          p_total_cents: number
+        }
+        Returns: Json
+      }
       rpc_assign_invoice_number: {
         Args: { p_invoice_id: string }
         Returns: string
@@ -2829,8 +2899,91 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_create_estimated_invoice: {
+        Args: {
+          p_invoice: Json
+          p_notifications?: Json
+          p_now: string
+          p_stage_due_at: string
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
+      rpc_cron_begin_run: {
+        Args: {
+          p_job: string
+          p_now: string
+          p_simulated: boolean
+          p_trigger: string
+          p_triggered_by: string
+        }
+        Returns: Json
+      }
+      rpc_cron_context: { Args: never; Returns: Json }
+      rpc_cron_due_agreements: {
+        Args: { p_limit: number; p_today: string }
+        Returns: Json
+      }
+      rpc_cron_expired_photos: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
+      }
+      rpc_cron_finish_run: {
+        Args: {
+          p_counts: Json
+          p_errors: Json
+          p_remaining: boolean
+          p_run_id: string
+          p_status: string
+        }
+        Returns: undefined
+      }
+      rpc_cron_overdue_summaries: { Args: { p_today: string }; Returns: Json }
+      rpc_cron_pause_candidates: {
+        Args: { p_limit: number; p_owner_id: string }
+        Returns: Json
+      }
+      rpc_cron_ticket_candidates: {
+        Args: { p_after: string; p_limit: number }
+        Returns: Json
+      }
+      rpc_escalate_ticket: {
+        Args: {
+          p_level: number
+          p_notifications?: Json
+          p_now: string
+          p_reason: string
+          p_status: Database["public"]["Enums"]["ticket_status"]
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       rpc_login_gate_state: {
         Args: { p_ip: unknown; p_username: string }
+        Returns: Json
+      }
+      rpc_mark_photos_deleted: {
+        Args: { p_ids: Json; p_now: string }
+        Returns: number
+      }
+      rpc_mark_ticket_overdue: {
+        Args: {
+          p_escalation_level: number
+          p_from: Database["public"]["Enums"]["ticket_status"]
+          p_notifications?: Json
+          p_now: string
+          p_reason: string
+          p_reminder_no: number
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
+      rpc_notify_once: {
+        Args: {
+          p_dedupe_key: string
+          p_notifications: Json
+          p_owner_id: string
+        }
         Returns: Json
       }
       rpc_open_billing_cycle: {
@@ -2838,6 +2991,8 @@ export type Database = {
           p_agreement_id: string
           p_cycle_no: number
           p_notifications?: Json
+          p_now?: string
+          p_overdue_notifications?: Json
           p_stage_due_at: string
         }
         Returns: Json
@@ -2852,6 +3007,15 @@ export type Database = {
           p_role: Database["public"]["Enums"]["user_role"]
           p_user_id: string
           p_username: string
+        }
+        Returns: Json
+      }
+      rpc_raise_dispute: {
+        Args: {
+          p_actor_id: string
+          p_notifications?: Json
+          p_reason: string
+          p_ticket_id: string
         }
         Returns: Json
       }
@@ -2876,6 +3040,17 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_record_ticket_reminder: {
+        Args: {
+          p_metadata?: Json
+          p_notifications?: Json
+          p_now: string
+          p_reminder_no: number
+          p_status: Database["public"]["Enums"]["ticket_status"]
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       rpc_reject_meter_submission: {
         Args: {
           p_actor_id: string
@@ -2890,6 +3065,17 @@ export type Database = {
       }
       rpc_reset_account_password: {
         Args: { p_actor_id: string; p_target_id: string }
+        Returns: Json
+      }
+      rpc_resolve_dispute: {
+        Args: {
+          p_actor_id: string
+          p_notifications?: Json
+          p_outcome: Database["public"]["Enums"]["dispute_status"]
+          p_resolution: string
+          p_stage_due_at?: string
+          p_ticket_id: string
+        }
         Returns: Json
       }
       rpc_return_machine: {
@@ -2935,6 +3121,16 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_set_ticket_pause: {
+        Args: {
+          p_notifications?: Json
+          p_now: string
+          p_pause: boolean
+          p_reason: string
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       rpc_settle_deposit: {
         Args: {
           p_actor_id: string
@@ -2976,6 +3172,7 @@ export type Database = {
       rpc_transition_ticket: {
         Args: {
           p_actor_id: string
+          p_due_date?: string
           p_event_type?: Database["public"]["Enums"]["ticket_event_type"]
           p_from: Database["public"]["Enums"]["ticket_status"]
           p_invoice_status?: Database["public"]["Enums"]["invoice_status"]
@@ -3115,6 +3312,9 @@ export type Database = {
         | "MANUAL_ENTRY"
         | "BASELINE"
         | "NOTE"
+        | "PAUSED"
+        | "RESUMED"
+        | "LATE_FEE"
       ticket_status:
         | "METER_REQUESTED"
         | "PENDING_OWNER_REVIEW"
@@ -3351,6 +3551,9 @@ export const Constants = {
         "MANUAL_ENTRY",
         "BASELINE",
         "NOTE",
+        "PAUSED",
+        "RESUMED",
+        "LATE_FEE",
       ],
       ticket_status: [
         "METER_REQUESTED",

@@ -14,10 +14,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:dev": "playwright test --config=playwright.dev.config.ts",
     "test:db": "vitest run --config vitest.db.config.mts",
     "db:push": "supabase db push",
     "db:types": "supabase gen types typescript --linked > src/types/db.ts",
-    "db:seed": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed.ts"
+    "db:seed": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed.ts",
+    "cron:run": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cron-run.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

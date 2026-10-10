@@ -13,7 +13,10 @@ import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 import { INVOICE_STATUS_LABEL } from "@/lib/status-labels";
 import { getTicket } from "@/lib/tickets/queries";
+import { isMeterStage } from "@/lib/tickets/states";
 import { currentDue, nextStep } from "@/lib/tickets/view";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Ticket" };
 
@@ -64,6 +67,16 @@ export default async function OwnerTicketPage({ params }: PageProps<"/owner/tick
               <dd className="font-medium">{dueText(currentDue(ticket))}</dd>
             </div>
           </dl>
+          {ticket.status === "PENDING_OWNER_REVIEW" && (
+            <Link href={`/owner/tickets/${ticket.id}/review`} className={cn(buttonVariants(), "mt-4 h-12 w-full text-base sm:w-auto sm:px-6")}>
+              {ticket.invoice?.type === "ESTIMATED" ? "Review the estimated invoice" : "Review the reading"}
+            </Link>
+          )}
+          {isMeterStage({ status: ticket.status, statusBeforeOverdue: ticket.status_before_overdue }) && (
+            <Link href={`/owner/tickets/${ticket.id}/enter`} className={cn(buttonVariants({ variant: "outline" }), "mt-4 h-12 w-full text-base sm:w-auto sm:px-6")}>
+              Enter the reading for the customer
+            </Link>
+          )}
           <p className="mt-4 text-sm text-muted-foreground">
             Period {formatDate(ticket.period_start)} to {formatDate(ticket.period_end)} ({ticket.cycle_length_days} days).{" "}
             <Link href={`/owner/agreements/${ticket.agreement_id}`} className="underline underline-offset-4">

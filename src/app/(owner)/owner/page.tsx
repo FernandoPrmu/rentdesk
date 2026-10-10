@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { listDepositsToSettle } from "@/lib/deposits/queries";
+import { countApprovals } from "@/lib/tickets/queries";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Home" };
@@ -15,7 +16,7 @@ export const metadata: Metadata = { title: "Home" };
 // Placeholder dashboard: the owner dashboard (RPT-01) comes with billing cycles.
 export default async function OwnerHomePage() {
   const user = await requireUser("OWNER");
-  const deposits = await listDepositsToSettle();
+  const [deposits, approvals] = await Promise.all([listDepositsToSettle(), countApprovals()]);
   return (
     <>
       <PageHeader title={`Hello, ${user.full_name || user.username}`} description="Your rental business at a glance" />
@@ -45,9 +46,19 @@ export default async function OwnerHomePage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Billing</CardTitle>
-            <CardDescription>Meter readings, invoices and payments will appear here.</CardDescription>
+            <CardTitle>Waiting for your review</CardTitle>
+            <CardDescription>
+              {approvals === 0 ? "No meter readings to check." : `${approvals} meter ${approvals === 1 ? "reading" : "readings"} or estimates to check.`}
+            </CardDescription>
           </CardHeader>
+          <CardContent className="flex flex-col gap-2 sm:flex-row">
+            <Link href="/owner/approvals" className={cn(buttonVariants({ variant: approvals > 0 ? "default" : "outline" }), "h-12 text-base")} data-testid="home-approvals">
+              Approvals ({approvals})
+            </Link>
+            <Link href="/owner/tickets" className={cn(buttonVariants({ variant: "outline" }), "h-12 text-base")}>
+              All tickets
+            </Link>
+          </CardContent>
         </Card>
       </div>
     </>

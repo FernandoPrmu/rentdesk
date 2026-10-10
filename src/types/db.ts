@@ -328,6 +328,84 @@ export type Database = {
           },
         ]
       }
+      credit_refunds: {
+        Row: {
+          amount_cents: number
+          created_at: string
+          created_by: string
+          credit_id: string
+          customer_id: string
+          id: string
+          method: Database["public"]["Enums"]["payment_method"]
+          note: string | null
+          owner_id: string
+          reference: string | null
+          refunded_on: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string
+          created_by: string
+          credit_id: string
+          customer_id: string
+          id?: string
+          method: Database["public"]["Enums"]["payment_method"]
+          note?: string | null
+          owner_id: string
+          reference?: string | null
+          refunded_on: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string
+          created_by?: string
+          credit_id?: string
+          customer_id?: string
+          id?: string
+          method?: Database["public"]["Enums"]["payment_method"]
+          note?: string | null
+          owner_id?: string
+          reference?: string | null
+          refunded_on?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_refunds_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_refunds_credit_fkey"
+            columns: ["credit_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "credits"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "credit_refunds_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "credit_refunds_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "credit_refunds_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       credits: {
         Row: {
           agreement_id: string | null
@@ -345,6 +423,7 @@ export type Database = {
           received_on: string | null
           reference: string | null
           refunded_at: string | null
+          refunded_cents: number
           source_invoice_id: string | null
           source_payment_id: string | null
           status: Database["public"]["Enums"]["credit_status"]
@@ -366,6 +445,7 @@ export type Database = {
           received_on?: string | null
           reference?: string | null
           refunded_at?: string | null
+          refunded_cents?: number
           source_invoice_id?: string | null
           source_payment_id?: string | null
           status?: Database["public"]["Enums"]["credit_status"]
@@ -387,6 +467,7 @@ export type Database = {
           received_on?: string | null
           reference?: string | null
           refunded_at?: string | null
+          refunded_cents?: number
           source_invoice_id?: string | null
           source_payment_id?: string | null
           status?: Database["public"]["Enums"]["credit_status"]
@@ -1975,11 +2056,106 @@ export type Database = {
           },
         ]
       }
+      payment_allocations: {
+        Row: {
+          applied_cents: number
+          balance_after_cents: number | null
+          created_at: string
+          customer_id: string
+          id: string
+          invoice_id: string
+          owner_id: string
+          payment_id: string
+          planned_cents: number
+          release_reason: string | null
+          released_at: string | null
+          ticket_id: string
+          updated_at: string
+          waiting: boolean
+        }
+        Insert: {
+          applied_cents?: number
+          balance_after_cents?: number | null
+          created_at?: string
+          customer_id: string
+          id?: string
+          invoice_id: string
+          owner_id: string
+          payment_id: string
+          planned_cents: number
+          release_reason?: string | null
+          released_at?: string | null
+          ticket_id: string
+          updated_at?: string
+          waiting?: boolean
+        }
+        Update: {
+          applied_cents?: number
+          balance_after_cents?: number | null
+          created_at?: string
+          customer_id?: string
+          id?: string
+          invoice_id?: string
+          owner_id?: string
+          payment_id?: string
+          planned_cents?: number
+          release_reason?: string | null
+          released_at?: string | null
+          ticket_id?: string
+          updated_at?: string
+          waiting?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_allocations_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_invoice_fkey"
+            columns: ["invoice_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_payment_fkey"
+            columns: ["payment_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_ticket_fkey"
+            columns: ["ticket_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "billing_cycle_tickets"
+            referencedColumns: ["id", "owner_id"]
+          },
+        ]
+      }
       payment_slips: {
         Row: {
           created_at: string
           id: string
           mime_type: string
+          original_sha256: string | null
           owner_id: string
           payment_id: string
           retention_until: string | null
@@ -1993,6 +2169,7 @@ export type Database = {
           created_at?: string
           id?: string
           mime_type: string
+          original_sha256?: string | null
           owner_id: string
           payment_id: string
           retention_until?: string | null
@@ -2006,6 +2183,7 @@ export type Database = {
           created_at?: string
           id?: string
           mime_type?: string
+          original_sha256?: string | null
           owner_id?: string
           payment_id?: string
           retention_until?: string | null
@@ -2051,22 +2229,25 @@ export type Database = {
           accepted_amount_cents: number | null
           amount_cents: number
           created_at: string
+          credit_cents: number
           customer_id: string
           duplicate_of_payment_id: string | null
+          duplicate_reasons: string[]
           id: string
           idempotency_key: string | null
-          invoice_id: string
           method: Database["public"]["Enums"]["payment_method"]
           note: string | null
           owner_id: string
           paid_on: string
           reference: string | null
           reject_reason: string | null
+          reverse_reason: string | null
+          reversed_at: string | null
+          reversed_by: string | null
           source: Database["public"]["Enums"]["payment_source"]
           status: Database["public"]["Enums"]["payment_status"]
           submitted_at: string
           submitted_by: string
-          ticket_id: string
           updated_at: string
           verified_at: string | null
           verified_by: string | null
@@ -2075,22 +2256,25 @@ export type Database = {
           accepted_amount_cents?: number | null
           amount_cents: number
           created_at?: string
+          credit_cents?: number
           customer_id: string
           duplicate_of_payment_id?: string | null
+          duplicate_reasons?: string[]
           id?: string
           idempotency_key?: string | null
-          invoice_id: string
           method: Database["public"]["Enums"]["payment_method"]
           note?: string | null
           owner_id: string
           paid_on: string
           reference?: string | null
           reject_reason?: string | null
+          reverse_reason?: string | null
+          reversed_at?: string | null
+          reversed_by?: string | null
           source: Database["public"]["Enums"]["payment_source"]
           status?: Database["public"]["Enums"]["payment_status"]
           submitted_at?: string
           submitted_by: string
-          ticket_id: string
           updated_at?: string
           verified_at?: string | null
           verified_by?: string | null
@@ -2099,22 +2283,25 @@ export type Database = {
           accepted_amount_cents?: number | null
           amount_cents?: number
           created_at?: string
+          credit_cents?: number
           customer_id?: string
           duplicate_of_payment_id?: string | null
+          duplicate_reasons?: string[]
           id?: string
           idempotency_key?: string | null
-          invoice_id?: string
           method?: Database["public"]["Enums"]["payment_method"]
           note?: string | null
           owner_id?: string
           paid_on?: string
           reference?: string | null
           reject_reason?: string | null
+          reverse_reason?: string | null
+          reversed_at?: string | null
+          reversed_by?: string | null
           source?: Database["public"]["Enums"]["payment_source"]
           status?: Database["public"]["Enums"]["payment_status"]
           submitted_at?: string
           submitted_by?: string
-          ticket_id?: string
           updated_at?: string
           verified_at?: string | null
           verified_by?: string | null
@@ -2135,13 +2322,6 @@ export type Database = {
             referencedColumns: ["id", "owner_id"]
           },
           {
-            foreignKeyName: "payments_invoice_fkey"
-            columns: ["invoice_id", "owner_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id", "owner_id"]
-          },
-          {
             foreignKeyName: "payments_owner_id_fkey"
             columns: ["owner_id"]
             isOneToOne: false
@@ -2156,18 +2336,18 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "payments_submitted_by_fkey"
-            columns: ["submitted_by"]
+            foreignKeyName: "payments_reversed_by_fkey"
+            columns: ["reversed_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "payments_ticket_fkey"
-            columns: ["ticket_id", "owner_id"]
+            foreignKeyName: "payments_submitted_by_fkey"
+            columns: ["submitted_by"]
             isOneToOne: false
-            referencedRelation: "billing_cycle_tickets"
-            referencedColumns: ["id", "owner_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "payments_verified_by_fkey"
@@ -2350,6 +2530,217 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "owners"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      receipt_counters: {
+        Row: {
+          last_value: number
+          owner_id: string
+          prefix: string
+          updated_at: string
+        }
+        Insert: {
+          last_value?: number
+          owner_id: string
+          prefix?: string
+          updated_at?: string
+        }
+        Update: {
+          last_value?: number
+          owner_id?: string
+          prefix?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "receipt_counters_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: true
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "receipt_counters_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: true
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      receipt_pdf_versions: {
+        Row: {
+          byte_size: number
+          content_hash: string
+          created_at: string
+          customer_id: string
+          id: string
+          owner_id: string
+          reason: string
+          receipt_id: string
+          storage_path: string
+          template: string
+          version: number
+        }
+        Insert: {
+          byte_size: number
+          content_hash: string
+          created_at?: string
+          customer_id: string
+          id?: string
+          owner_id: string
+          reason: string
+          receipt_id: string
+          storage_path: string
+          template: string
+          version: number
+        }
+        Update: {
+          byte_size?: number
+          content_hash?: string
+          created_at?: string
+          customer_id?: string
+          id?: string
+          owner_id?: string
+          reason?: string
+          receipt_id?: string
+          storage_path?: string
+          template?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "receipt_pdf_versions_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "receipt_pdf_versions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "receipt_pdf_versions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receipt_pdf_versions_receipt_fkey"
+            columns: ["receipt_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "receipts"
+            referencedColumns: ["id", "owner_id"]
+          },
+        ]
+      }
+      receipts: {
+        Row: {
+          branding_snapshot: Json | null
+          content: Json
+          created_at: string
+          customer_id: string
+          id: string
+          issued_at: string
+          owner_id: string
+          payment_id: string
+          pdf_attempts: number
+          pdf_claimed_at: string | null
+          pdf_last_error: string | null
+          pdf_path: string | null
+          pdf_pending_reason: string | null
+          pdf_requested_at: string | null
+          pdf_revision: number
+          pdf_status: string
+          receipt_no: string
+          receipt_seq: number
+          reverse_reason: string | null
+          reversed_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          branding_snapshot?: Json | null
+          content: Json
+          created_at?: string
+          customer_id: string
+          id?: string
+          issued_at?: string
+          owner_id: string
+          payment_id: string
+          pdf_attempts?: number
+          pdf_claimed_at?: string | null
+          pdf_last_error?: string | null
+          pdf_path?: string | null
+          pdf_pending_reason?: string | null
+          pdf_requested_at?: string | null
+          pdf_revision?: number
+          pdf_status?: string
+          receipt_no: string
+          receipt_seq: number
+          reverse_reason?: string | null
+          reversed_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          branding_snapshot?: Json | null
+          content?: Json
+          created_at?: string
+          customer_id?: string
+          id?: string
+          issued_at?: string
+          owner_id?: string
+          payment_id?: string
+          pdf_attempts?: number
+          pdf_claimed_at?: string | null
+          pdf_last_error?: string | null
+          pdf_path?: string | null
+          pdf_pending_reason?: string | null
+          pdf_requested_at?: string | null
+          pdf_revision?: number
+          pdf_status?: string
+          receipt_no?: string
+          receipt_seq?: number
+          reverse_reason?: string | null
+          reversed_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "receipts_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "receipts_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "receipts_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receipts_payment_fkey"
+            columns: ["payment_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id", "owner_id"]
           },
         ]
       }
@@ -2984,6 +3375,10 @@ export type Database = {
         Args: { p_invoice_id: string; p_now: string }
         Returns: Json
       }
+      rpc_claim_receipt_pdf: {
+        Args: { p_now: string; p_receipt_id: string }
+        Returns: Json
+      }
       rpc_complete_password_change: {
         Args: { p_user_id: string }
         Returns: Json
@@ -3057,12 +3452,20 @@ export type Database = {
         Args: { p_limit: number; p_now: string }
         Returns: Json
       }
+      rpc_cron_orphan_slips: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
+      }
       rpc_cron_overdue_summaries: { Args: { p_today: string }; Returns: Json }
       rpc_cron_pause_candidates: {
         Args: { p_limit: number; p_owner_id: string }
         Returns: Json
       }
       rpc_cron_pending_invoice_pdfs: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
+      }
+      rpc_cron_pending_receipt_pdfs: {
         Args: { p_limit: number; p_now: string }
         Returns: Json
       }
@@ -3091,6 +3494,10 @@ export type Database = {
       }
       rpc_mark_photos_deleted: {
         Args: { p_ids: Json; p_now: string }
+        Returns: number
+      }
+      rpc_mark_receipt_pdf_failed: {
+        Args: { p_error: string; p_receipt_id: string }
         Returns: number
       }
       rpc_mark_ticket_overdue: {
@@ -3124,6 +3531,20 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_payment_duplicates: {
+        Args: {
+          p_amount_cents: number
+          p_original_sha256: string
+          p_owner_id: string
+          p_reference: string
+          p_sha256: string
+        }
+        Returns: Json
+      }
+      rpc_plan_allocation: {
+        Args: { p_amount_cents: number; p_invoice_ids: string[] }
+        Returns: Json
+      }
       rpc_provision_account: {
         Args: {
           p_created_by: string
@@ -3143,6 +3564,16 @@ export type Database = {
           p_notifications?: Json
           p_reason: string
           p_ticket_id: string
+        }
+        Returns: Json
+      }
+      rpc_reallocate_payment: {
+        Args: {
+          p_actor_id: string
+          p_invoice_ids: string[]
+          p_notifications?: Json
+          p_payment_id: string
+          p_reason: string
         }
         Returns: Json
       }
@@ -3180,6 +3611,29 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_record_manual_payment: {
+        Args: {
+          p_actor_id: string
+          p_customer_id: string
+          p_idempotency_key: string
+          p_invoice_ids: string[]
+          p_notifications?: Json
+          p_payment: Json
+        }
+        Returns: Json
+      }
+      rpc_record_receipt_pdf: {
+        Args: {
+          p_hash: string
+          p_path: string
+          p_receipt_id: string
+          p_revision: number
+          p_size: number
+          p_template: string
+          p_version: number
+        }
+        Returns: Json
+      }
       rpc_record_ticket_reminder: {
         Args: {
           p_metadata?: Json
@@ -3188,6 +3642,15 @@ export type Database = {
           p_reminder_no: number
           p_status: Database["public"]["Enums"]["ticket_status"]
           p_ticket_id: string
+        }
+        Returns: Json
+      }
+      rpc_refund_credit: {
+        Args: {
+          p_actor_id: string
+          p_credit_id: string
+          p_notifications?: Json
+          p_refund: Json
         }
         Returns: Json
       }
@@ -3224,6 +3687,15 @@ export type Database = {
           p_agreement_id: string
           p_return: Json
           p_today: string
+        }
+        Returns: Json
+      }
+      rpc_reverse_payment: {
+        Args: {
+          p_actor_id: string
+          p_notifications?: Json
+          p_payment_id: string
+          p_reason: string
         }
         Returns: Json
       }
@@ -3303,13 +3775,13 @@ export type Database = {
       rpc_submit_payment: {
         Args: {
           p_actor_id: string
+          p_customer_id: string
           p_idempotency_key: string
+          p_invoice_ids: string[]
           p_notifications?: Json
           p_payment: Json
           p_slip: Json
-          p_source: Database["public"]["Enums"]["payment_source"]
           p_stage_due_at: string
-          p_ticket_id: string
         }
         Returns: Json
       }
@@ -3355,8 +3827,6 @@ export type Database = {
           p_notifications?: Json
           p_payment_id: string
           p_reason?: string
-          p_stage_due_at?: string
-          p_ticket_id: string
         }
         Returns: Json
       }
@@ -3382,7 +3852,7 @@ export type Database = {
         | "CANCELLED_INVOICE"
         | "ADVANCE"
         | "MANUAL"
-      credit_status: "AVAILABLE" | "APPLIED" | "REFUNDED"
+      credit_status: "AVAILABLE" | "APPLIED" | "REFUNDED" | "VOID"
       deposit_transaction_kind:
         | "RECEIVED"
         | "DEDUCTED"
@@ -3431,7 +3901,12 @@ export type Database = {
         | "OTHER"
         | "SECURITY_DEPOSIT"
       payment_source: "CUSTOMER_SLIP" | "OWNER_MANUAL"
-      payment_status: "SUBMITTED" | "ACCEPTED" | "REJECTED" | "PARTIAL"
+      payment_status:
+        | "SUBMITTED"
+        | "ACCEPTED"
+        | "REJECTED"
+        | "PARTIAL"
+        | "REVERSED"
       reading_source: "CUSTOMER" | "OWNER_MANUAL"
       service_request_status:
         | "NEW"
@@ -3459,6 +3934,7 @@ export type Database = {
         | "PAUSED"
         | "RESUMED"
         | "LATE_FEE"
+        | "PAYMENT"
       ticket_status:
         | "METER_REQUESTED"
         | "PENDING_OWNER_REVIEW"
@@ -3613,7 +4089,7 @@ export const Constants = {
         "ADVANCE",
         "MANUAL",
       ],
-      credit_status: ["AVAILABLE", "APPLIED", "REFUNDED"],
+      credit_status: ["AVAILABLE", "APPLIED", "REFUNDED", "VOID"],
       deposit_transaction_kind: [
         "RECEIVED",
         "DEDUCTED",
@@ -3668,7 +4144,13 @@ export const Constants = {
         "SECURITY_DEPOSIT",
       ],
       payment_source: ["CUSTOMER_SLIP", "OWNER_MANUAL"],
-      payment_status: ["SUBMITTED", "ACCEPTED", "REJECTED", "PARTIAL"],
+      payment_status: [
+        "SUBMITTED",
+        "ACCEPTED",
+        "REJECTED",
+        "PARTIAL",
+        "REVERSED",
+      ],
       reading_source: ["CUSTOMER", "OWNER_MANUAL"],
       service_request_status: [
         "NEW",
@@ -3698,6 +4180,7 @@ export const Constants = {
         "PAUSED",
         "RESUMED",
         "LATE_FEE",
+        "PAYMENT",
       ],
       ticket_status: [
         "METER_REQUESTED",

@@ -26,6 +26,7 @@ import { previousReading } from "../src/lib/billing/usage.ts";
 import { BRANDING_SNAPSHOT_COLUMNS, brandingSnapshot } from "../src/lib/invoices/branding-snapshot.ts";
 import { generateInvoicePdf, INVOICE_BUCKET, type InvoiceFiles } from "../src/lib/invoices/pdf-job.ts";
 import { loadInvoiceFonts } from "../src/lib/invoices/pdf/fonts.ts";
+import { generateReceiptPdf, RECEIPT_BUCKET, type ReceiptFiles } from "../src/lib/payments/receipt-pdf/job.ts";
 import type { Rpc } from "../src/lib/tickets/transitions.ts";
 import type { Database, Json } from "../src/types/db";
 
@@ -531,37 +532,36 @@ async function submitPayment(ticket: Ticket, agreement: AgreementDef, partial: b
   const balance = invoice.total_cents - invoice.amount_paid_cents;
   const amount = partial ? Math.round(balance * 0.6) : balance;
   const bytes = slipPdf(ticket.id);
-  const slipPath = `${ticket.owner_id}/${ticket.id}/seed-slip.pdf`;
+  // Slips live in the customer's folder (decision 41).
+  const slipPath = `${ticket.owner_id}/${ticket.customer_id}/${stableId(`slip:${ticket.id}`)}.pdf`;
   check(await admin.storage.from("payment-slips").upload(slipPath, bytes, { contentType: "application/pdf", upsert: true }), "upload slip");
 
   check(
     await admin.rpc("rpc_submit_payment", {
-      p_ticket_id: ticket.id,
       p_actor_id: ticket.customer_id,
+      p_customer_id: ticket.customer_id,
       p_idempotency_key: stableId(`payment:${ticket.id}`),
-      p_source: "CUSTOMER_SLIP",
+      p_invoice_ids: [ticket.current_invoice_id!],
       p_payment: { amount_cents: amount, paid_on: colomboToday(), method: "BANK_TRANSFER", reference: `SEED-${ticket.id.slice(0, 8).toUpperCase()}` },
       p_slip: { storage_path: slipPath, sha256: sha256(bytes), mime_type: "application/pdf", size_bytes: bytes.length },
       p_stage_due_at: inDays(2),
-      p_notifications: [{ user_id: ticket.owner_id, event: "payment.submitted", title: "Payment slip submitted" }],
+      p_notifications: [{ user_id: ticket.owner_id, event: "payment.submitted", title: "Payment slip received", link: "/owner/payments/{entity_id}" }],
     }),
     `submit payment ${agreement.key}#${ticket.cycle_no}`,
   );
 }
 
 async function verifyPayment(ticket: Ticket, agreement: AgreementDef) {
-  const payment = check(
-    await admin.from("payments").select("id").eq("ticket_id", ticket.id).eq("status", "SUBMITTED").single(),
+  const waiting = check(
+    await admin.from("payment_allocations").select("payment_id").eq("ticket_id", ticket.id).eq("waiting", true).single(),
     "pending payment",
   );
   check(
     await admin.rpc("rpc_verify_payment", {
-      p_ticket_id: ticket.id,
-      p_payment_id: payment.id,
+      p_payment_id: waiting.payment_id,
       p_actor_id: ticket.owner_id,
       p_accept: true,
-      p_stage_due_at: inDays(7),
-      p_notifications: [{ user_id: ticket.customer_id, event: "payment.verified", title: "Payment confirmed" }],
+      p_notifications: [{ user_id: ticket.customer_id, event: "payment.receipt", title: "Payment received", link: "/customer/payments/{entity_id}" }],
     }),
     `verify payment ${agreement.key}#${ticket.cycle_no}`,
   );
@@ -614,6 +614,31 @@ async function makeInvoicePdfs(ids: Record<string, string>) {
     "pending pdfs",
   );
   for (const inv of pending) await generateInvoicePdf(rpc, files, () => loadInvoiceFonts(), inv.id);
+  return pending.length;
+}
+
+/** Decision 44: PDFs of the demo receipts, through the same job as the app. */
+async function makeReceiptPdfs(ids: Record<string, string>) {
+  const rpc: Rpc = async (fn, args) => {
+    const { data, error } = await admin.rpc(fn as never, args as never);
+    if (error) throw new Error(`${fn}: ${error.message}`);
+    return data;
+  };
+  const files: ReceiptFiles = {
+    async readBranding(path) {
+      const { data, error } = await admin.storage.from("branding").download(path);
+      if (error) return null;
+      return new Uint8Array(await data.arrayBuffer());
+    },
+    async writeReceiptPdf(path, bytes) {
+      check(await admin.storage.from(RECEIPT_BUCKET).upload(path, bytes, { contentType: "application/pdf", upsert: true }), "upload receipt pdf");
+    },
+  };
+  const pending = check(
+    await admin.from("receipts").select("id").in("owner_id", [ids.ownerA, ids.ownerB]).eq("pdf_status", "PENDING"),
+    "pending receipt pdfs",
+  );
+  for (const r of pending) await generateReceiptPdf(rpc, files, () => loadInvoiceFonts(), r.id);
   return pending.length;
 }
 
@@ -718,6 +743,7 @@ async function main() {
   await seedServiceRequests(ids);
   console.log(`  demo meter photos refreshed: ${await refreshDemoPhotos(ids)}`);
   console.log(`  invoice PDFs made: ${await makeInvoicePdfs(ids)}`);
+  console.log(`  receipt PDFs made: ${await makeReceiptPdfs(ids)}`);
 
   const tickets = check(
     await admin

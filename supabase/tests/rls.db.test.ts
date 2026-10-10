@@ -14,6 +14,7 @@ const ALL_RELATIONS = [
   "service_requests", "service_request_history", "notifications", "notification_templates",
   "idempotency_keys", "audit_logs", "agreement_terms_history", "customer_balances",
   "deposit_transactions", "agreement_deposit_balances", "invoice_pdf_versions",
+  "payment_allocations", "credit_refunds", "receipts", "receipt_counters", "receipt_pdf_versions",
 ];
 
 /** Relations with an owner_id column that authenticated users may read. */
@@ -24,7 +25,7 @@ const TENANT_RELATIONS = [
   "invoice_lines", "invoice_counters", "payments", "payment_slips", "disputes", "credits",
   "service_requests", "service_request_history", "notifications", "notification_templates", "audit_logs",
   "agreement_terms_history", "customer_balances", "deposit_transactions", "agreement_deposit_balances",
-  "invoice_pdf_versions",
+  "invoice_pdf_versions", "payment_allocations", "credit_refunds", "receipts", "receipt_counters", "receipt_pdf_versions",
 ];
 
 /** Rows visible to the current role; 0 when the relation is not granted at all. */
@@ -239,9 +240,9 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         ],
         [
           "payments",
-          `insert into public.payments (owner_id, invoice_id, ticket_id, customer_id, source, method, amount_cents, paid_on, submitted_by)
-           values ($1, $2, $3, $4, 'CUSTOMER_SLIP', 'BANK_TRANSFER', 100, current_date, $4)`,
-          [f.ownerA, f.invoices.a1Colour, f.tickets.a1Colour, f.custA1],
+          `insert into public.payments (owner_id, customer_id, source, method, amount_cents, paid_on, submitted_by)
+           values ($1, $2, 'CUSTOMER_SLIP', 'BANK_TRANSFER', 100, current_date, $2)`,
+          [f.ownerA, f.custA1],
         ],
         [
           "payment_slips",
@@ -276,7 +277,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
     });
   });
 
-  it("a customer can upload files only to their own ticket at the right stage", async () => {
+  it("a customer can upload meter photos only to their own ticket at the right stage, slips only to their own folder", async () => {
     await isolated(db, async () => {
       await asUser(db, f.custA1);
       const upload = (bucket: string, name: string) =>
@@ -288,15 +289,14 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
       expect((await upload("meter-photos", `${f.ownerA}/${f.tickets.a1Colour}/again.jpg`))?.code).toBe("42501");
       // Another customer's ticket -> denied.
       expect((await upload("meter-photos", `${f.ownerA}/${f.tickets.a2Mono}/x.jpg`))?.code).toBe("42501");
-      // Slip while no payment is expected -> denied.
-      expect((await upload("payment-slips", `${f.ownerA}/${f.tickets.a1Mono}/slip.pdf`))?.code).toBe("42501");
+      // Slips go to the customer's own folder (checked by the server before recording, decision 41).
+      expect(await upload("payment-slips", `${f.ownerA}/${f.custA1}/${f.slipA2}.jpg`)).toBeNull();
+      expect((await upload("payment-slips", `${f.ownerA}/${f.custA2}/other.pdf`))?.code).toBe("42501");
+      expect((await upload("payment-slips", `${f.ownerB}/${f.custA1}/other.pdf`))?.code).toBe("42501");
+      expect((await upload("payment-slips", `${f.ownerA}/${f.custA1}/deeper/x.pdf`))?.code).toBe("42501");
       // Branding is owner-only.
       expect((await upload("branding", `${f.ownerA}/logo2.png`))?.code).toBe("42501");
 
-      await asPostgres(db);
-      await asUser(db, f.custB1);
-      // B1's invoice is awaiting payment -> slip allowed.
-      expect(await upload("payment-slips", `${f.ownerB}/${f.tickets.b1Mono}/slip.pdf`)).toBeNull();
     });
   });
 
@@ -375,6 +375,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_assign_invoice_number",
         "rpc_assign_machine",
         "rpc_claim_invoice_pdf",
+        "rpc_claim_receipt_pdf",
         "rpc_complete_password_change",
         "rpc_confirm_meter_submission",
         "rpc_correct_meter_reading",
@@ -385,27 +386,37 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_cron_expired_photos",
         "rpc_cron_finish_run",
         "rpc_cron_orphan_photos",
+        "rpc_cron_orphan_slips",
         "rpc_cron_overdue_summaries",
         "rpc_cron_pause_candidates",
         "rpc_cron_pending_invoice_pdfs",
+        "rpc_cron_pending_receipt_pdfs",
         "rpc_cron_ticket_candidates",
         "rpc_escalate_ticket",
         "rpc_login_gate_state",
         "rpc_mark_invoice_pdf_failed",
         "rpc_mark_photos_deleted",
+        "rpc_mark_receipt_pdf_failed",
         "rpc_mark_ticket_overdue",
         "rpc_notify_once",
         "rpc_open_billing_cycle",
+        "rpc_payment_duplicates",
+        "rpc_plan_allocation",
         "rpc_provision_account",
         "rpc_raise_dispute",
+        "rpc_reallocate_payment",
         "rpc_reassign_machine",
         "rpc_record_invoice_pdf",
         "rpc_record_login_attempt",
+        "rpc_record_manual_payment",
+        "rpc_record_receipt_pdf",
         "rpc_record_ticket_reminder",
+        "rpc_refund_credit",
         "rpc_reject_meter_submission",
         "rpc_reset_account_password",
         "rpc_resolve_dispute",
         "rpc_return_machine",
+        "rpc_reverse_payment",
         "rpc_save_company_profile",
         "rpc_save_invoice_template",
         "rpc_session_state",

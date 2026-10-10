@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -319,12 +321,12 @@ describe.skipIf(!DB_URL)("client business rules (linked dev database, rolled bac
         await asService(db);
         const slip = await sqlError(
           db,
-          `select app.submit_payment($1, $2, gen_random_uuid(), 'CUSTOMER_SLIP', $3::jsonb, $4::jsonb, now() + interval '2 days')`,
+          `select app.submit_payment($1, $1, gen_random_uuid(), array[$2::uuid], $3::jsonb, $4::jsonb, now() + interval '2 days')`,
           [
-            f.tickets.b1Mono,
             f.custB1,
-            JSON.stringify({ amount_cents: RS(6500), paid_on: today, reference: `AFTER-RETURN-${f.tag}` }),
-            JSON.stringify({ storage_path: `${f.ownerB}/${f.tickets.b1Mono}/slip-after.pdf`, sha256: "b".repeat(64), mime_type: "application/pdf", size_bytes: 900 }),
+            f.invoices.b1Mono,
+            JSON.stringify({ amount_cents: RS(6500), paid_on: today, method: "BANK_TRANSFER", reference: `AFTER-RETURN-${f.tag}` }),
+            JSON.stringify({ storage_path: `${f.ownerB}/${f.custB1}/${randomUUID()}.pdf`, sha256: "b".repeat(64), mime_type: "application/pdf", size_bytes: 900 }),
           ],
         );
         expect(slip).toBeNull();
@@ -485,7 +487,7 @@ describe.skipIf(!DB_URL)("client business rules (linked dev database, rolled bac
 
         // Deductions are payments of method SECURITY_DEPOSIT; both invoices are paid and closed.
         const { rows: payments } = await db.query(
-          "select method, status, amount_cents::int from public.payments where invoice_id in (select id from public.invoices where agreement_id = $1) order by amount_cents desc",
+          "select p.method, p.status, p.amount_cents::int from public.payments p join public.payment_allocations a on a.payment_id = p.id where a.invoice_id in (select id from public.invoices where agreement_id = $1) order by p.amount_cents desc",
           [id],
         );
         expect(payments).toEqual([
@@ -524,7 +526,7 @@ describe.skipIf(!DB_URL)("client business rules (linked dev database, rolled bac
           [ticket],
         );
         expect(first[0]).toEqual({ status: "PARTIALLY_PAID", amount_paid_cents: RS(3000), ticket_status: "PARTIALLY_PAID" });
-        expect(await count(db, "select 1 from public.payments where method = 'SECURITY_DEPOSIT' and status = 'PARTIAL' and ticket_id = $1", [ticket])).toBe(1);
+        expect(await count(db, "select 1 from public.payments p join public.payment_allocations a on a.payment_id = p.id where p.method = 'SECURITY_DEPOSIT' and p.status = 'PARTIAL' and a.ticket_id = $1", [ticket])).toBe(1);
 
         // Nothing left to settle.
         await asService(db);

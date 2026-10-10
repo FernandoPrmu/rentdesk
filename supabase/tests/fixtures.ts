@@ -42,6 +42,7 @@ export function newFixtureIds() {
     keyA2Mono: id(),
     keyB1Mono: id(),
     keyA2Payment: id(),
+    slipA2: id(),
   };
 }
 
@@ -56,6 +57,9 @@ export interface Fixture extends FixtureIds {
 }
 
 const SHA = "a".repeat(64);
+
+/** The fixture's slip file (customer A2's folder). */
+export const slipPath = (f: FixtureIds) => `${f.ownerA}/${f.custA2}/${f.slipA2}.pdf`;
 
 /**
  * Invoices are built by the billing engine (the only place amounts are calculated);
@@ -166,9 +170,10 @@ export async function createFixture(db: pg.Client, options: { storage?: boolean 
       (select id from public.meter_submissions where idempotency_key = '${f.keyA2Mono}'),
       '${f.ownerA}', current_date + 7, now() + interval '7 days', null,
       ${json([{ user_id: f.custA2, event: "invoice.issued", title: "Invoice issued" }])});
-    select app.submit_payment('${tickets.a2Mono}', '${f.custA2}', '${f.keyA2Payment}', 'CUSTOMER_SLIP',
-      ${json({ amount_cents: 650_000, paid_on: new Date().toISOString().slice(0, 10), reference: `REF-${tag}` })},
-      ${json({ storage_path: `${f.ownerA}/${tickets.a2Mono}/slip.pdf`, sha256: SHA, mime_type: "application/pdf", size_bytes: 1200 })},
+    select app.submit_payment('${f.custA2}', '${f.custA2}', '${f.keyA2Payment}',
+      array[(select current_invoice_id from public.billing_cycle_tickets where id = '${tickets.a2Mono}')],
+      ${json({ amount_cents: 650_000, paid_on: new Date().toISOString().slice(0, 10), method: "BANK_TRANSFER", reference: `REF-${tag}` })},
+      ${json({ storage_path: slipPath(f), sha256: SHA, mime_type: "application/pdf", size_bytes: 1200 })},
       now() + interval '2 days');
 
     select app.submit_meter_reading('${tickets.b1Mono}', '${f.custB1}', '${f.keyB1Mono}', 'CUSTOMER',
@@ -194,7 +199,7 @@ export async function createFixture(db: pg.Client, options: { storage?: boolean 
       insert into storage.objects (bucket_id, name) values
         ('meter-photos', '${f.ownerA}/${tickets.a1Colour}/photo-1.jpg'),
         ('meter-photos', '${f.ownerB}/${tickets.b1Mono}/photo-3.jpg'),
-        ('payment-slips', '${f.ownerA}/${tickets.a2Mono}/slip.pdf'),
+        ('payment-slips', '${slipPath(f)}'),
         ('branding', '${f.ownerA}/logo.png'),
         ('branding', '${f.ownerB}/logo.png');
     `);
@@ -238,10 +243,14 @@ export async function deleteFixture(db: pg.Client, f: Fixture) {
       "notification_templates",
       "ticket_comments",
       "ticket_events",
+      "receipt_pdf_versions",
+      "receipts",
+      "payment_allocations",
       "payment_slips",
       "deposit_transactions",
       "invoice_pdf_versions",
       "invoice_lines",
+      "credit_refunds",
       "credits",
       "disputes",
       "payments",
@@ -264,6 +273,7 @@ export async function deleteFixture(db: pg.Client, f: Fixture) {
       "machines",
       "owner_settings",
       "invoice_counters",
+      "receipt_counters",
       "owner_company_profiles",
       "customers",
     ]) {

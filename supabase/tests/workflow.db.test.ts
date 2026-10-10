@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -184,43 +186,43 @@ describe.skipIf(!DB_URL)("workflow functions (linked dev database, rolled back)"
 
   it("verifying a full payment closes the ticket; a partial one keeps it open", async () => {
     await isolated(db, async () => {
-      const verify = "select app.verify_payment($1, $2, $3, $4, $5, $6, now() + interval '7 days') as r";
+      const verify = "select app.verify_payment($1, $2, $3, $4, $5) as r";
 
       await db.query("savepoint partial");
-      const partial = await db.query(verify, [f.tickets.a2Mono, f.payments.a2Mono, f.ownerA, true, 400_000, null]);
-      expect(partial.rows[0].r).toMatchObject({ status: "PARTIALLY_PAID", invoice_status: "PARTIALLY_PAID", balance_cents: 250_000 });
+      const partial = await db.query(verify, [f.payments.a2Mono, f.ownerA, true, 400_000, null]);
+      expect(partial.rows[0].r).toMatchObject({
+        status: "PARTIAL",
+        invoices: [{ ticket_status: "PARTIALLY_PAID", invoice_status: "PARTIALLY_PAID", balance_cents: 250_000 }],
+      });
       await db.query("rollback to savepoint partial");
 
-      expect((await sqlError(db, verify, [f.tickets.a2Mono, f.payments.a2Mono, f.ownerA, false, null, ""]))?.code).toBe("RD400");
+      expect((await sqlError(db, verify, [f.payments.a2Mono, f.ownerA, false, null, ""]))?.code).toBe("RD400");
 
-      const full = await db.query(verify, [f.tickets.a2Mono, f.payments.a2Mono, f.ownerA, true, null, null]);
-      expect(full.rows[0].r).toMatchObject({ status: "CLOSED", invoice_status: "PAID", balance_cents: 0 });
+      const full = await db.query(verify, [f.payments.a2Mono, f.ownerA, true, null, null]);
+      expect(full.rows[0].r).toMatchObject({ status: "ACCEPTED", invoices: [{ ticket_status: "CLOSED", invoice_status: "PAID", balance_cents: 0 }] });
       const { rows } = await db.query(
         "select closed_by, closed_at is not null as closed from public.billing_cycle_tickets where id = $1",
         [f.tickets.a2Mono],
       );
       expect(rows[0]).toEqual({ closed_by: f.ownerA, closed: true });
       // Second verification of the same payment is refused.
-      expect((await sqlError(db, verify, [f.tickets.a2Mono, f.payments.a2Mono, f.ownerA, true, null, null]))?.code).toBe("RD409");
+      expect((await sqlError(db, verify, [f.payments.a2Mono, f.ownerA, true, null, null]))?.code).toBe("RD409");
     });
   });
 
-  it("flags a reused bank reference as a possible duplicate", async () => {
+  it("flags a reused bank reference and amount as a possible duplicate", async () => {
     await isolated(db, async () => {
-      await db.query(
-        "select app.verify_payment($1, $2, $3, false, null, 'Amount does not match', now())",
-        [f.tickets.a2Mono, f.payments.a2Mono, f.ownerA],
-      );
+      await db.query("select app.verify_payment($1, $2, false, null, 'Amount does not match')", [f.payments.a2Mono, f.ownerA]);
       const resubmit = await db.query(
-        `select app.submit_payment($1, $2, gen_random_uuid(), 'CUSTOMER_SLIP', $3::jsonb, $4::jsonb, now()) as r`,
+        `select app.submit_payment($1, $1, gen_random_uuid(), array[$2::uuid], $3::jsonb, $4::jsonb, now()) as r`,
         [
-          f.tickets.a2Mono,
           f.custA2,
-          JSON.stringify({ amount_cents: 650_000, paid_on: "2026-10-07", reference: `ref-${f.tag}` }),
-          JSON.stringify({ storage_path: `${f.ownerA}/${f.tickets.a2Mono}/slip2.pdf`, sha256: "c".repeat(64), mime_type: "application/pdf", size_bytes: 10 }),
+          f.invoices.a2Mono,
+          JSON.stringify({ amount_cents: 650_000, paid_on: "2026-10-07", method: "BANK_TRANSFER", reference: `ref-${f.tag}` }),
+          JSON.stringify({ storage_path: `${f.ownerA}/${f.custA2}/${randomUUID()}.pdf`, sha256: "c".repeat(64), mime_type: "application/pdf", size_bytes: 10 }),
         ],
       );
-      expect(resubmit.rows[0].r.duplicate_of_payment_id).toBe(f.payments.a2Mono);
+      expect(resubmit.rows[0].r).toMatchObject({ duplicate_of_payment_id: f.payments.a2Mono, duplicate_reasons: ["REFERENCE"] });
     });
   });
 

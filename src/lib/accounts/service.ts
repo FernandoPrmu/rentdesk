@@ -5,6 +5,8 @@ import type { AccountStatusValue, CustomerInput, OwnerInput } from "@/lib/accoun
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { generateTemporaryPassword } from "@/lib/auth/temporary-password";
 import { usernameCandidates, usernameToEmail } from "@/lib/auth/username";
+import { syncPauses } from "@/lib/cron/daily";
+import { supabaseRpc } from "@/lib/cron/server";
 import { dbErrorMessage } from "@/lib/db-errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/types/db";
@@ -129,13 +131,22 @@ export async function changeAccountStatus(
   status: AccountStatusValue,
   reason: string,
 ): Promise<ActionResult> {
-  const { error } = await createAdminClient().rpc("rpc_set_account_status", {
+  const admin = createAdminClient();
+  const { error } = await admin.rpc("rpc_set_account_status", {
     p_actor_id: actor.id,
     p_target_id: targetId,
     p_status: status,
     p_reason: reason,
   });
-  return error ? fail(dbErrorMessage(error, "accounts")) : ok(undefined);
+  if (error) return fail(dbErrorMessage(error, "accounts"));
+  // TKT-12: pause or resume the open tickets now; the daily job would otherwise do it tonight.
+  const ownerId = actor.role === "ADMIN" ? targetId : actor.id;
+  try {
+    await syncPauses(supabaseRpc(admin), new Date(), ownerId, 50, { paused: 0, resumed: 0, skipped: 0 });
+  } catch (syncError) {
+    console.error("[accounts] ticket pause sync:", syncError);
+  }
+  return ok(undefined);
 }
 
 /**

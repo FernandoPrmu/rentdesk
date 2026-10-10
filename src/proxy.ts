@@ -134,8 +134,19 @@ async function loadState(userId: string) {
 
 export const config = {
   matcher: [
-    // Everything except Next internals, API routes (cron has its own secret),
-    // the service worker, the manifest and static files.
-    "/((?!_next/|api/|sw\\.js|swe-worker|manifest\\.webmanifest|favicon\\.ico|icon|apple-icon|.*\\.(?:png|jpg|jpeg|svg|webp|ico|txt|js|map)$).*)",
+    {
+      // Everything except Next internals, API routes (cron has its own secret),
+      // the service worker, the manifest and static files.
+      source:
+        "/((?!_next/|api/|sw\\.js|swe-worker|manifest\\.webmanifest|favicon\\.ico|icon|apple-icon|.*\\.(?:png|jpg|jpeg|svg|webp|ico|txt|js|map)$).*)",
+      // Router prefetches (production builds prefetch every visible link) skip the
+      // guard: a redirect answer is logged in the browser as a failed load. They carry
+      // only the static shell (partial prefetching), every page checks the user again
+      // (requireUser), and the real navigation comes through here.
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
   ],
 };

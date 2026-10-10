@@ -13,7 +13,7 @@ const ALL_RELATIONS = [
   "invoice_lines", "invoice_counters", "payments", "payment_slips", "disputes", "credits",
   "service_requests", "service_request_history", "notifications", "notification_templates",
   "idempotency_keys", "audit_logs", "agreement_terms_history", "customer_balances",
-  "deposit_transactions", "agreement_deposit_balances",
+  "deposit_transactions", "agreement_deposit_balances", "invoice_pdf_versions",
 ];
 
 /** Relations with an owner_id column that authenticated users may read. */
@@ -24,6 +24,7 @@ const TENANT_RELATIONS = [
   "invoice_lines", "invoice_counters", "payments", "payment_slips", "disputes", "credits",
   "service_requests", "service_request_history", "notifications", "notification_templates", "audit_logs",
   "agreement_terms_history", "customer_balances", "deposit_transactions", "agreement_deposit_balances",
+  "invoice_pdf_versions",
 ];
 
 /** Rows visible to the current role; 0 when the relation is not granted at all. */
@@ -103,11 +104,9 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
       expect(updateMachine.rowCount).toBe(0);
       const updateCustomer = await db.query("update public.customers set name = 'hacked' where id = $1", [f.custB1]);
       expect(updateCustomer.rowCount).toBe(0);
-      const updateBranding = await db.query(
-        "update public.owner_company_profiles set company_name = 'hacked' where owner_id = $1",
-        [f.ownerB],
-      );
-      expect(updateBranding.rowCount).toBe(0);
+      // Migration 0022: the company profile is server-write-only.
+      const updateBranding = await sqlError(db, "update public.owner_company_profiles set company_name = 'hacked' where owner_id = $1", [f.ownerB]);
+      expect(updateBranding?.code).toBe("42501");
 
       // Agreements are written only through rpc_assign_machine (cross-tenant links: machines.db.test.ts).
       const crossLink = await sqlError(
@@ -143,7 +142,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
     });
   });
 
-  it("an owner edits their own machine details and branding; agreements and machine status go through rpc", async () => {
+  it("an owner edits their own machine details; branding, agreements and machine status go through rpc", async () => {
     await isolated(db, async () => {
       await asUser(db, f.ownerA);
       expect(await sqlError(db, "update public.machines set notes = 'serviced' where id = $1", [f.machineASpare])).toBeNull();
@@ -153,9 +152,8 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
           `NEW-${f.tag}`,
         ]),
       ).toBeNull();
-      expect(
-        await sqlError(db, "update public.owner_company_profiles set phone = '011' where owner_id = $1", [f.ownerA]),
-      ).toBeNull();
+      // Migration 0022: company details go through rpc_save_company_profile (English-only validation, decision 33).
+      expect((await sqlError(db, "update public.owner_company_profiles set phone = '011' where owner_id = $1", [f.ownerA]))?.code).toBe("42501");
       // Migration 0014: no direct agreement writes, no hand-set machine status.
       for (const [sql, params] of [
         [
@@ -376,6 +374,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_apply_late_fee",
         "rpc_assign_invoice_number",
         "rpc_assign_machine",
+        "rpc_claim_invoice_pdf",
         "rpc_complete_password_change",
         "rpc_confirm_meter_submission",
         "rpc_correct_meter_reading",
@@ -388,9 +387,11 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_cron_orphan_photos",
         "rpc_cron_overdue_summaries",
         "rpc_cron_pause_candidates",
+        "rpc_cron_pending_invoice_pdfs",
         "rpc_cron_ticket_candidates",
         "rpc_escalate_ticket",
         "rpc_login_gate_state",
+        "rpc_mark_invoice_pdf_failed",
         "rpc_mark_photos_deleted",
         "rpc_mark_ticket_overdue",
         "rpc_notify_once",
@@ -398,6 +399,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_provision_account",
         "rpc_raise_dispute",
         "rpc_reassign_machine",
+        "rpc_record_invoice_pdf",
         "rpc_record_login_attempt",
         "rpc_record_ticket_reminder",
         "rpc_reject_meter_submission",
@@ -405,6 +407,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_resolve_dispute",
         "rpc_return_machine",
         "rpc_save_company_profile",
+        "rpc_save_invoice_template",
         "rpc_session_state",
         "rpc_set_account_status",
         "rpc_set_invoice_credit",

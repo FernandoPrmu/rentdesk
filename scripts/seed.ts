@@ -468,7 +468,8 @@ async function submitMeter(ticket: Ticket, agreement: AgreementDef, ids: Record<
     COLOUR: colour ? previous("COLOUR") + perCycle.COLOUR * context.cyclesCovered : null,
   });
 
-  const photoPath = `${ticket.owner_id}/${ticket.id}/seed-meter.jpg`;
+  // One photo per attempt (a rejected attempt keeps its row).
+  const photoPath = `${ticket.owner_id}/${ticket.id}/seed-meter${ticket.rejection_count ? `-${ticket.rejection_count}` : ""}.jpg`;
   const photo = await demoPhotoFor(ticket.machine_id, submission.readings);
   check(await admin.storage.from("meter-photos").upload(photoPath, photo, { contentType: "image/jpeg", upsert: true }), "upload meter photo");
 
@@ -476,7 +477,8 @@ async function submitMeter(ticket: Ticket, agreement: AgreementDef, ids: Record<
     await admin.rpc("rpc_submit_meter_reading", {
       p_ticket_id: ticket.id,
       p_actor_id: ticket.customer_id,
-      p_idempotency_key: stableId(`meter:${ticket.id}`),
+      // A new key after each rejection, so a re-run sends a fresh reading instead of replaying the rejected one.
+      p_idempotency_key: stableId(`meter:${ticket.id}:${ticket.rejection_count}`),
       p_source: "CUSTOMER",
       p_readings: submission.readings as unknown as Json,
       p_photo: { storage_path: photoPath, captured_at: new Date().toISOString() },
@@ -580,7 +582,7 @@ async function refreshDemoPhotos(ids: Record<string, string>) {
       .select("storage_path, submission:meter_submissions!meter_photos_submission_fkey(ticket:billing_cycle_tickets!meter_submissions_ticket_fkey(machine_id), readings:meter_readings!meter_readings_submission_fkey(counter_type, current_value))")
       .in("owner_id", [ids.ownerA, ids.ownerB])
       .is("deleted_at", null)
-      .like("storage_path", "%/seed-meter.jpg"),
+      .like("storage_path", "%/seed-meter%.jpg"),
     "demo photos",
   ) as unknown as { storage_path: string; submission: { ticket: { machine_id: string }; readings: { counter_type: string; current_value: number }[] } }[];
   for (const p of photos) {

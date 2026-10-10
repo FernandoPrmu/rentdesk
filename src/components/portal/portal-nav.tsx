@@ -111,7 +111,9 @@ function BottomLinks({ portal, pathname, className }: { portal: Portal; pathname
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex h-16 flex-col items-center justify-center gap-1 text-xs font-medium",
+                  "flex h-16 flex-col items-center justify-center gap-1 font-medium",
+                  // Six items share 360 px: a slightly smaller label keeps "Customers" whole.
+                  items.length > 5 ? "text-[11px] tracking-tight" : "text-xs",
                   active ? "text-primary" : "text-muted-foreground",
                 )}
               >

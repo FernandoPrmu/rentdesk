@@ -64,7 +64,7 @@ describe("every transition function: allowed ones call their rpc, forbidden ones
       let allowedSomewhere = false;
       for (const [status, before] of STATES) {
         for (const actor of ACTORS) {
-          const rpc = vi.fn(async () => ({}));
+          const rpc = vi.fn<Rpc>(async () => ({}));
           const t = ticket(status, before);
           const label = `${action} by ${actor} on ${status}${before ? ` (from ${before})` : ""}`;
           if (canPerform(action, actor, { status, statusBeforeOverdue: before })) {

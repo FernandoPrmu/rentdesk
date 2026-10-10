@@ -373,23 +373,41 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
       );
       const wrappers = rows.filter((r) => r.name.startsWith("rpc_"));
       expect(wrappers.map((r) => r.name).sort()).toEqual([
+        "rpc_apply_late_fee",
         "rpc_assign_invoice_number",
         "rpc_assign_machine",
         "rpc_complete_password_change",
         "rpc_confirm_meter_submission",
+        "rpc_create_estimated_invoice",
+        "rpc_cron_begin_run",
+        "rpc_cron_context",
+        "rpc_cron_due_agreements",
+        "rpc_cron_expired_photos",
+        "rpc_cron_finish_run",
+        "rpc_cron_overdue_summaries",
+        "rpc_cron_pause_candidates",
+        "rpc_cron_ticket_candidates",
+        "rpc_escalate_ticket",
         "rpc_login_gate_state",
+        "rpc_mark_photos_deleted",
+        "rpc_mark_ticket_overdue",
+        "rpc_notify_once",
         "rpc_open_billing_cycle",
         "rpc_provision_account",
+        "rpc_raise_dispute",
         "rpc_reassign_machine",
         "rpc_record_login_attempt",
+        "rpc_record_ticket_reminder",
         "rpc_reject_meter_submission",
         "rpc_reset_account_password",
+        "rpc_resolve_dispute",
         "rpc_return_machine",
         "rpc_save_company_profile",
         "rpc_session_state",
         "rpc_set_account_status",
         "rpc_set_invoice_credit",
         "rpc_set_machine_status",
+        "rpc_set_ticket_pause",
         "rpc_settle_deposit",
         "rpc_submit_meter_reading",
         "rpc_submit_payment",
@@ -410,7 +428,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
       for (const actAs of [() => asAnon(db), () => asUser(db, f.ownerA), () => asUser(db, f.custA1), () => asUser(db, f.admin)]) {
         await actAs();
         for (const r of wrappers) {
-          const nulls = r.args.split(", ").map((type) => `null::${type}`).join(", ");
+          const nulls = r.args ? r.args.split(", ").map((type) => `null::${type}`).join(", ") : "";
           expect((await sqlError(db, `select public.${r.name}(${nulls})`))?.code, r.signature).toBe("42501");
         }
         await asPostgres(db);

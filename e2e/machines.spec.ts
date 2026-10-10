@@ -9,7 +9,7 @@ import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX } from "./support/demo";
 test.describe.configure({ mode: "serial" });
 
 test.afterAll(async () => {
-  await deleteE2eMachines();
+  await deleteE2eMachines(serial);
 });
 
 const serial = `${E2E_SERIAL_PREFIX}${Date.now().toString(36).toUpperCase()}`;
@@ -97,7 +97,7 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
     await expect(card).toBeVisible();
     await expect(card).toContainText("Ricoh MP 2555");
     await expect(card).toContainText("Front office");
-    await expect(card).toContainText("Rs. 5,000 every 30 days");
+    await expect(card).toContainText("Rs. 5,000 per month");
     await expect(card).toContainText("Next meter reading");
     // Another customer's machines never show up.
     await expect(page.getByText("LCS-C-001")).toHaveCount(0);
@@ -129,10 +129,13 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
 
     await page.getByLabel("Closing B&W reading").fill("12,000");
     await page.getByLabel("Reason for the return").fill("Customer moved to a bigger machine");
+    // The final invoice preview says what is wrong before saving, and the server refuses it too.
+    await expect(page.getByTestId("final-invoice-preview")).toContainText("lower than the previous reading 12500");
     await page.getByRole("button", { name: "Return machine" }).click();
-    await expect(page.getByText(/lower than the last reading 12500/)).toBeVisible();
+    await expect(page.locator("#field-closing_bw-error")).toContainText("lower than the previous reading 12500");
 
     await page.getByLabel("Closing B&W reading").fill("13,100");
+    await expect(page.getByTestId("final-invoice-total")).toBeVisible();
     await page.getByRole("button", { name: "Return machine" }).click();
     await expect(page).toHaveURL(/\?returned=1$/);
     await expect(page.getByText("The machine was returned and is available again.")).toBeVisible();
@@ -185,14 +188,15 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
     await expect(page.getByRole("link", { name: "Assign to a customer" })).toHaveCount(0);
   });
 
-  test("return is blocked while a billing ticket is open", async ({ page }) => {
+  test("return is blocked while a meter reading waits for review (RET-01)", async ({ page }) => {
     await signInOwner(page);
-    // Seed: Perera Printers' colour machine has a ticket waiting for the meter reading.
-    await page.goto("/owner/machines?q=LCS-C-001");
+    // Seed: Perera Printers' mono machine has a reading waiting for the owner's review.
+    await page.goto("/owner/machines?q=LCS-M-002");
     await page.getByRole("list", { name: "Machines" }).getByRole("link").first().click();
     await page.getByRole("link", { name: "Return", exact: true }).click();
     await expect(page.getByText("This machine cannot be returned yet")).toBeVisible();
-    await expect(page.getByText(/Billing ticket for cycle 1: Meter requested/)).toBeVisible();
+    await expect(page.getByText(/so the final bill uses confirmed numbers/)).toBeVisible();
+    await expect(page.getByText(/Meter reading for cycle 1: Pending owner review/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Return machine" })).toHaveCount(0);
   });
 });

@@ -3,14 +3,14 @@ import Link from "next/link";
 import { MachineTypeBadge } from "@/components/machines/machine-badges";
 import { Badge } from "@/components/ui/badge";
 import type { CustomerAgreement } from "@/lib/agreements/queries";
-import { isEndingSoon } from "@/lib/agreements/cycle-calendar";
+import { billingDayText, isEndingSoon } from "@/lib/agreements/cycle-calendar";
 import { formatCount, formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 
 /** One line of terms: commitment, included copies and rates. */
 export function termsLine(a: CustomerAgreement) {
   const parts = [
-    `${formatRupees(a.monthly_commitment_cents)} every ${a.cycle_length_days} days`,
+    `${formatRupees(a.monthly_commitment_cents)} per month · ${billingDayText(a.first_billing_date).replace("Monthly on", "billed on")}`,
     `${formatCount(a.bw_included)} B&W copies included, then ${formatRupees(a.bw_rate_cents)} each`,
   ];
   if (a.colour_included !== null && a.colour_rate_cents !== null) {
@@ -28,11 +28,14 @@ export function AgreementCards({
   today,
   linkBase,
   empty,
+  deposits,
 }: {
   agreements: CustomerAgreement[];
   today: string;
   linkBase?: string;
   empty: string;
+  /** DEP-01: deposit held per agreement. */
+  deposits?: Map<string, number>;
 }) {
   if (agreements.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>;
   return (
@@ -75,6 +78,11 @@ export function AgreementCards({
                 </>
               )}
             </p>
+            {(deposits?.get(a.id) ?? 0) > 0 && (
+              <p className="mt-1 text-sm font-medium" data-testid="deposit-held">
+                Deposit held: {formatRupees(deposits!.get(a.id)!)}
+              </p>
+            )}
           </li>
         );
       })}

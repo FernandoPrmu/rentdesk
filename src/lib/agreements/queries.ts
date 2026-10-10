@@ -41,35 +41,29 @@ export type TermsVersion = Awaited<ReturnType<typeof getTermsHistory>>[number];
 export const UNPAID_INVOICE_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED", "PARTIALLY_PAID", "OVERDUE", "DISPUTED"] as const;
 
 export interface ReturnBlocker {
-  kind: "ticket" | "invoice";
+  kind: "ticket";
   id: string;
   label: string;
   status: string;
 }
 
-/** Open tickets and unpaid invoices that must be resolved before a return (MAC-04). */
+/**
+ * RET-01 / rule 4: only a meter reading waiting for the owner's review blocks a
+ * return (the final bill must start from confirmed numbers). Unpaid invoices do
+ * not. Same rule as app.agreement_return_blockers.
+ */
 export async function getReturnBlockers(agreementId: string): Promise<ReturnBlocker[]> {
   const supabase = await createClient();
-  const [tickets, invoices] = await Promise.all([
-    supabase
-      .from("billing_cycle_tickets")
-      .select("id, cycle_no, status")
-      .eq("agreement_id", agreementId)
-      .not("status", "in", "(CLOSED,CANCELLED)")
-      .order("cycle_no"),
-    supabase
-      .from("invoices")
-      .select("id, invoice_no, status")
-      .eq("agreement_id", agreementId)
-      .in("status", [...UNPAID_INVOICE_STATUSES])
-      .order("created_at"),
-  ]);
-  if (tickets.error) throw new Error(`blockers: ${tickets.error.message}`);
-  if (invoices.error) throw new Error(`blockers: ${invoices.error.message}`);
-  return [
-    ...tickets.data.map((t) => ({ kind: "ticket" as const, id: t.id, label: `Billing ticket for cycle ${t.cycle_no}`, status: t.status })),
-    ...invoices.data.map((i) => ({ kind: "invoice" as const, id: i.id, label: `Invoice ${i.invoice_no ?? "(not issued)"}`, status: i.status })),
-  ];
+  const { data, error } = await supabase
+    .from("billing_cycle_tickets")
+    .select("id, cycle_no, status, status_before_overdue")
+    .eq("agreement_id", agreementId)
+    .in("status", ["PENDING_OWNER_REVIEW", "OVERDUE"])
+    .order("cycle_no");
+  if (error) throw new Error(`blockers: ${error.message}`);
+  return data
+    .filter((t) => t.status === "PENDING_OWNER_REVIEW" || t.status_before_overdue === "PENDING_OWNER_REVIEW")
+    .map((t) => ({ kind: "ticket" as const, id: t.id, label: `Meter reading for cycle ${t.cycle_no}`, status: "PENDING_OWNER_REVIEW" }));
 }
 
 /** A customer's agreements, live first (owner portal profile, customer portal). */
@@ -78,9 +72,9 @@ export async function listCustomerAgreements(customerId: string) {
   const { data, error } = await supabase
     .from("rental_agreements")
     .select(
-      `id, status, start_date, end_date, first_billing_date, next_cycle_no, next_cycle_date, cycle_length_days,
+      `id, status, start_date, end_date, first_billing_date, next_cycle_no, next_cycle_date, billing_day,
        installation_location, monthly_commitment_cents, bw_included, bw_rate_cents, colour_included, colour_rate_cents,
-       due_days, terminated_at, ${MACHINE}`,
+       due_days, late_fee_mode, late_fee_cents, terminated_at, ${MACHINE}`,
     )
     .eq("customer_id", customerId)
     .order("status")

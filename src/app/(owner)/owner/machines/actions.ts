@@ -78,7 +78,7 @@ export async function reassignMachineAction(
   const type = await getMachineType(machineId);
   if (!type) return fail(NOT_FOUND);
   const values = formValues(formData);
-  const closing = returnSchema(type).safeParse(values);
+  const closing = returnSchema(type, todayInColombo()).safeParse(values);
   const assignment = assignmentSchema(type, todayInColombo()).safeParse(values);
   if (!closing.success || !assignment.success) {
     return fail(CHECK_FIELDS, {

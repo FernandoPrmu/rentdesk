@@ -53,3 +53,17 @@ export async function getCustomerBilling(customerId: string) {
   if (invoices.error) throw new Error(`customer invoices: ${invoices.error.message}`);
   return { tickets: tickets.data, invoices: invoices.data };
 }
+
+/** Issued invoices not fully paid yet, oldest due first (customer Bills tab, RET-01). */
+export async function listOpenInvoices(customerId: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("id, invoice_no, status, total_cents, amount_paid_cents, due_date, machine:machines!invoices_machine_fkey(brand, model)")
+    .eq("customer_id", customerId)
+    .in("status", ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED", "PARTIALLY_PAID", "OVERDUE", "DISPUTED"])
+    .order("due_date", { nullsFirst: false })
+    .order("invoice_seq");
+  if (error) throw new Error(`open invoices: ${error.message}`);
+  return data;
+}

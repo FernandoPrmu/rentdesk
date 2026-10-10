@@ -35,13 +35,13 @@ describe.skipIf(!DB_URL)("billing engine wiring (linked dev database, rolled bac
     bwRateCents: 250,
     colourIncluded: null,
     colourRateCents: null,
-    cycleLengthDays: 30,
   };
   const context = (overrides: Partial<MeterContext> = {}, previous = 5000, counterMax: number | null = null): MeterContext => ({
     terms: MONO,
     cyclesCovered: 1,
     counters: { BW: { known: [{ value: previous, at: "2026-01-01T00:00:00Z", source: "INITIAL" }], counterMax, history: [] } },
     estimateCredits: [],
+    credits: [],
     ...overrides,
   });
 
@@ -67,7 +67,7 @@ describe.skipIf(!DB_URL)("billing engine wiring (linked dev database, rolled bac
       await asPostgres(db);
       const inv = await db.query("select total_cents::int, cycles_covered, calculation from public.invoices where id = $1", [rows[0].r.invoice_id]);
       expect(inv.rows[0]).toMatchObject({ total_cents: 650_000, cycles_covered: 1 });
-      expect(inv.rows[0].calculation).toMatchObject({ engine: "rentdesk-billing-1", counters: [{ usage: 2600, excess: 600 }] });
+      expect(inv.rows[0].calculation).toMatchObject({ engine: "rentdesk-billing-2", counters: [{ usage: 2600, excess: 600 }] });
       expect(await count(db, "select 1 from public.invoice_lines where invoice_id = $1", [rows[0].r.invoice_id])).toBe(2);
     });
   });

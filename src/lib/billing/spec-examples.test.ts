@@ -17,7 +17,6 @@ const COLOUR: Terms = {
   bwRateCents: RS(2),
   colourIncluded: 500,
   colourRateCents: RS(10),
-  cycleLengthDays: 30,
 };
 
 // Mono: commitment Rs. 5,000; 2,000 copies included; Rs. 2.50 per copy.
@@ -28,7 +27,6 @@ const MONO: Terms = {
   bwRateCents: 250,
   colourIncluded: null,
   colourRateCents: null,
-  cycleLengthDays: 30,
 };
 
 function colour(bwUsed: number, colourUsed: number) {

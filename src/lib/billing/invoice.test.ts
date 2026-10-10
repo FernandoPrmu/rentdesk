@@ -12,7 +12,6 @@ const COLOUR: Terms = {
   bwRateCents: RS(2),
   colourIncluded: 500,
   colourRateCents: RS(10),
-  cycleLengthDays: 30,
 };
 const MONO: Terms = { ...COLOUR, machineType: "MONO", commitmentCents: RS(5000), bwIncluded: 2000, bwRateCents: 250, colourIncluded: null, colourRateCents: null };
 
@@ -99,7 +98,7 @@ describe("calculateInvoice: basics", () => {
   it("puts every input and result in the calculation record", () => {
     const r = mono(2600);
     expect(r.calculation).toMatchObject({
-      engine: "rentdesk-billing-1",
+      engine: "rentdesk-billing-2",
       type: "NORMAL",
       cycles_covered: 1,
       terms: { commitment_cents: RS(5000), bw_included: 2000, bw_rate_cents: 250, colour_included: null, colour_rate_cents: null },
@@ -159,12 +158,12 @@ describe("estimated billing and reconciliation (spec 11.6)", () => {
 
 describe("final invoice when a machine is returned mid-cycle (spec 11.4)", () => {
   it("PRORATED: commitment and included copies by days used, half up", () => {
-    // 12 of 30 days: Rs. 10,000 x 12/30 = Rs. 4,000; 3,000 x 12/30 = 1,200 B&W; 500 x 12/30 = 200 colour.
+    // 12 of 30 days (e.g. a cycle 30 Apr - 29 May): Rs. 10,000 x 12/30 = Rs. 4,000; 3,000 x 12/30 = 1,200 B&W; 500 x 12/30 = 200 colour.
     const r = calculateInvoice({
       terms: COLOUR,
       kind: "NORMAL",
       fullCycles: 0,
-      partialCycle: { daysUsed: 12, rule: "PRORATED" },
+      partialCycle: { daysUsed: 12, daysInCycle: 30, rule: "PRORATED" },
       readings: { BW: reading(0, 1500), COLOUR: reading(0, 150) },
     });
     expectConsistent(r);
@@ -178,34 +177,51 @@ describe("final invoice when a machine is returned mid-cycle (spec 11.4)", () =>
 
   it("PRORATED rounding: money half up to the cent, included copies half up to a copy", () => {
     // Rs. 5,000.01 x 1/2 = 250,000.5 cents -> 250,001; 2,001 copies x 1/2 = 1,000.5 -> 1,001.
-    const terms = { ...MONO, commitmentCents: 500_001, bwIncluded: 2001, cycleLengthDays: 2 };
-    const r = calculateInvoice({ terms, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 1, rule: "PRORATED" }, readings: { BW: reading(0, 1001) } });
+    const terms = { ...MONO, commitmentCents: 500_001, bwIncluded: 2001 };
+    const r = calculateInvoice({ terms, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 1, daysInCycle: 2, rule: "PRORATED" }, readings: { BW: reading(0, 1001) } });
     expect(r.commitmentCents).toBe(250_001);
     expect(r.counters[0]).toMatchObject({ included: 1001, excess: 0 });
     // 1/3 of Rs. 100.00 = 3,333.33... cents -> 3,333 (rounds down below a half).
-    const third = calculateInvoice({ terms: { ...MONO, commitmentCents: 10_000, cycleLengthDays: 3 }, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 1, rule: "PRORATED" }, readings: { BW: reading(0, 0) } });
+    const third = calculateInvoice({ terms: { ...MONO, commitmentCents: 10_000 }, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 1, daysInCycle: 3, rule: "PRORATED" }, readings: { BW: reading(0, 0) } });
     expect(third.commitmentCents).toBe(3333);
   });
 
   it("FULL: the partial cycle is billed as a whole cycle", () => {
-    const r = calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 5, rule: "FULL" }, readings: { BW: reading(0, 2600) } });
+    const r = calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 5, daysInCycle: 31, rule: "FULL" }, readings: { BW: reading(0, 2600) } });
     expect(r.totalCents).toBe(RS(6500));
     expect(r.cyclesCovered).toBe(1);
   });
 
   it("whole missed cycles plus the final partial one", () => {
-    const r = calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 1, partialCycle: { daysUsed: 15, rule: "PRORATED" }, readings: { BW: reading(0, 3000) } });
+    const r = calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 1, partialCycle: { daysUsed: 15, daysInCycle: 30, rule: "PRORATED" }, readings: { BW: reading(0, 3000) } });
     expect(r.cyclesCovered).toBe(2);
     expect(r.commitmentCents).toBe(RS(5000) + RS(2500));
     expect(r.counters[0]).toMatchObject({ included: 3000, excess: 0 });
   });
 
-  it("checks the days used", () => {
-    for (const daysUsed of [0, 31]) {
-      expect(errorOf(() => calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed, rule: "PRORATED" }, readings: { BW: reading(0, 1) } })).code).toBe(
-        "INVALID_INPUT",
-      );
+  it("prorates by the real days of the cycle: the same 14 days cost more in February", () => {
+    const prorate = (daysInCycle: number) =>
+      calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 14, daysInCycle, rule: "PRORATED" }, readings: { BW: reading(0, 0) } });
+    // Rs. 5,000 x 14/28 = Rs. 2,500 (February); x 14/31 = 225,806.45 -> 225,806 cents; x 14/29 (leap) = 241,379.31 -> 241,379.
+    expect(prorate(28).commitmentCents).toBe(RS(2500));
+    expect(prorate(31).commitmentCents).toBe(225_806);
+    expect(prorate(29).commitmentCents).toBe(241_379);
+    expect(prorate(30).commitmentCents).toBe(233_333);
+    // Included copies the same way: 2,000 x 14/31 = 903.2 -> 903.
+    expect(prorate(31).counters[0].included).toBe(903);
+    expect(prorate(31).calculation.partial).toEqual({ days_used: 14, days_in_cycle: 31, rule: "PRORATED" });
+    expect(prorate(28).lines[0].description).toBe("Commitment for 14 of 28 days (final cycle)");
+  });
+
+  it("checks the days used against the days in the cycle", () => {
+    for (const [daysUsed, daysInCycle] of [[0, 30], [31, 30], [29, 28], [1, 0]]) {
+      expect(
+        errorOf(() => calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed, daysInCycle, rule: "PRORATED" }, readings: { BW: reading(0, 1) } })).code,
+      ).toBe("INVALID_INPUT");
     }
+    // All 31 days of a 31-day cycle is the whole commitment.
+    const whole = calculateInvoice({ terms: MONO, kind: "NORMAL", fullCycles: 0, partialCycle: { daysUsed: 31, daysInCycle: 31, rule: "PRORATED" }, readings: { BW: reading(0, 0) } });
+    expect(whole.commitmentCents).toBe(RS(5000));
   });
 });
 
@@ -225,6 +241,48 @@ describe("credits and adjustments (PAY-12, spec 11.4)", () => {
       { id: "c1", amountCents: RS(1000), remainingCents: 0 },
       { id: "c2", amountCents: RS(5500), remainingCents: RS(3500) },
     ]);
+    // Each CREDIT line names the credit it uses; c3 is not needed and gets no line.
+    expect(r.lines.filter((l) => l.line_type === "CREDIT").map((l) => [l.credit_id, l.amount_cents])).toEqual([
+      ["c1", -RS(1000)],
+      ["c2", -RS(5500)],
+    ]);
+    // The database checks the list of available credits against its own.
+    expect(r.calculation.credits).toEqual([
+      { id: "c1", available_cents: RS(1000) },
+      { id: "c2", available_cents: RS(9000) },
+      { id: "c3", available_cents: RS(500) },
+    ]);
+  });
+
+  it("rule 13: credits are added automatically; a removed credit is recorded and the next one fills in", () => {
+    const credits = [
+      { id: "adv", amountCents: RS(2000), label: "advance payment" },
+      { id: "over", amountCents: RS(1000), label: "overpayment" },
+    ];
+    const all = mono(0, { credits });
+    expect(all.totalCents).toBe(RS(2000));
+    expect(all.lines.find((l) => l.credit_id === "adv")?.description).toBe("Credit applied (advance payment)");
+
+    // The owner removes the advance (e.g. to refund it instead): it is not applied,
+    // and is listed as excluded. Only the overpayment is used now.
+    const without = mono(0, { credits: credits.filter((c) => c.id !== "adv"), creditsExcluded: ["adv"] });
+    expectConsistent(without);
+    expect(without.totalCents).toBe(RS(4000));
+    expect(without.creditsApplied).toEqual([{ id: "over", amountCents: RS(1000), remainingCents: 0 }]);
+    expect(without.calculation.credits_excluded).toEqual(["adv"]);
+
+    // Added back: the same result as before.
+    expect(mono(0, { credits }).totalCents).toBe(all.totalCents);
+
+    // An excluded credit can never be applied, and a credit is never listed twice.
+    expect(errorOf(() => mono(0, { credits, creditsExcluded: ["adv"] })).code).toBe("INVALID_INPUT");
+    expect(errorOf(() => mono(0, { credits: [credits[0], credits[0]] })).code).toBe("INVALID_INPUT");
+  });
+
+  it("no credits: no CREDIT lines and an empty record", () => {
+    const r = mono(2600);
+    expect(r.lines.some((l) => l.line_type === "CREDIT")).toBe(false);
+    expect(r.calculation).toMatchObject({ credits: [], credits_excluded: [], credits_applied: [] });
   });
 
   it("adds adjustments (credit notes may be negative) but never a negative subtotal", () => {

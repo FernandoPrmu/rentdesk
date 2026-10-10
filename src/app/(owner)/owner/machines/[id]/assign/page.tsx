@@ -12,6 +12,8 @@ import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import { requireUser } from "@/lib/auth/current-user";
 import { getMachine } from "@/lib/machines/queries";
 import { MACHINE_STATUS_LABEL, MACHINE_TYPE_LABEL } from "@/lib/machines/schemas";
+import { getLateFeeSources } from "@/lib/settings/billing";
+import { describeOwnerDefault } from "@/lib/settings/billing-schema";
 
 export const metadata: Metadata = { title: "Assign machine" };
 
@@ -23,7 +25,8 @@ export default async function AssignMachinePage({ params, searchParams }: PagePr
   const machine = await getMachine(id);
   if (!machine) notFound();
   const { customer } = await searchParams;
-  const customers = (await listCustomers({ status: "ACTIVE" })).map((c) => ({ id: c.id, name: c.name }));
+  const [allCustomers, lateFee] = await Promise.all([listCustomers({ status: "ACTIVE" }), getLateFeeSources()]);
+  const customers = allCustomers.map((c) => ({ id: c.id, name: c.name }));
   const fixedCustomer = typeof customer === "string" ? customers.find((c) => c.id === customer) : undefined;
   const title = `${machine.brand} ${machine.model}`;
 
@@ -39,6 +42,7 @@ export default async function AssignMachinePage({ params, searchParams }: PagePr
               today={todayInColombo()}
               customers={customers}
               fixedCustomer={fixedCustomer}
+              ownerLateFee={describeOwnerDefault(lateFee)}
               action={assignMachineAction.bind(null, id)}
             />
           ) : (

@@ -13,6 +13,7 @@ import { AccountForm } from "@/components/accounts/account-form";
 import { AccountSummary } from "@/components/accounts/account-summary";
 import { AgreementCards } from "@/components/agreements/agreement-cards";
 import { Facts } from "@/components/agreements/agreement-display";
+import { DepositsToSettle } from "@/components/deposits/deposits-to-settle";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { buttonVariants } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import { listCustomerAgreements } from "@/lib/agreements/queries";
 import { requireUser } from "@/lib/auth/current-user";
 import { getCustomerBalances, getCustomerBilling } from "@/lib/customers/queries";
+import { getDepositsHeld, listDepositsToSettle } from "@/lib/deposits/queries";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 import { INVOICE_STATUS_LABEL, TICKET_STATUS_LABEL } from "@/lib/status-labels";
@@ -39,11 +41,14 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
   const customer = await getCustomer(id);
   if (!customer) notFound();
 
-  const [agreements, balances, billing] = await Promise.all([
+  const [agreements, balances, billing, toSettle] = await Promise.all([
     listCustomerAgreements(id),
     getCustomerBalances(id),
     getCustomerBilling(id),
+    listDepositsToSettle(id),
   ]);
+  const deposits = await getDepositsHeld(agreements.map((a) => a.id));
+  const depositHeld = [...deposits.values()].reduce((s, v) => s + v, 0);
   const balance = balances.get(id);
   const today = todayInColombo();
   const live = agreements.filter((a) => a.status !== "TERMINATED");
@@ -81,6 +86,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
                     : "Nothing due"}
                 </span>,
               ],
+              ["Deposit held", <span key="d" data-testid="customer-deposit-held">{depositHeld > 0 ? formatRupees(depositHeld) : "None"}</span>],
             ]}
           />
         </CardContent>
@@ -96,15 +102,26 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          <AgreementCards agreements={live} today={today} linkBase="/owner/agreements" empty="No machines rented at the moment." />
+          <AgreementCards agreements={live} today={today} linkBase="/owner/agreements" deposits={deposits} empty="No machines rented at the moment." />
           {past.length > 0 && (
             <details className="text-sm">
               <summary className="cursor-pointer py-2 font-medium">Earlier rentals ({past.length})</summary>
-              <AgreementCards agreements={past} today={today} linkBase="/owner/agreements" empty="" />
+              <AgreementCards agreements={past} today={today} linkBase="/owner/agreements" deposits={deposits} empty="" />
             </details>
           )}
         </CardContent>
       </Card>
+
+      {toSettle.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Deposits to settle</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DepositsToSettle items={toSettle} empty="" />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

@@ -13,6 +13,7 @@ const ALL_RELATIONS = [
   "invoice_lines", "invoice_counters", "payments", "payment_slips", "disputes", "credits",
   "service_requests", "service_request_history", "notifications", "notification_templates",
   "idempotency_keys", "audit_logs", "agreement_terms_history", "customer_balances",
+  "deposit_transactions", "agreement_deposit_balances",
 ];
 
 /** Relations with an owner_id column that authenticated users may read. */
@@ -22,7 +23,7 @@ const TENANT_RELATIONS = [
   "ticket_comments", "meter_submissions", "meter_readings", "meter_photos", "invoices",
   "invoice_lines", "invoice_counters", "payments", "payment_slips", "disputes", "credits",
   "service_requests", "service_request_history", "notifications", "notification_templates", "audit_logs",
-  "agreement_terms_history", "customer_balances",
+  "agreement_terms_history", "customer_balances", "deposit_transactions", "agreement_deposit_balances",
 ];
 
 /** Rows visible to the current role; 0 when the relation is not granted at all. */
@@ -387,7 +388,9 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_save_company_profile",
         "rpc_session_state",
         "rpc_set_account_status",
+        "rpc_set_invoice_credit",
         "rpc_set_machine_status",
+        "rpc_settle_deposit",
         "rpc_submit_meter_reading",
         "rpc_submit_payment",
         "rpc_transition_ticket",

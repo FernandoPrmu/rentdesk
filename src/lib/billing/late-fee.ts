@@ -3,17 +3,62 @@ import { BillingError } from "./errors.ts";
 import type { InvoiceLine } from "./invoice.ts";
 
 /**
- * Optional late fee (PAY-13, spec 8.3; rule in docs/decisions.md): a flat
- * `late_fee_cents` from the settings, added ONCE per invoice when it is still not
- * fully paid after due date + grace period. Never while a slip waits for the
- * owner's verification (spec 8.2) or while the invoice is disputed (11.4:
- * reminders pause). Dates are ISO calendar dates in Asia/Colombo.
+ * Optional late fee (PAY-13, LATE-01, spec 8.3; rule 7 in docs/decisions.md): a
+ * flat amount, added ONCE per invoice when it is still not fully paid after due
+ * date + grace period. Never while a slip waits for the owner's verification
+ * (spec 8.2) or while the invoice is disputed (11.4: reminders pause). Dates are
+ * ISO calendar dates in Asia/Colombo.
+ *
+ * Which amount: the agreement's setting (kept in its terms history, snapshot on
+ * each ticket), then the owner's settings, then the platform default.
  */
 
 export interface LateFeeSettings {
   enabled: boolean;
   feeCents: number;
   graceDays: number;
+}
+
+/** Agreement setting: follow the owner, a custom amount, or never. */
+export type LateFeeMode = "OWNER_DEFAULT" | "CUSTOM" | "NONE";
+
+export interface LateFeeSources {
+  agreement: { mode: LateFeeMode; feeCents: number | null };
+  /** owner_settings: null = not set, use the platform default. */
+  owner: { enabled: boolean | null; feeCents: number | null; graceDays: number | null };
+  platform: { enabled: boolean; feeCents: number; graceDays: number };
+}
+
+export interface ResolvedLateFee extends LateFeeSettings {
+  /** Where the amount comes from. */
+  source: "AGREEMENT" | "OWNER" | "PLATFORM";
+}
+
+/**
+ * Effective late fee for an agreement (LATE-01). CUSTOM charges its amount even
+ * when the owner's late fee is off (client decision); NONE never charges. The
+ * grace period always comes from the owner's settings, else the platform's.
+ */
+export function resolveLateFee(s: LateFeeSources): ResolvedLateFee {
+  const graceDays = assertCount(s.owner.graceDays ?? s.platform.graceDays, "Grace period");
+  switch (s.agreement.mode) {
+    case "NONE":
+      return { enabled: false, feeCents: 0, graceDays, source: "AGREEMENT" };
+    case "CUSTOM":
+      if (s.agreement.feeCents === null) throw new BillingError("INVALID_INPUT", "A custom late fee needs an amount");
+      return { enabled: true, feeCents: assertCount(s.agreement.feeCents, "Late fee"), graceDays, source: "AGREEMENT" };
+    case "OWNER_DEFAULT": {
+      const ownerSet = s.owner.enabled !== null || s.owner.feeCents !== null;
+      return {
+        enabled: s.owner.enabled ?? s.platform.enabled,
+        feeCents: assertCount(s.owner.feeCents ?? s.platform.feeCents, "Late fee"),
+        graceDays,
+        source: ownerSet ? "OWNER" : "PLATFORM",
+      };
+    }
+    default:
+      throw new BillingError("INVALID_INPUT", "Unknown late fee setting");
+  }
 }
 
 export interface LateFeeInvoice {

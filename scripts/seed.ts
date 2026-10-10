@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { addMonths } from "../src/lib/agreements/cycle-calendar.ts";
 import { loadMeterContext } from "../src/lib/billing/context.ts";
 import { buildMeterSubmission } from "../src/lib/billing/meter-invoice.ts";
 import { previousReading } from "../src/lib/billing/usage.ts";
@@ -349,8 +350,8 @@ async function seedMachinesAndAgreements(ids: Record<string, string>) {
       start_date: addDays(today, -a.startDaysAgo),
       // The seed backdates rentals to create tickets in several stages, so the first
       // billing date is in the past here; the app only allows today or later.
-      first_billing_date: addDays(today, 30 - a.startDaysAgo),
-      cycle_length_days: 30,
+      // Monthly cycles (rule 1): one month after the start, then monthly on that day.
+      first_billing_date: addMonths(addDays(today, -a.startDaysAgo), 1),
       due_days: 7,
       installation_location: "Front office",
       initial_bw_reading: 10_000,
@@ -371,6 +372,58 @@ async function seedMachinesAndAgreements(ids: Record<string, string>) {
     if (missing.length === 0) continue;
     check(await actingAs(ids[owner]).from("rental_agreements").insert(missing), `agreements ${owner}`);
   }
+}
+
+/**
+ * Money received upfront (DEP-01/02): a security deposit held for Fernando Book
+ * Shop's mono machine (agA5) and an advance payment from Bandara Enterprises (agB3),
+ * which the first invoice of agB3 takes off automatically (rule 13). Stable ids:
+ * re-runs add nothing.
+ */
+async function seedUpfrontMoney(ids: Record<string, string>) {
+  const today = colomboToday();
+  check(
+    await actingAs(ids.ownerA).from("deposit_transactions").upsert(
+      [
+        {
+          id: stableId("deposit:agA5"),
+          owner_id: ids.ownerA,
+          customer_id: ids.custA3,
+          agreement_id: stableId("agreement:agA5"),
+          kind: "RECEIVED" as const,
+          amount_cents: 1_000_000,
+          occurred_on: addDays(today, -40),
+          method: "BANK_TRANSFER" as const,
+          reference: "DEP-FERNANDO",
+          note: "Security deposit with the contract",
+          created_by: ids.ownerA,
+        },
+      ],
+      { onConflict: "id", ignoreDuplicates: true },
+    ),
+    "deposit",
+  );
+  check(
+    await actingAs(ids.ownerB).from("credits").upsert(
+      [
+        {
+          id: stableId("advance:agB3"),
+          owner_id: ids.ownerB,
+          customer_id: ids.custB3,
+          agreement_id: stableId("agreement:agB3"),
+          kind: "ADVANCE" as const,
+          amount_cents: 300_000,
+          reason: "Advance payment with the contract",
+          received_on: addDays(today, -20),
+          method: "CASH" as const,
+          reference: "ADV-BANDARA",
+          created_by: ids.ownerB,
+        },
+      ],
+      { onConflict: "id", ignoreDuplicates: true },
+    ),
+    "advance",
+  );
 }
 
 /** Opens every cycle that is due today or earlier, like the daily cron (catch-up). */
@@ -598,6 +651,7 @@ async function main() {
   const ids = await ensureUsers();
   await seedPlansTemplatesAndBranding(ids);
   await seedMachinesAndAgreements(ids);
+  await seedUpfrontMoney(ids);
   await openDueCycles(ids);
 
   console.log("Tickets");

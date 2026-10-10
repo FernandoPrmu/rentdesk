@@ -929,6 +929,80 @@ export type Database = {
           },
         ]
       }
+      invoice_pdf_versions: {
+        Row: {
+          byte_size: number
+          content_hash: string
+          created_at: string
+          customer_id: string
+          id: string
+          invoice_id: string
+          owner_id: string
+          parties: Json
+          reason: string
+          storage_path: string
+          template: string
+          version: number
+        }
+        Insert: {
+          byte_size: number
+          content_hash: string
+          created_at?: string
+          customer_id: string
+          id?: string
+          invoice_id: string
+          owner_id: string
+          parties: Json
+          reason: string
+          storage_path: string
+          template: string
+          version: number
+        }
+        Update: {
+          byte_size?: number
+          content_hash?: string
+          created_at?: string
+          customer_id?: string
+          id?: string
+          invoice_id?: string
+          owner_id?: string
+          parties?: Json
+          reason?: string
+          storage_path?: string
+          template?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_pdf_versions_customer_fkey"
+            columns: ["customer_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "invoice_pdf_versions_invoice_fkey"
+            columns: ["invoice_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "invoice_pdf_versions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "invoice_pdf_versions_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoices: {
         Row: {
           agreement_id: string
@@ -952,7 +1026,14 @@ export type Database = {
           late_fee_cents: number
           machine_id: string
           owner_id: string
+          pdf_attempts: number
+          pdf_claimed_at: string | null
+          pdf_last_error: string | null
           pdf_path: string | null
+          pdf_pending_reason: string | null
+          pdf_requested_at: string | null
+          pdf_revision: number
+          pdf_status: string
           period_end: string
           period_start: string
           replaces_invoice_id: string | null
@@ -985,7 +1066,14 @@ export type Database = {
           late_fee_cents?: number
           machine_id: string
           owner_id: string
+          pdf_attempts?: number
+          pdf_claimed_at?: string | null
+          pdf_last_error?: string | null
           pdf_path?: string | null
+          pdf_pending_reason?: string | null
+          pdf_requested_at?: string | null
+          pdf_revision?: number
+          pdf_status?: string
           period_end: string
           period_start: string
           replaces_invoice_id?: string | null
@@ -1018,7 +1106,14 @@ export type Database = {
           late_fee_cents?: number
           machine_id?: string
           owner_id?: string
+          pdf_attempts?: number
+          pdf_claimed_at?: string | null
+          pdf_last_error?: string | null
           pdf_path?: string | null
+          pdf_pending_reason?: string | null
+          pdf_requested_at?: string | null
+          pdf_revision?: number
+          pdf_status?: string
           period_end?: string
           period_start?: string
           replaces_invoice_id?: string | null
@@ -1667,6 +1762,7 @@ export type Database = {
           logo_path: string | null
           onboarding_completed_at: string | null
           owner_id: string
+          payment_instructions: string | null
           phone: string | null
           updated_at: string
         }
@@ -1684,6 +1780,7 @@ export type Database = {
           logo_path?: string | null
           onboarding_completed_at?: string | null
           owner_id: string
+          payment_instructions?: string | null
           phone?: string | null
           updated_at?: string
         }
@@ -1701,6 +1798,7 @@ export type Database = {
           logo_path?: string | null
           onboarding_completed_at?: string | null
           owner_id?: string
+          payment_instructions?: string | null
           phone?: string | null
           updated_at?: string
         }
@@ -2882,6 +2980,10 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_claim_invoice_pdf: {
+        Args: { p_invoice_id: string; p_now: string }
+        Returns: Json
+      }
       rpc_complete_password_change: {
         Args: { p_user_id: string }
         Returns: Json
@@ -2960,6 +3062,10 @@ export type Database = {
         Args: { p_limit: number; p_owner_id: string }
         Returns: Json
       }
+      rpc_cron_pending_invoice_pdfs: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
+      }
       rpc_cron_ticket_candidates: {
         Args: { p_after: string; p_limit: number }
         Returns: Json
@@ -2978,6 +3084,10 @@ export type Database = {
       rpc_login_gate_state: {
         Args: { p_ip: unknown; p_username: string }
         Returns: Json
+      }
+      rpc_mark_invoice_pdf_failed: {
+        Args: { p_error: string; p_invoice_id: string }
+        Returns: number
       }
       rpc_mark_photos_deleted: {
         Args: { p_ids: Json; p_now: string }
@@ -3047,6 +3157,19 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_record_invoice_pdf: {
+        Args: {
+          p_hash: string
+          p_invoice_id: string
+          p_parties: Json
+          p_path: string
+          p_revision: number
+          p_size: number
+          p_template: string
+          p_version: number
+        }
+        Returns: Json
+      }
       rpc_record_login_attempt: {
         Args: {
           p_ip: unknown
@@ -3106,6 +3229,10 @@ export type Database = {
       }
       rpc_save_company_profile: {
         Args: { p_details: Json; p_owner_id: string }
+        Returns: Json
+      }
+      rpc_save_invoice_template: {
+        Args: { p_owner_id: string; p_template: Json }
         Returns: Json
       }
       rpc_session_state: { Args: { p_user_id: string }; Returns: Json }

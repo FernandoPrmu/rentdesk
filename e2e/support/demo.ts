@@ -37,7 +37,7 @@ export async function profileId(username: string): Promise<string> {
  *   - every demo account: active and not locked, with no recent failed logins
  *     (the wrong-password test would otherwise build up to a lockout).
  */
-export async function restoreDemoState(): Promise<void> {
+export async function restoreDemoState(options: { invoiceTemplate?: boolean } = {}): Promise<void> {
   const admin = serviceClient();
   const usernames = Object.values(DEMO).map((a) => a.username);
 
@@ -60,7 +60,8 @@ export async function restoreDemoState(): Promise<void> {
   const { data: ceylonLogos } = await admin.storage.from("branding").list(`${ceylon}/logos`, { limit: 100 });
   if (ceylonLogos?.length) await admin.storage.from("branding").remove(ceylonLogos.map((o) => `${ceylon}/logos/${o.name}`));
 
-  await restoreInvoiceTemplate();
+  // A spec's own clean-up skips the template: invoice-template.spec.ts may be editing it in parallel.
+  if (options.invoiceTemplate !== false) await restoreInvoiceTemplate();
 
   const unknown = ["e2e.nobody"];
   const { error: attemptsError } = await admin

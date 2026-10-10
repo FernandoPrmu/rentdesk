@@ -10,7 +10,7 @@ import { pdfText } from "./support/pdf";
 // slip chosen from the phone's files, the owner accepts it and the customer downloads
 // the receipt; a part payment then the rest; a rejected slip sent again (flagged as a
 // possible duplicate); a cash payment recorded by the owner, then reversed. Each test
-// rents its own E2E machine to cust.fernando (a Rs. 5,000 bill); everything it made,
+// rents its own E2E machine to cust.perera (a Rs. 5,000 bill); everything it made,
 // slip and receipt files included, is deleted afterwards.
 test.describe.configure({ mode: "serial" });
 
@@ -22,12 +22,12 @@ test.afterAll(async () => {
   for (const serial of serials) await deleteE2eMachines(serial);
 });
 
-/** A Rs. 5,000 bill for cust.fernando on a new E2E machine. */
+/** A Rs. 5,000 bill for cust.perera on a new E2E machine. */
 async function newBill(tag: string): Promise<{ invoiceId: string; invoiceNo: string }> {
   const serial = `${E2E_SERIAL_PREFIX}PAY-${tag}-${run}`;
   serials.push(serial);
   const owner = await profileId(DEMO.ownerLanka.username);
-  const customer = await profileId(DEMO.custFernando.username);
+  const customer = await profileId(DEMO.custPerera.username);
   const agreementId = await assignMachine(owner, await createMachine(owner, serial), customer, today);
   const { invoiceNo } = await issueFirstInvoice(agreementId, 100);
   return { invoiceId: await invoiceIdByNo(owner, invoiceNo), invoiceNo };
@@ -41,7 +41,7 @@ async function slipImage(seed: number): Promise<Buffer> {
     .toBuffer();
 }
 
-const asCustomer = (page: Page) => signInCached(page, DEMO.custFernando, "/customer");
+const asCustomer = (page: Page) => signInCached(page, DEMO.custPerera, "/customer");
 const asOwner = (page: Page) => signInCached(page, DEMO.ownerLanka, "/owner");
 
 /** The customer pays from the bill page with a file from the phone; returns the payment id. */
@@ -165,7 +165,7 @@ test.describe("payments (PAY-02..07, TKT-10)", () => {
 
   test("the owner records a cash payment, then reverses it (a returned payment): the bill is owed again", async ({ page }) => {
     const bill = await newBill("CASH");
-    const customer = await profileId(DEMO.custFernando.username);
+    const customer = await profileId(DEMO.custPerera.username);
     await asOwner(page);
     await page.goto(`/owner/payments/new?customer=${customer}`);
     await page.getByRole("checkbox", { name: `Pays ${bill.invoiceNo}` }).check();

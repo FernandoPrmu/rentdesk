@@ -8,7 +8,8 @@ import { DEMO, restoreDemoState } from "./support/demo";
 test.describe.configure({ mode: "serial" });
 
 test.afterAll(async () => {
-  await restoreDemoState();
+  // Not the invoice template: invoice-template.spec.ts runs in parallel and owns it.
+  await restoreDemoState({ invoiceTemplate: false });
 });
 
 test("cust.bandara must change the temporary password before anything else (AUTH-03)", async ({ page }) => {

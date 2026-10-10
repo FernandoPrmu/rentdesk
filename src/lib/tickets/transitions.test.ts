@@ -38,6 +38,10 @@ const CASES: Record<TicketAction, { call: (rpc: Rpc, actor: Actor, t: TicketSnap
   enterReadingManually: { call: (r, a, t) => T.enterReadingManually(r, a, t, reading), rpc: "rpc_submit_meter_reading" },
   createEstimate: { call: (r, a, t) => T.createEstimate(r, a, t, { invoice: { ...invoice, type: "ESTIMATED" }, stageDueAt: NOW, now: NOW }), rpc: "rpc_create_estimated_invoice" },
   confirmInvoice: { call: (r, a, t) => T.confirmInvoice(r, a, t, { submissionId: ID, dueDate: "2026-10-17", stageDueAt: NOW, totalCents: 1 }), rpc: "rpc_confirm_meter_submission" },
+  correctReading: {
+    call: (r, a, t) => T.correctReading(r, a, t, { submissionId: ID, readings: reading.readings, invoice, note: "Customer typed 8 for 3", changes: "B&W 1 → 2" }),
+    rpc: "rpc_correct_meter_reading",
+  },
   rejectReading: { call: (r, a, t) => T.rejectReading(r, a, t, { submissionId: ID, reason: "Photo blurry", stageDueAt: NOW, photoExpiresAt: NOW }), rpc: "rpc_reject_meter_submission" },
   submitSlip: { call: (r, a, t) => T.submitSlip(r, a, t, payment), rpc: "rpc_submit_payment" },
   recordPayment: { call: (r, a, t) => T.recordPayment(r, a, t, { ...payment, slip: null, method: "CASH" }), rpc: "rpc_submit_payment" },

@@ -99,16 +99,38 @@ export async function listCustomerTicketRows(customerId: string): Promise<Custom
   }));
 }
 
-/** A customer's own ticket (placeholder detail page until the meter and payment screens arrive). */
+/**
+ * A customer's own ticket (CP-02): stage, timeline, and the readings sent with how
+ * they were reviewed (rejection reason, corrections as old → new). RLS: own tickets
+ * only, and a draft invoice is never visible to the customer.
+ */
 export async function getCustomerTicket(id: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("billing_cycle_tickets")
-    .select(`id, cycle_no, cycle_date, period_start, period_end, status, status_before_overdue, stage_due_at, escalation_level, paused_at, ${MACHINE}, ${INVOICE}`)
+    .select(
+      `id, cycle_no, cycle_date, period_start, period_end, status, status_before_overdue, stage_due_at, escalation_level, paused_at,
+       rejection_count, ${MACHINE}, ${INVOICE},
+       events:ticket_events!ticket_events_ticket_fkey(id, event_type, from_status, to_status, reason, metadata, created_at, actor_id),
+       submissions:meter_submissions!meter_submissions_ticket_fkey(id, attempt_no, source, status, submitted_at, reviewed_at, reject_reason, note,
+         readings:meter_readings!meter_readings_submission_fkey(counter_type, current_value, corrected_from_value, correction_note))`,
+    )
     .eq("id", id)
+    .order("created_at", { referencedTable: "ticket_events", ascending: true })
+    .order("attempt_no", { referencedTable: "meter_submissions", ascending: false })
     .maybeSingle();
   if (error) throw new Error(`ticket: ${error.message}`);
   return data ? { ...data, invoice: data.invoice as TicketViewInvoice | null } : null;
+}
+
+export type CustomerTicketDetail = NonNullable<Awaited<ReturnType<typeof getCustomerTicket>>>;
+
+/** Owner: how many readings and estimates wait for review (Home card, Tickets header). */
+export async function countApprovals(): Promise<number> {
+  const supabase = await createClient();
+  const { count, error } = await supabase.from("billing_cycle_tickets").select("id", { count: "exact", head: true }).eq("status", "PENDING_OWNER_REVIEW");
+  if (error) throw new Error(`approvals: ${error.message}`);
+  return count ?? 0;
 }
 
 /** Admin: tickets escalated to the platform (the owner did not act in time). */

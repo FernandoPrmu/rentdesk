@@ -61,7 +61,7 @@ export interface ActionRule {
   from: readonly TicketStatus[];
   /** Also from OVERDUE, when the ticket became overdue from one of these. */
   overdueFrom?: readonly TicketStatus[];
-  /** Possible results (the rpc picks one, e.g. paid in full or partly). */
+  /** Possible results (the rpc picks one, e.g. paid in full or partly); none = the status stays. */
   to: readonly TicketStatus[];
   /** A reason (or note) is mandatory. */
   reason?: boolean;
@@ -99,6 +99,14 @@ export const ACTIONS = {
     actors: ["OWNER"],
     from: ["PENDING_OWNER_REVIEW"],
     to: ["AWAITING_PAYMENT"],
+  },
+  correctReading: {
+    label: "Correct the reading",
+    actors: ["OWNER"],
+    from: ["PENDING_OWNER_REVIEW"],
+    // Stays with the owner: the draft is recalculated, the status does not change.
+    to: [],
+    reason: true,
   },
   rejectReading: {
     label: "Reject the reading",

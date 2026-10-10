@@ -43,6 +43,8 @@ export interface NotificationContext {
   hours?: number;
   reason?: string;
   months?: number;
+  /** "B&W 12,500 → 12,050" (corrections). */
+  changes?: string;
 }
 
 type Template = (c: NotificationContext) => { title: string; body: string };
@@ -131,6 +133,18 @@ const TEMPLATES = {
   "meter.rejected": (c) => ({
     title: `Please send the meter reading again: ${machine(c)}`,
     body: `Your rental company could not accept the reading.${reason(c)}`,
+  }),
+  "meter.rejected_final": (c) => ({
+    title: `Reading not accepted: ${machine(c)}`,
+    body: `Your rental company will enter the reading for you.${reason(c)}`,
+  }),
+  "meter.corrected": (c) => ({
+    title: `Your meter reading was corrected: ${machine(c)}`,
+    body: `${c.changes ?? ""}.${reason(c)} New amount: ${money(c)}.`,
+  }),
+  "meter.entered": (c) => ({
+    title: `Meter reading entered for you: ${machine(c)}`,
+    body: `Your rental company entered the reading.${reason(c)}`,
   }),
   "invoice.issued": (c) => ({
     title: `New bill: ${money(c)}`,

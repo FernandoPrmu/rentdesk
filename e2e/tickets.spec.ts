@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { signInAndWait } from "./support/auth";
+import { signInCached } from "./support/auth";
 import { assignMachine, createMachine, ticketIds } from "./support/billing";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 
@@ -43,7 +43,7 @@ test.describe("billing cycle tickets and the daily job", () => {
   });
 
   test("the owner sees the new ticket in the list and its history", async ({ page }) => {
-    await signInAndWait(page, DEMO.ownerLanka.username, DEMO.ownerLanka.password, /\/owner$/);
+    await signInCached(page, DEMO.ownerLanka, "/owner");
     await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Tickets" }).click();
     await expect(page).toHaveURL(/\/owner\/tickets$/);
 
@@ -61,7 +61,7 @@ test.describe("billing cycle tickets and the daily job", () => {
   });
 
   test("the customer's Home asks for the meter reading with its deadline", async ({ page }) => {
-    await signInAndWait(page, DEMO.custPerera.username, DEMO.custPerera.password, /\/customer$/);
+    await signInCached(page, DEMO.custPerera, "/customer");
     await expect(page.getByRole("heading", { name: "What you need to do now" })).toBeVisible();
     const task = page.getByTestId("task-meter").filter({ hasText: "Ricoh MP 2501" });
     await expect(task).toHaveCount(1);
@@ -70,12 +70,12 @@ test.describe("billing cycle tickets and the daily job", () => {
     await expect(task.getByRole("alert")).toHaveCount(0);
 
     await task.getByRole("link", { name: "Enter meter reading" }).click();
-    await expect(page).toHaveURL(new RegExp(`/customer/tickets/${ticketId}$`));
-    await expect(page.getByText("Send the meter reading and photo")).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/customer/tickets/${ticketId}/meter$`));
+    await expect(page.getByRole("heading", { name: "Enter meter reading" })).toBeVisible();
   });
 
   test("the admin sees the daily job's log, runs it now, and the escalations list", async ({ page }) => {
-    await signInAndWait(page, DEMO.admin.username, DEMO.admin.password, /\/admin$/);
+    await signInCached(page, DEMO.admin, "/admin");
     await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Daily job" }).click();
     await expect(page.getByRole("heading", { name: "Daily job" })).toBeVisible();
     const before = await page.getByTestId("cron-run").count();

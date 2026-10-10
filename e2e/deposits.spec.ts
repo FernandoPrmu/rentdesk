@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { signInAndWait } from "./support/auth";
+import { signInCached } from "./support/auth";
 import { createMachine, issueFirstInvoice } from "./support/billing";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 
@@ -29,7 +29,7 @@ async function choose(page: Page, combobox: string, option: string) {
   await expect(page.getByRole("combobox", { name: combobox, exact: true })).toContainText(option);
 }
 
-const signInOwner = (page: Page) => signInAndWait(page, DEMO.ownerLanka.username, DEMO.ownerLanka.password, /\/owner$/);
+const signInOwner = (page: Page) => signInCached(page, DEMO.ownerLanka, "/owner");
 
 test.describe("deposits, advances and returning with a balance (DEP-01..04, RET-01)", () => {
   test.beforeAll(async () => {
@@ -79,7 +79,7 @@ test.describe("deposits, advances and returning with a balance (DEP-01..04, RET-
   });
 
   test("the customer sees the deposit held on the Machines tab", async ({ page }) => {
-    await signInAndWait(page, DEMO.custSilva.username, DEMO.custSilva.password, /\/customer$/);
+    await signInCached(page, DEMO.custSilva, "/customer");
     await page.getByRole("link", { name: "Machines" }).first().click();
     const card = page.getByTestId("agreement-card").filter({ hasText: serial });
     await expect(card).toContainText("Deposit held: Rs. 1,000");
@@ -118,7 +118,7 @@ test.describe("deposits, advances and returning with a balance (DEP-01..04, RET-
   });
 
   test("the customer still sees the balance and the unpaid invoices", async ({ page }) => {
-    await signInAndWait(page, DEMO.custSilva.username, DEMO.custSilva.password, /\/customer$/);
+    await signInCached(page, DEMO.custSilva, "/customer");
     await page.getByRole("link", { name: "Bills" }).first().click();
     await expect(page.getByTestId("customer-balance")).not.toHaveText("Nothing to pay");
     const first = page.getByTestId("open-invoice").filter({ hasText: firstInvoice.invoiceNo });

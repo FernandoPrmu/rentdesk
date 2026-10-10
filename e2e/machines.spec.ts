@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { signInAndWait } from "./support/auth";
+import { signInCached } from "./support/auth";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX } from "./support/demo";
 
 // One machine goes through its whole life at 360 px: register, assign to a seed
@@ -26,7 +26,7 @@ async function choose(page: Page, combobox: string, option: string) {
   await expect(page.getByRole("combobox", { name: combobox, exact: true })).toContainText(option);
 }
 
-const signInOwner = (page: Page) => signInAndWait(page, DEMO.ownerLanka.username, DEMO.ownerLanka.password, /\/owner$/);
+const signInOwner = (page: Page) => signInCached(page, DEMO.ownerLanka, "/owner");
 
 test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
   test("owner registers a machine", async ({ page }) => {
@@ -90,7 +90,7 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
   });
 
   test("the customer sees it in the Machines tab", async ({ page }) => {
-    await signInAndWait(page, DEMO.custSilva.username, DEMO.custSilva.password, /\/customer$/);
+    await signInCached(page, DEMO.custSilva, "/customer");
     await page.getByRole("link", { name: "Machines" }).first().click();
     await expect(page).toHaveURL(/\/customer\/machines$/);
     const card = page.getByTestId("agreement-card").filter({ hasText: serial });

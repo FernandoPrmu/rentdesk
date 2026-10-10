@@ -129,6 +129,13 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
       : await db.query<{ id: string }>("select id from public.machines where serial_no like $1", [`${E2E_SERIAL_PREFIX}%`]);
     const machines = rows.map((r) => r.id);
     if (machines.length > 0) {
+      // Meter photos the tests uploaded (also ones never submitted) live in Storage, not only in rows.
+      const { rows: folders } = await db.query<{ folder: string }>(
+        `select t.owner_id || '/' || t.id as folder from public.billing_cycle_tickets t
+         join public.rental_agreements a on a.id = t.agreement_id where a.machine_id = any($1)`,
+        [machines],
+      );
+      await removePhotoFolders(folders.map((r) => r.folder));
       const { rows: agreementRows } = await db.query<{ id: string }>(
         "select id from public.rental_agreements where machine_id = any($1)",
         [machines],
@@ -168,5 +175,15 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
     throw error;
   } finally {
     await db.end();
+  }
+}
+
+/** Deletes every meter photo under the given `{owner}/{ticket}` folders (Storage API: direct deletes are not allowed). */
+async function removePhotoFolders(folders: string[]): Promise<void> {
+  const storage = serviceClient().storage.from("meter-photos");
+  for (const folder of folders) {
+    const { data } = await storage.list(folder, { limit: 100 });
+    const paths = (data ?? []).map((o) => `${folder}/${o.name}`);
+    if (paths.length > 0) await storage.remove(paths);
   }
 }

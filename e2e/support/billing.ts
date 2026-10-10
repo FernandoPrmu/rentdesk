@@ -26,9 +26,9 @@ function check<T>(result: { data: T; error: { message: string } | null }, what: 
 }
 
 /** Registers a mono machine for an owner (serial must start with E2E- so it is cleaned up). */
-export async function createMachine(ownerId: string, serial: string): Promise<string> {
+export async function createMachine(ownerId: string, serial: string, model = "MP 2501"): Promise<string> {
   const row = check(
-    await service().from("machines").insert({ owner_id: ownerId, brand: "Ricoh", model: "MP 2501", serial_no: serial, type: "MONO" }).select("id").single(),
+    await service().from("machines").insert({ owner_id: ownerId, brand: "Ricoh", model, serial_no: serial, type: "MONO" }).select("id").single(),
     "machine",
   );
   return row!.id;
@@ -107,4 +107,13 @@ export async function assignMachine(ownerId: string, machineId: string, customer
 export async function ticketIds(agreementId: string): Promise<string[]> {
   const rows = check(await service().from("billing_cycle_tickets").select("id").eq("agreement_id", agreementId).order("cycle_no"), "tickets");
   return rows!.map((r) => r.id);
+}
+
+/** Opens cycle 1 of an agreement as the daily job would (meter deadline in 5 days); returns the ticket id. */
+export async function openFirstCycle(agreementId: string): Promise<string> {
+  const opened = check(
+    await service().rpc("rpc_open_billing_cycle", { p_agreement_id: agreementId, p_cycle_no: 1, p_stage_due_at: new Date(Date.now() + 5 * 86_400_000).toISOString() }),
+    "open cycle",
+  ) as { ticket_id: string };
+  return opened.ticket_id;
 }

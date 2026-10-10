@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0019`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0021`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -160,8 +160,9 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | Function | Effect |
 | --- | --- |
 | `open_billing_cycle` | Creates ticket + event + notifications at the job's `p_now`; snapshots terms, late fee and the real days of the cycle; advances the monthly calendar; flags an earlier ticket still waiting for its reading as Overdue (11.6, owner notified); replays safely |
-| `submit_meter_reading` | Submission + readings + photo row + draft invoice/lines → `PENDING_OWNER_REVIEW` (idempotent). Closes the older meter-stage tickets of the cycles it bills ("Billed in the cycle N invoice", rule 25); refused (`PREVIOUS_REVIEW_PENDING`) while an older reading waits for review |
-| `confirm_meter_submission` | Assigns the invoice number, issues the invoice, marks the photo for deletion → `AWAITING_PAYMENT`. `p_submission_id` null = the ticket's estimated draft |
+| `submit_meter_reading` | Submission + readings + photo row + draft invoice/lines → `PENDING_OWNER_REVIEW` (idempotent). Closes the older meter-stage tickets of the cycles it bills ("Billed in the cycle N invoice", rule 25); refused (`PREVIOUS_REVIEW_PENDING`) while an older reading waits for review, and a customer reading after the rejection limit (`TOO_MANY_REJECTIONS`, rule 28) |
+| `confirm_meter_submission` | Assigns the invoice number, issues the invoice, marks the photo for deletion → `AWAITING_PAYMENT`. `p_submission_id` null = the ticket's estimated draft. Returns `photo_paths` and `photo_ids`: server code deletes the files at once and marks the rows |
+| `correct_meter_reading` | INV-08 (rule 29): owner only, reading waiting for review, note required. The engine's recalculated draft is checked (`verify_meter_invoice`, `verify_invoice_credits`, same removed credits); the customer's value is kept in `corrected_from_value`; lines and totals replaced; `CORRECTION` event, audit `METER_READING_CORRECTED`, customer notified |
 | `reject_meter_submission` | Reason required; draft → `REJECTED`; → `METER_REQUESTED`. `p_submission_id` null = reject the estimated draft (no second estimate for that ticket) |
 | `submit_payment` | Payment + slip, duplicate flag → `PAYMENT_SUBMITTED` (idempotent) |
 | `verify_payment` | Accept → `CLOSED`, or partial → `PARTIALLY_PAID`, or reject (reason). An overpayment becomes a credit |
@@ -169,7 +170,7 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `raise_dispute` / `resolve_dispute` | Customer disputes an issued invoice (reason) → `DISPUTED`; owner rejects or resolves it (explanation) → `AWAITING_PAYMENT` (invoice partially paid if part was paid) |
 | `create_estimated_invoice` | Daily job (rule 22): after the meter deadline, when the owner bills estimates, a draft estimated invoice from the engine (`verify_estimated_invoice`, credits checked) → `PENDING_OWNER_REVIEW`; once per ticket |
 | `mark_ticket_overdue`, `record_ticket_reminder`, `escalate_ticket`, `apply_late_fee`, `set_ticket_pause` | Daily job steps (rules 20-24). Compare-and-set under the ticket lock: a step already done returns `{skipped}`. `apply_late_fee` re-checks the amount (ticket snapshot → owner → platform), the grace period, once only, never with a slip waiting or a dispute |
-| `cron_begin_run` / `cron_finish_run`, `cron_context`, `cron_due_agreements`, `cron_ticket_candidates`, `cron_pause_candidates`, `cron_expired_photos`, `mark_photos_deleted`, `cron_overdue_summaries`, `notify_once` | The daily job's run record (10-minute lease), its reads (keyset pages) and the photo / weekly-summary steps |
+| `cron_begin_run` / `cron_finish_run`, `cron_context`, `cron_due_agreements`, `cron_ticket_candidates`, `cron_pause_candidates`, `cron_expired_photos`, `mark_photos_deleted`, `cron_orphan_photos`, `cron_overdue_summaries`, `notify_once` | The daily job's run record (10-minute lease), its reads (keyset pages) and the photo / weekly-summary steps |
 | `assign_invoice_number` | Per-owner counter row lock. Rolls back with the transaction, so numbering is gap-free |
 | `provision_account` | Profile + owner/customer rows; enforces Admin → Owner → Customer |
 | `write_audit` | Explicit audit entries (logins, resets) |
@@ -313,6 +314,17 @@ app's own per-account and per-IP limits above protect logins instead.
 - **Time override** (non-production only): `x-rentdesk-now` header or `?now=` on `/api/cron/daily`
   (`npm run cron:run -- --now=2026-11-01T01:00:00+05:30`). Production builds ignore it (`src/lib/cron/time.ts`).
 
+## Meter review (migrations 0020–0021)
+
+- **Customer path.** The browser uploads the live photo to `meter-photos/{owner}/{ticket}/{photo id}.jpg` (storage policy:
+  own ticket, waiting for a reading, not paused); the server action checks folder, size and JPEG signature, recalculates
+  with the billing engine and calls `rpc_submit_meter_reading` with the idempotency key.
+- **Owner path.** Review reads the photo through a 5-minute signed URL made with the owner's own client (storage RLS);
+  confirm, reject, correct and manual entry go through `src/lib/tickets/transitions.ts`. `onInvoiceIssued`
+  (`src/lib/invoices/issued.ts`) runs after an invoice is issued: the PDF and email plug in there (task 6b).
+- **Grant (0021).** The service role reads `owner_settings_effective` (it was recreated in 0017 without the grant).
+  `meter-review.db.test.ts` checks that the service role can read every table the meter service reads.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -320,7 +332,7 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 
 | Bucket | Limit / types | Direct client access |
 | --- | --- | --- |
-| `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/…` while their ticket awaits a reading. Only the owner reads |
+| `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/{photo id}.jpg` while their ticket awaits a reading. Only the owner reads (signed URL). Deleted on confirm; rejected after retention; never-submitted after 2 days (rule 30) |
 | `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads while their ticket awaits payment. Customer, owner and admin read |
 | `branding` | 5 MB; PNG, JPEG, SVG, PDF | Owner manages their own prefix. Their customers and admin read. The app stores the logo only as `{owner_id}/logo.png` (max 512 px, SVG rasterised on the server) |
 
@@ -340,6 +352,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 - The seed writes its agreements with the service role (stable ids, backdated first billing dates to create
   tickets in several stages); the same triggers apply as for `rpc_assign_machine`.
 - `cron.db.test.ts` runs the daily job with simulated dates in 2024-2025, when no seed or fixture agreement is due.
+- Feature e2e specs reuse one saved session per demo account (`signInCached`, `playwright/.auth/`, cleared by the global
+  setup) to stay under Supabase Auth's sign-in rate limit; raise that limit before production (see above).
 - `npm run test:e2e` runs on a production build (`next build` + `next start`, port 3100); `npm run test:e2e:dev`
   uses `next dev`. It signs in with the seed accounts. Its global setup and teardown restore them
   and delete the `owner.e2e-*` / `cust.e2e-*` accounts and the `E2E-*` machines (with their agreements) the

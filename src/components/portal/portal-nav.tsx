@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, CalendarClock, House, LayoutDashboard, LifeBuoy, type LucideIcon, Printer, Receipt, Settings, Ticket, TriangleAlert, Users } from "lucide-react";
+import { Building2, CalendarClock, FileText, House, LayoutDashboard, LifeBuoy, type LucideIcon, Printer, Receipt, Settings, Ticket, TriangleAlert, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
@@ -21,12 +21,14 @@ const NAV: Record<Portal, NavItem[]> = {
   admin: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
     { href: "/admin/owners", label: "Owners", icon: Building2 },
+    { href: "/admin/invoices", label: "Invoices", icon: FileText },
     { href: "/admin/escalations", label: "Escalations", icon: TriangleAlert },
     { href: "/admin/jobs", label: "Daily job", icon: CalendarClock },
   ],
   owner: [
     { href: "/owner", label: "Home", icon: House, exact: true },
     { href: "/owner/tickets", label: "Tickets", icon: Ticket },
+    { href: "/owner/invoices", label: "Invoices", icon: FileText },
     { href: "/owner/customers", label: "Customers", icon: Users },
     { href: "/owner/machines", label: "Machines", icon: Printer },
     { href: "/owner/settings", label: "Settings", icon: Settings },
@@ -114,7 +116,7 @@ function BottomLinks({ portal, pathname, className }: { portal: Portal; pathname
                 )}
               >
                 <item.icon className="size-6" aria-hidden />
-                {item.label}
+                <span className="max-w-full truncate px-0.5">{item.label}</span>
               </Link>
             </li>
           );

@@ -7,7 +7,8 @@ import { supabaseRpc } from "@/lib/cron/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/types/db";
 
-import { generateInvoicePdf, INVOICE_BUCKET, type InvoiceFiles, type PdfOutcome } from "./pdf-job";
+import { INVOICE_BUCKET } from "./bucket";
+import { generateInvoicePdf, type InvoiceFiles, type PdfOutcome } from "./pdf-job";
 import { loadInvoiceFonts } from "./pdf/fonts";
 
 /** Storage port of the PDF job: branding reads and invoice PDF writes (service role). */

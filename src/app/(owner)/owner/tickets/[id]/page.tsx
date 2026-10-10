@@ -101,6 +101,11 @@ export default async function OwnerTicketPage({ params }: PageProps<"/owner/tick
               </p>
             </div>
             <p className="text-2xl font-semibold tabular-nums">{formatRupees(inv.total_cents)}</p>
+            {inv.invoice_no && inv.id && (
+              <Link href={`/owner/invoices/${inv.id}`} className={cn(buttonVariants({ variant: "outline" }), "h-11 w-full text-base sm:w-auto")}>
+                Open invoice and PDF
+              </Link>
+            )}
           </CardContent>
         </Card>
       )}

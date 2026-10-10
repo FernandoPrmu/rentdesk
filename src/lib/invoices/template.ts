@@ -7,7 +7,7 @@ import { BRANDING_BUCKET, isOwnLetterheadPath, letterheadFilePath, letterheadKin
 import { checkLetterhead } from "@/lib/branding/letterhead";
 import { dbErrorMessage } from "@/lib/db-errors";
 import { BRANDING_SNAPSHOT_COLUMNS } from "@/lib/invoices/branding-snapshot";
-import { INVOICE_BUCKET } from "@/lib/invoices/pdf-job";
+import { INVOICE_BUCKET } from "@/lib/invoices/bucket";
 import { supabaseInvoiceFiles } from "@/lib/invoices/pdf-server";
 import { brandingFromSnapshot, sampleInvoiceDocument } from "@/lib/invoices/pdf/document";
 import { loadInvoiceFonts } from "@/lib/invoices/pdf/fonts";

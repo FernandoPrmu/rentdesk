@@ -10,6 +10,7 @@ import { isMeterStage, isPaymentStage, responsibleParty, type TicketStatus } fro
  */
 
 export interface TicketViewInvoice {
+  id?: string;
   invoice_no: string | null;
   type: "NORMAL" | "ESTIMATED";
   status: string;

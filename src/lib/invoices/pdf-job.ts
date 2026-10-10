@@ -13,7 +13,7 @@ import { type InvoiceFonts, renderInvoicePdf } from "./pdf/render.ts";
  * Only relative imports.
  */
 
-export const INVOICE_BUCKET = "invoices";
+export { INVOICE_BUCKET } from "./bucket.ts";
 
 export interface InvoiceFiles {
   /** A branding file (logo, letterhead); null when it does not exist. */

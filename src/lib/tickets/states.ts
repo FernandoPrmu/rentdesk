@@ -27,7 +27,8 @@ export const TRANSITIONS: Readonly<Record<TicketStatus, readonly TicketStatus[]>
   PENDING_OWNER_REVIEW: ["AWAITING_PAYMENT", "METER_REQUESTED", "CANCELLED"],
   AWAITING_PAYMENT: ["PAYMENT_SUBMITTED", "OVERDUE", "DISPUTED", "CANCELLED"],
   PAYMENT_SUBMITTED: ["CLOSED", "AWAITING_PAYMENT", "PARTIALLY_PAID"],
-  PARTIALLY_PAID: ["PAYMENT_SUBMITTED", "OVERDUE", "DISPUTED", "CANCELLED"],
+  // -> AWAITING_PAYMENT: its only payment was reversed (decision 42).
+  PARTIALLY_PAID: ["PAYMENT_SUBMITTED", "OVERDUE", "DISPUTED", "CANCELLED", "AWAITING_PAYMENT"],
   OVERDUE: ["PENDING_OWNER_REVIEW", "AWAITING_PAYMENT", "PARTIALLY_PAID", "PAYMENT_SUBMITTED", "DISPUTED", "CANCELLED"],
   DISPUTED: ["AWAITING_PAYMENT", "CANCELLED"],
   CLOSED: ["REOPENED"],
@@ -65,6 +66,11 @@ export interface ActionRule {
   to: readonly TicketStatus[];
   /** A reason (or note) is mandatory. */
   reason?: boolean;
+  /**
+   * A step the database takes inside another action's rpc (app.settle_invoice_payment),
+   * never requested on its own: it has no transition function.
+   */
+  internal?: boolean;
 }
 
 /**
@@ -192,10 +198,43 @@ export const ACTIONS = {
     from: ["REOPENED"],
     to: ["AWAITING_PAYMENT"],
   },
+  /**
+   * TKT-10 / 11.5: take back an accepted payment (a returned cheque). The rpc moves
+   * each of its tickets along the payment edges (app.settle_invoice_payment): a
+   * closed ticket is reopened and asks for payment again, a partly paid one with
+   * nothing left paid goes back to Awaiting payment (paymentWithdrawn); others stay.
+   */
+  reversePayment: {
+    label: "Reverse the payment",
+    actors: ["OWNER"],
+    from: ["CLOSED", "PARTIALLY_PAID", "AWAITING_PAYMENT", "REOPENED"],
+    overdueFrom: PAYMENT_STAGE,
+    to: [],
+    reason: true,
+  },
+  paymentWithdrawn: {
+    label: "Take back the part payment",
+    actors: ["OWNER"],
+    from: ["PARTIALLY_PAID"],
+    to: ["AWAITING_PAYMENT"],
+    reason: true,
+    internal: true,
+  },
+  /** 11.5: move an accepted payment to other bills; each ticket follows the money (same edges). */
+  reallocatePayment: {
+    label: "Move the payment",
+    actors: ["OWNER"],
+    from: ["CLOSED", "PARTIALLY_PAID", "AWAITING_PAYMENT", "REOPENED"],
+    overdueFrom: PAYMENT_STAGE,
+    to: [],
+    reason: true,
+  },
 } as const satisfies Record<string, ActionRule>;
 
 export type TicketAction = keyof typeof ACTIONS;
 export const TICKET_ACTIONS = Object.keys(ACTIONS) as TicketAction[];
+/** Actions with their own transition function (not internal steps). */
+export const REQUESTED_ACTIONS = TICKET_ACTIONS.filter((a) => !(ACTIONS[a] as ActionRule).internal);
 
 /** Why an action is refused, or null when it is allowed. */
 export function refusal(action: TicketAction, actor: ActorKind, ticket: TicketState): string | null {

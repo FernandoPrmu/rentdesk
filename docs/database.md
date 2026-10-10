@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0021`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0023`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -27,7 +27,7 @@ and workflow functions. It is **not** exposed through the Data API.
 | --- | --- | --- |
 | Accounts | `profiles` | Role (`ADMIN`/`OWNER`/`CUSTOMER`), tenant, status, `must_change_password`, login security |
 | | `owners` | Tenant business details, plan |
-| | `owner_company_profiles` | Branding (spec 17): company, logo, bank details, letterhead + layout, `onboarding_completed_at` |
+| | `owner_company_profiles` | Branding (spec 17): company, logo, bank details, letterhead + layout, payment instructions, `onboarding_completed_at`. Server-write-only since 0022 |
 | | `customers` | Customer details (status lives in `profiles`) |
 | | `subscription_plans` | Optional plans (ADM-07) |
 | Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee, login lockout and session timeout |
@@ -42,7 +42,8 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `meter_submissions` | Each reading attempt (idempotency key, server timestamp, review outcome) |
 | | `meter_readings` | Per-counter previous/current values, kept permanently |
 | | `meter_photos` | Temporary photo record; the file is deleted on confirm, the row stays |
-| | `invoices` / `invoice_lines` | Draft → issued invoice; number assigned on issue; branding snapshot |
+| | `invoices` / `invoice_lines` | Draft → issued invoice; number assigned on issue; branding snapshot; PDF state (`pdf_status`, `pdf_revision`, `pdf_path`, attempts, last error) |
+| | `invoice_pdf_versions` | Every PDF made for an invoice (`v1`, `v2`, …): reason, template, content hash, size, the customer and machine printed on v1. Append-only |
 | | `invoice_counters` | Per-owner, gap-free invoice sequence |
 | Payments | `payments` | Customer slips and owner-recorded cash/cheque; duplicate flag |
 | | `payment_slips` | File path, SHA-256, MIME type, size, retention |
@@ -81,6 +82,7 @@ erDiagram
     billing_cycle_tickets ||--o{ invoices : "drafts / reissues"
     billing_cycle_tickets |o--o| invoices : "current invoice"
     invoices ||--|{ invoice_lines : lines
+    invoices ||--o{ invoice_pdf_versions : pdfs
     invoices ||--o{ payments : paid_by
     payments ||--o{ payment_slips : proof
     invoices ||--o{ disputes : disputed
@@ -103,7 +105,7 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | --- | --- | --- | --- | --- |
 | profiles, customers | read all | read; update customer contact columns | read self | — |
 | owners | read all | read self | read own owner | — |
-| company profile / branding | read all | read, insert, update | read (own owner) | — |
+| company profile / branding | read all | read (writes through `rpc_save_company_profile` / `rpc_save_invoice_template`) | read (own owner) | — |
 | settings | read all; update global | read, insert, update own | — | — |
 | machines | read all | read, insert, update details (not status, not type) | read those they rent | — |
 | agreements | read all | read | read their own | — |
@@ -113,6 +115,7 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | tickets, events, comments, submissions, readings | read all | read | read own | — |
 | meter photos (rows and files) | rows only | read | — | — |
 | invoices, lines | read all | read | read own, **not DRAFT/REJECTED** | — |
+| invoice PDF versions (rows and files) | read all | read | read own issued invoices | — |
 | payments, slips, disputes, credits | read all | read | read own | — |
 | deposit transactions, deposit balances (view) | read all | read | read own | — |
 | service requests + history | read all | read | read own | — |
@@ -129,7 +132,8 @@ using the service role:
 - `rental_agreements`, `agreement_terms_history` and `machines.status` (migration 0014)
 - tickets, events and comments
 - meter submissions, readings and photos
-- invoices, invoice lines and invoice counters
+- invoices, invoice lines, invoice counters and invoice PDF versions (append-only)
+- the company profile (`owner_company_profiles`, since 0022)
 - payments, payment slips, disputes and credits
 - deposit transactions (append-only even for the service role)
 - service requests and their history
@@ -188,6 +192,8 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `update_agreement_terms` | New terms version from the cycle after the one in progress (`app.cycle_in_progress + 1`); installation location and end date change at once; customer notified |
 | `set_machine_status` | `AVAILABLE` / `UNDER_REPAIR` / `RETIRED` with a reason (audit). Never `RENTED`, never while rented |
 | `settle_deposit` | Returned agreement only (settle later, DEP-04). Same rules as at return (`apply_deposit_settlement`): deduct + refund + retain = held; deductions pay the agreement's unpaid invoices (no slip waiting, not disputed) oldest due first as accepted payments of method `SECURITY_DEPOSIT`, closing paid tickets; refund needs date and method; retain needs a reason. Audit `DEPOSIT_SETTLED`, customer notified |
+| `save_invoice_template` | BRD-04..07: letterhead path (the owner's own content-hash path), layout (preset, area inside the page, at least 50 % × 40 %), payment instructions (≤ 300). No letterhead clears the layout. Audited by the row trigger |
+| `claim_invoice_pdf` / `record_invoice_pdf` / `mark_invoice_pdf_failed` / `cron_pending_invoice_pdfs` | Invoice PDFs (rule 34): claim a pending invoice for 5 minutes and get everything the PDF prints; record version n+1 (or "same as the newest"), READY only if `pdf_revision` did not move while rendering, audit `INVOICE_PDF_CREATED`; record a failure; the daily job's list (fewest attempts first) |
 | `set_invoice_credit` | Rule 13: the owner removes a credit from a draft (or adds it back). Takes the engine's recalculation, checks only the customer-credit lines changed, swaps them; audit `INVOICE_CREDIT_REMOVED` / `RESTORED` |
 
 Audit triggers record the actor:
@@ -325,6 +331,21 @@ app's own per-account and per-IP limits above protect logins instead.
 - **Grant (0021).** The service role reads `owner_settings_effective` (it was recreated in 0017 without the grant).
   `meter-review.db.test.ts` checks that the service role can read every table the meter service reads.
 
+## Invoice PDFs and the letterhead (migrations 0022–0023)
+
+- **Pending flag.** A `before insert or update` trigger on `invoices` (`app.invoice_pdf_flag`) sets `pdf_status = PENDING`,
+  bumps `pdf_revision` and records the reason when an issued invoice is issued, gets a late fee, a new due date, new
+  amounts or credits, or is cancelled. Payment status changes do not (no PAID stamp). Issuing updates the invoice twice in
+  one transaction, so a PDF still waiting for its first version keeps the reason ISSUED (0023).
+- **Rendering** (`src/lib/invoices/pdf-job.ts`): claim → build the document from the stored invoice, lines and
+  `branding_snapshot` → skip if the content hash equals the newest version → render (pdf-lib, Noto Sans) → upload
+  `v{n}.pdf` → record. Called after confirm and return (`onInvoiceIssued` / `onInvoiceChanged`), by the daily job for
+  everything still pending, and by the seed. All through `rpc_*`, so `invoice-pdfs.db.test.ts` runs the real job.
+- **Backfill.** 0022 marked every invoice issued before it as pending; the next daily job (or `npm run db:seed`) makes their PDFs.
+  Dev-database invoices issued before 0015 have no stored `calculation`, so their PDFs have no readings table.
+- **Writes.** Owners lost their direct insert/update grants on `owner_company_profiles` and the branding bucket's
+  write policies: the server validates first (English only, rule 33; file checks, rule 36) and writes with the service role.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -334,7 +355,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 | --- | --- | --- |
 | `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/{photo id}.jpg` while their ticket awaits a reading. Only the owner reads (signed URL). Deleted on confirm; rejected after retention; never-submitted after 2 days (rule 30) |
 | `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads while their ticket awaits payment. Customer, owner and admin read |
-| `branding` | 5 MB; PNG, JPEG, SVG, PDF | Owner manages their own prefix. Their customers and admin read. The app stores the logo only as `{owner_id}/logo.png` (max 512 px, SVG rasterised on the server) |
+| `branding` | 5 MB; PNG, JPEG, SVG, PDF | Server writes only (0022). Owner, their customers and admin read. Logos at `{owner_id}/logos/{sha256}.png` (max 512 px, SVG rasterised on the server; older `{owner_id}/logo.png` still valid), letterheads at `{owner_id}/letterheads/{sha256}.{pdf,jpg,png}`. Never overwritten or deleted (rule 35) |
+| `invoices` | 10 MB; PDF | Server writes only. `{owner_id}/{invoice_id}/v{n}.pdf`: owner (own tenant), the invoice's customer (issued invoices only) and admin read. `{owner_id}/preview/sample.pdf`: the owner's sample preview |
 
 ## Tests and seed
 

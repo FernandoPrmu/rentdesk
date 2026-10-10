@@ -14,6 +14,8 @@ import { AccountSummary } from "@/components/accounts/account-summary";
 import { AgreementCards } from "@/components/agreements/agreement-cards";
 import { Facts } from "@/components/agreements/agreement-display";
 import { DepositsToSettle } from "@/components/deposits/deposits-to-settle";
+import { CreditsPanel } from "@/components/payments/credits-panel";
+import { PaymentList } from "@/components/payments/payment-views";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { buttonVariants } from "@/components/ui/button";
@@ -27,25 +29,31 @@ import { getCustomerBalances, getCustomerBilling } from "@/lib/customers/queries
 import { getDepositsHeld, listDepositsToSettle } from "@/lib/deposits/queries";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
+import { listCustomerCredits, listPayments } from "@/lib/payments/service";
+import { createClient } from "@/lib/supabase/server";
+
+import { refundCreditAction } from "../../payments/actions";
 import { INVOICE_STATUS_LABEL, TICKET_STATUS_LABEL } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Customer" };
 
-/** CUS-04: contact details, account, machines and agreements, balance, tickets, invoices, requests. */
+/** CUS-04: contact details, account, machines and agreements, balance, tickets, invoices, payments, credits, requests. */
 export default async function CustomerDetailPage({ params }: PageProps<"/owner/customers/[id]">) {
-  await requireUser("OWNER");
+  const owner = await requireUser("OWNER");
   const { id } = await params;
   if (!uuidSchema.safeParse(id).success) notFound();
   // RLS: an owner only ever sees their own customers; anything else is "not found".
   const customer = await getCustomer(id);
   if (!customer) notFound();
 
-  const [agreements, balances, billing, toSettle] = await Promise.all([
+  const [agreements, balances, billing, toSettle, payments, credits] = await Promise.all([
     listCustomerAgreements(id),
     getCustomerBalances(id),
     getCustomerBilling(id),
     listDepositsToSettle(id),
+    listPayments(await createClient(), { customerId: id, limit: 20 }),
+    listCustomerCredits(owner, id),
   ]);
   const deposits = await getDepositsHeld(agreements.map((a) => a.id));
   const depositHeld = [...deposits.values()].reduce((s, v) => s + v, 0);
@@ -157,7 +165,14 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
               {billing.invoices.map((i) => (
                 <li key={i.id} className="flex flex-wrap justify-between gap-2 py-2">
                   <span>
-                    {i.invoice_no ?? "Not issued"} · {formatRupees(i.total_cents)}
+                    {i.invoice_no ? (
+                      <Link href={`/owner/invoices/${i.id}`} className="font-medium text-primary underline-offset-4 hover:underline">
+                        {i.invoice_no}
+                      </Link>
+                    ) : (
+                      "Not issued"
+                    )}{" "}
+                    · {formatRupees(i.total_cents)}
                     {i.amount_paid_cents > 0 ? ` (paid ${formatRupees(i.amount_paid_cents)})` : ""}
                     {i.due_date ? ` · due ${formatDate(i.due_date)}` : ""}
                   </span>
@@ -166,7 +181,28 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
               ))}
             </ul>
           )}
-          <p className="mt-3 text-xs text-muted-foreground">Payment history per invoice is added with payments (PAY-08).</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle>Payments</CardTitle>
+          <Link href={`/owner/payments/new?customer=${customer.id}`} className={cn(buttonVariants({ variant: "outline" }), "h-11")}>
+            Record a payment
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <PaymentList payments={payments} hrefBase="/owner/payments" audience="OWNER" empty="No payments yet." />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Credits</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-2 text-sm text-muted-foreground">Credits come off the next bills automatically. You can refund what is free instead.</p>
+          <CreditsPanel credits={credits} today={today} action={refundCreditAction} />
         </CardContent>
       </Card>
 

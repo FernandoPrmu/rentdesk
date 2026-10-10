@@ -5,6 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateInvoicePdf } from "@/lib/invoices/pdf-job";
 import { supabaseInvoiceFiles } from "@/lib/invoices/pdf-server";
 import { loadInvoiceFonts } from "@/lib/invoices/pdf/fonts";
+import { generateReceiptPdf } from "@/lib/payments/receipt-pdf/job";
+import { supabaseReceiptFiles } from "@/lib/payments/receipt-pdf/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { type Rpc, RpcError } from "@/lib/tickets/transitions";
 import type { Database } from "@/types/db";
@@ -32,6 +34,11 @@ export function meterPhotoStorage(client: SupabaseClient<Database>): PhotoStorag
       const { error } = await client.storage.from("meter-photos").remove(paths);
       if (error) throw new Error(`meter photos: ${error.message}`);
     },
+    async removePaymentSlips(paths) {
+      if (paths.length === 0) return;
+      const { error } = await client.storage.from("payment-slips").remove(paths);
+      if (error) throw new Error(`payment slips: ${error.message}`);
+    },
   };
 }
 
@@ -39,7 +46,9 @@ export function runDailyJobNow(options: DailyJobOptions): Promise<DailyJobResult
   const admin = createAdminClient();
   const rpc = supabaseRpc(admin);
   const files = supabaseInvoiceFiles(admin);
+  const receiptFiles = supabaseReceiptFiles(admin);
   return runDailyJob(rpc, meterPhotoStorage(admin), options, {
     generate: (invoiceId, now) => generateInvoicePdf(rpc, files, () => loadInvoiceFonts(), invoiceId, now),
+    generateReceipt: (receiptId, now) => generateReceiptPdf(rpc, receiptFiles, () => loadInvoiceFonts(), receiptId, now),
   });
 }

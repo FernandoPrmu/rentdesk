@@ -56,3 +56,44 @@ export const DEPOSIT_KIND_LABEL: Record<string, string> = {
   REFUNDED: "Refunded",
   RETAINED: "Kept",
 };
+
+/** Payments (PAY-01..12): the owner's words and the customer's words. */
+export const PAYMENT_STATUS_LABEL: Record<string, string> = {
+  SUBMITTED: "Waiting for check",
+  ACCEPTED: "Accepted",
+  PARTIAL: "Part payment",
+  REJECTED: "Not accepted",
+  REVERSED: "Reversed",
+};
+
+export const CUSTOMER_PAYMENT_STATUS_LABEL: Record<string, string> = {
+  SUBMITTED: "Being checked",
+  ACCEPTED: "Accepted",
+  PARTIAL: "Accepted (part)",
+  REJECTED: "Not accepted",
+  REVERSED: "Reversed",
+};
+
+export const CREDIT_KIND_LABEL: Record<string, string> = {
+  OVERPAYMENT: "Overpayment",
+  ADVANCE: "Advance payment",
+  CANCELLED_INVOICE: "Paid on a cancelled invoice",
+  ESTIMATE_RECONCILIATION: "Estimate",
+  MANUAL: "Credit",
+};
+
+export const CREDIT_STATUS_LABEL: Record<string, string> = {
+  AVAILABLE: "Available",
+  APPLIED: "Used",
+  REFUNDED: "Refunded",
+  VOID: "Removed",
+};
+
+/** What the reference of a payment is called, by method. */
+export const REFERENCE_LABEL: Record<string, string> = {
+  BANK_TRANSFER: "Bank reference",
+  DEPOSIT: "Deposit slip number",
+  CHEQUE: "Cheque number",
+  OTHER: "Reference",
+  CASH: "Receipt book number",
+};

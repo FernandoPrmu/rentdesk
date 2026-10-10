@@ -125,14 +125,15 @@ async function loadEstimateCredits(client: Client, agreementId: string, lastConf
 
 /**
  * Rule 13: the customer's credits with something left, oldest first. What is left
- * = amount minus the CREDIT lines that use it on live invoices (drafts included:
+ * = amount minus what was refunded (PAY-12) minus the CREDIT lines that use it on
+ * live invoices (drafts included:
  * a draft reserves its credits). `excludeInvoiceId`: recalculating that draft, so
  * its own lines do not count. Same as app.available_credits.
  */
 export async function loadAvailableCredits(client: Client, customerId: string, excludeInvoiceId: string | null = null): Promise<AvailableCredit[]> {
   const { data: credits, error } = await client
     .from("credits")
-    .select("id, kind, amount_cents, created_at")
+    .select("id, kind, amount_cents, refunded_cents, created_at")
     .eq("customer_id", customerId)
     .eq("status", "AVAILABLE")
     .order("created_at")
@@ -156,7 +157,7 @@ export async function loadAvailableCredits(client: Client, customerId: string, e
     usedBy.set(line.credit_id, (usedBy.get(line.credit_id) ?? 0) - line.amount_cents);
   }
   return credits
-    .map((c) => ({ id: c.id, amountCents: c.amount_cents - (usedBy.get(c.id) ?? 0), label: CREDIT_LABEL[c.kind] }))
+    .map((c) => ({ id: c.id, amountCents: c.amount_cents - c.refunded_cents - (usedBy.get(c.id) ?? 0), label: CREDIT_LABEL[c.kind] }))
     .filter((c) => c.amountCents > 0);
 }
 

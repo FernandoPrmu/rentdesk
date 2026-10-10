@@ -22,8 +22,9 @@ import { type CronTicket, decideTicket, type Decision, ESCALATION_ADMIN, ESCALAT
  *
  * Steps, in order: pause/resume tickets of suspended accounts, open due cycles
  * (catching up every missed one), the ticket sweep (overdue, estimate, reminders,
- * escalation, late fee), meter photo purge, weekly overdue summaries, then the
- * invoice PDFs still pending (new, changed by this run, or a failed earlier try).
+ * escalation, late fee), meter photo and orphan slip purge, weekly overdue
+ * summaries, then the invoice and receipt PDFs still pending (new, changed by this
+ * run, or a failed earlier try).
  *
  * - Idempotent: every write is a compare-and-set rpc; a second run the same day
  *   finds nothing to do.
@@ -39,11 +40,15 @@ import { type CronTicket, decideTicket, type Decision, ESCALATION_ADMIN, ESCALAT
 export interface PhotoStorage {
   /** Deletes meter photo objects; a missing object is not an error. */
   removeMeterPhotos(paths: string[]): Promise<void>;
+  /** Deletes payment slip files never sent with a payment (decision 41); optional in unit tests. */
+  removePaymentSlips?(paths: string[]): Promise<void>;
 }
 
 /** Makes one pending invoice PDF (src/lib/invoices/pdf-job.ts); optional so unit tests can leave it out. */
 export interface InvoicePdfPort {
   generate(invoiceId: string, now: Date): Promise<{ status: "SKIPPED" | "UNCHANGED" | "CREATED" }>;
+  /** Makes one pending receipt PDF (src/lib/payments/receipt-pdf/job.ts, decision 44). */
+  generateReceipt?(receiptId: string, now: Date): Promise<{ status: "SKIPPED" | "UNCHANGED" | "CREATED" }>;
 }
 
 export interface DailyJobOptions {
@@ -72,6 +77,8 @@ export const COUNT_KEYS = [
   "photosDeleted",
   "summaries",
   "pdfs",
+  "receiptPdfs",
+  "slipsDeleted",
   "skipped",
 ] as const;
 export type CronCounts = Record<(typeof COUNT_KEYS)[number], number>;
@@ -288,6 +295,20 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
       }
     }
 
+    // Payment slips uploaded but never sent with a payment, older than 2 days (decision 41). One batch per run.
+    if (storage.removePaymentSlips) {
+      checkTime();
+      const slips = (await rpc("rpc_cron_orphan_slips", { p_now: now.toISOString(), p_limit: batch })) as string[];
+      if (slips.length > 0) {
+        try {
+          await storage.removePaymentSlips(slips);
+          counts.slipsDeleted += slips.length;
+        } catch (error) {
+          record(errorEntry("orphan slips", undefined, error));
+        }
+      }
+    }
+
     // Weekly overdue summary to owners (spec 5.4, 8.3).
     checkTime();
     const summaries = (await rpc("rpc_cron_overdue_summaries", { p_today: today })) as {
@@ -330,6 +351,27 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
             else counts.pdfs += 1;
           } catch (error) {
             record(errorEntry("invoice pdf", id, error));
+          }
+        }
+      }
+    }
+
+    // Receipt PDFs (decision 44): new, reversed or moved payments whose PDF failed earlier.
+    if (pdfs?.generateReceipt) {
+      const tried = new Set<string>();
+      for (;;) {
+        checkTime();
+        const ids = ((await rpc("rpc_cron_pending_receipt_pdfs", { p_now: now.toISOString(), p_limit: batch })) as string[]).filter((id) => !tried.has(id));
+        if (ids.length === 0) break;
+        for (const id of ids) {
+          checkTime();
+          tried.add(id);
+          try {
+            const r = await pdfs.generateReceipt(id, now);
+            if (r.status === "SKIPPED") counts.skipped += 1;
+            else counts.receiptPdfs += 1;
+          } catch (error) {
+            record(errorEntry("receipt pdf", id, error));
           }
         }
       }

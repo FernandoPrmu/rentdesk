@@ -137,6 +137,18 @@ describe("buildEstimate (11.6, rule 13)", () => {
     expect(steps.indexOf("rpc_cron_pending_invoice_pdfs")).toBeGreaterThan(steps.indexOf("rpc_cron_overdue_summaries"));
   });
 
+  it("makes pending receipt PDFs after the invoice PDFs, and purges unsent slips", async () => {
+    const generateReceipt = vi.fn(async () => ({ status: "CREATED" as const }));
+    const removePaymentSlips = vi.fn(async () => {});
+    const { rpc, calls } = fakeRpc({ rpc_cron_pending_receipt_pdfs: () => ["rct-1"], rpc_cron_orphan_slips: () => ["o/c/s.jpg"] });
+    const result = await runDailyJob(rpc, { ...storage, removePaymentSlips }, { now: NOW, trigger: "CRON" }, { generate: vi.fn(), generateReceipt });
+    expect(generateReceipt).toHaveBeenCalledWith("rct-1", NOW);
+    expect(removePaymentSlips).toHaveBeenCalledWith(["o/c/s.jpg"]);
+    expect(result.counts).toMatchObject({ receiptPdfs: 1, slipsDeleted: 1 });
+    const steps = calls.map(([fn]) => fn);
+    expect(steps.indexOf("rpc_cron_pending_receipt_pdfs")).toBeGreaterThan(steps.indexOf("rpc_cron_pending_invoice_pdfs"));
+  });
+
   it("without a PDF port the step is skipped", async () => {
     const { rpc, calls } = fakeRpc({});
     await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });

@@ -121,7 +121,7 @@ test.describe("deposits, advances and returning with a balance (DEP-01..04, RET-
     await signInCached(page, DEMO.custSilva, "/customer");
     await page.getByRole("link", { name: "Bills" }).first().click();
     await expect(page.getByTestId("customer-balance")).not.toHaveText("Nothing to pay");
-    const first = page.getByTestId("open-invoice").filter({ hasText: firstInvoice.invoiceNo });
+    const first = page.getByRole("region", { name: "To pay" }).getByTestId("invoice-row").filter({ hasText: firstInvoice.invoiceNo });
     // Rs. 3,000 less Rs. 1,000 from the deposit.
     await expect(first).toContainText("Rs. 2,000");
     await expect(first).toContainText("Partially paid");

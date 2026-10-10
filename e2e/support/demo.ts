@@ -57,6 +57,10 @@ export async function restoreDemoState(): Promise<void> {
   const { error: setupError } = await admin.from("owner_company_profiles").delete().eq("owner_id", ceylon);
   if (setupError) throw new Error(`e2e: restore ceylon setup: ${setupError.message}`);
   await admin.storage.from("branding").remove([`${ceylon}/logo.png`]);
+  const { data: ceylonLogos } = await admin.storage.from("branding").list(`${ceylon}/logos`, { limit: 100 });
+  if (ceylonLogos?.length) await admin.storage.from("branding").remove(ceylonLogos.map((o) => `${ceylon}/logos/${o.name}`));
+
+  await restoreInvoiceTemplate();
 
   const unknown = ["e2e.nobody"];
   const { error: attemptsError } = await admin
@@ -65,6 +69,27 @@ export async function restoreDemoState(): Promise<void> {
     .in("username", [...usernames, ...unknown])
     .eq("success", false);
   if (attemptsError) throw new Error(`e2e: clear failed attempts: ${attemptsError.message}`);
+}
+
+/**
+ * Owner A's invoice template back to the built-in one (BRD-06), and the letterheads the
+ * tests uploaded removed unless an invoice still uses one (decision 35).
+ */
+export async function restoreInvoiceTemplate(): Promise<void> {
+  const admin = serviceClient();
+  const lanka = await profileId(DEMO.ownerLanka.username);
+  const { error: templateError } = await admin
+    .from("owner_company_profiles")
+    .update({ letterhead_path: null, letterhead_layout: {}, payment_instructions: null })
+    .eq("owner_id", lanka);
+  if (templateError) throw new Error(`e2e: restore lanka template: ${templateError.message}`);
+  const { data: letterheads } = await admin.storage.from("branding").list(`${lanka}/letterheads`, { limit: 100 });
+  for (const file of letterheads ?? []) {
+    const path = `${lanka}/letterheads/${file.name}`;
+    const { count } = await admin.from("invoices").select("id", { count: "exact", head: true }).eq("branding_snapshot->>letterhead_path", path);
+    if (!count) await admin.storage.from("branding").remove([path]);
+  }
+  await admin.storage.from("invoices").remove([`${lanka}/preview/sample.pdf`]);
 }
 
 /** Business names of accounts created by the e2e tests start with this; usernames with `.e2e-`. */
@@ -148,6 +173,13 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
       await db.query("delete from public.payment_slips where payment_id in (select id from public.payments where invoice_id = any($1))", [invoices]);
       await db.query("update public.credits set source_payment_id = null where source_payment_id in (select id from public.payments where invoice_id = any($1))", [invoices]);
       await db.query("delete from public.payments where invoice_id = any($1)", [invoices]);
+      // Invoice PDFs: the files in the invoices bucket and their version rows.
+      const { rows: pdfFolders } = await db.query<{ folder: string }>(
+        "select owner_id || '/' || id as folder from public.invoices where id = any($1)",
+        [invoices],
+      );
+      await removeFolders("invoices", pdfFolders.map((r) => r.folder));
+      await db.query("delete from public.invoice_pdf_versions where invoice_id = any($1)", [invoices]);
       await db.query("delete from public.invoice_lines where invoice_id = any($1)", [invoices]);
       await db.query(
         "update public.credits set status = 'AVAILABLE', applied_to_invoice_id = null, applied_at = null where applied_to_invoice_id = any($1)",
@@ -180,7 +212,11 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
 
 /** Deletes every meter photo under the given `{owner}/{ticket}` folders (Storage API: direct deletes are not allowed). */
 async function removePhotoFolders(folders: string[]): Promise<void> {
-  const storage = serviceClient().storage.from("meter-photos");
+  await removeFolders("meter-photos", folders);
+}
+
+async function removeFolders(bucket: string, folders: string[]): Promise<void> {
+  const storage = serviceClient().storage.from(bucket);
   for (const folder of folders) {
     const { data } = await storage.list(folder, { limit: 100 });
     const paths = (data ?? []).map((o) => `${folder}/${o.name}`);

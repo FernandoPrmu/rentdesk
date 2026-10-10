@@ -3,13 +3,15 @@ import { expect, type Page, test } from "@playwright/test";
 import { signInCached } from "./support/auth";
 import { assignMachine, createMachine, openFirstCycle } from "./support/billing";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
+import { pdfText } from "./support/pdf";
 
 // Meter reading with the live camera and the owner's review at 360 px (INV-01..09,
 // CP-02, CP-03), using Chromium's fake camera. A denied camera shows the help; the
 // customer photographs the meter, types the reading, sees the preview and sends it;
 // the owner rejects it with a reason; the customer sees why and sends again; the
-// owner confirms; the customer sees "Awaiting payment". The machine, its ticket and
-// the uploaded photos are deleted afterwards.
+// owner confirms; the customer sees "Awaiting payment", opens Bills and downloads the
+// invoice PDF (INV-09, CP-05). The machine, its ticket, the uploaded photos and the
+// invoice PDFs are deleted afterwards.
 test.describe.configure({ mode: "serial" });
 test.use({
   launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
@@ -41,8 +43,11 @@ async function sendReading(page: Page, reading: string, total: string) {
   const video = page.getByTestId("camera-video");
   await expect(video).toBeVisible();
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth)).toBeGreaterThan(0);
+  // The shutter waits for real frames (decision 37), then the fake camera's frame passes the check.
+  await expect(page.getByRole("button", { name: "Take photo" })).toBeEnabled({ timeout: 15_000 });
   await page.getByRole("button", { name: "Take photo" }).click();
   await expect(page.getByTestId("meter-photo")).toBeVisible();
+  await expect(page.getByTestId("bad-photo")).toHaveCount(0);
   // No gallery or file picker anywhere on the page (INV-03).
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
 
@@ -122,5 +127,44 @@ test.describe("meter reading with the live camera, and the owner's review", () =
     await expect(page.getByTestId("customer-ticket-status")).toHaveText("Awaiting payment");
     await expect(page.getByTestId("customer-bill")).toContainText("Rs. 6,250 to pay");
     await expect(page.getByTestId("customer-timeline")).toContainText("Reading not accepted");
+  });
+
+  test("the customer opens Bills and downloads the invoice PDF; the owner sees its version history", async ({ page }) => {
+    await signIn(page, "customer");
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Bills" }).last().click();
+    await expect(page).toHaveURL(/\/customer\/bills$/);
+    const row = page.getByRole("region", { name: "To pay" }).getByTestId("invoice-row").filter({ hasText: MODEL });
+    await expect(row).toContainText("Rs. 6,250.00");
+    await row.click();
+
+    await expect(page.getByTestId("invoice-total")).toHaveText("Rs. 6,250.00");
+    await expect(page.getByTestId("invoice-line")).toHaveCount(2);
+    const invoiceNo = (await page.getByRole("heading", { level: 1 }).textContent())?.trim() ?? "";
+    expect(invoiceNo).toMatch(/^INV-\d+$/);
+    const download = page.getByTestId("download-pdf");
+    await expect(download).toHaveAttribute("target", "_blank");
+
+    // The link opens a new tab (headless Chrome downloads the PDF there); the same link,
+    // followed here, redirects to a short-lived signed URL of the private file.
+    const [tab] = await Promise.all([page.waitForEvent("popup"), download.click()]);
+    await tab.close();
+    const href = (await download.getAttribute("href")) ?? "";
+    const redirect = await page.request.get(href, { maxRedirects: 0 });
+    expect(redirect.status()).toBe(303);
+    expect(redirect.headers().location).toMatch(/\/storage\/v1\/object\/sign\/invoices\//);
+    const response = await page.request.get(href);
+    expect(response.headers()["content-type"]).toContain("application/pdf");
+    const text = await pdfText(await response.body());
+    expect(text).toContain(invoiceNo);
+    expect(text).toContain("Rs. 6,250.00");
+    expect(text).toContain("Monthly commitment");
+    expect(text).toContain(serial);
+
+    await signIn(page, "owner");
+    await page.goto("/owner/invoices");
+    await page.getByTestId("invoice-row").filter({ hasText: invoiceNo }).click();
+    await expect(page.getByTestId("pdf-version")).toHaveCount(1);
+    await expect(page.getByTestId("pdf-version")).toContainText("Version 1 · Issued");
+    await expect(page.getByTestId("download-pdf")).toBeVisible();
   });
 });

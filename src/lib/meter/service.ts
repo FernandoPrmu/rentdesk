@@ -10,6 +10,7 @@ import type { MeterContext } from "@/lib/billing/meter-invoice";
 import { previousReading } from "@/lib/billing/usage";
 import { supabaseRpc } from "@/lib/cron/server";
 import { dbErrorMessage } from "@/lib/db-errors";
+import { BRANDING_SNAPSHOT_COLUMNS, brandingSnapshot } from "@/lib/invoices/branding-snapshot";
 import { onInvoiceIssued } from "@/lib/invoices/issued";
 import { describeChange, previewReading, type ReadingErrors } from "@/lib/meter/readings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -407,7 +408,7 @@ export async function confirmReview(owner: CurrentUser, ticketId: string, rollov
       pendingSubmissionId(admin, t.id),
       admin
         .from("owner_company_profiles")
-        .select("company_name, address, phone, email, logo_path, bank_name, bank_branch, bank_account_name, bank_account_no, letterhead_path, letterhead_layout")
+        .select(BRANDING_SNAPSHOT_COLUMNS)
         .eq("owner_id", t.owner_id)
         .maybeSingle(),
       admin.from("invoices").select("total_cents").eq("id", t.current_invoice_id ?? "").maybeSingle(),
@@ -419,7 +420,7 @@ export async function confirmReview(owner: CurrentUser, ticketId: string, rollov
       stageDueAt: paymentDeadline(dueDate),
       totalCents: inv?.total_cents ?? 0,
       // BRD-03: issued invoices keep the branding of the day they were issued.
-      brandingSnapshot: brand ? { ...brand, snapshot_at: now.toISOString() } : null,
+      brandingSnapshot: brandingSnapshot(brand, now),
       rolloverConfirmed,
     });
     // Spec 6.5 / INV-09: the photo goes now; the daily job retries anything left behind.

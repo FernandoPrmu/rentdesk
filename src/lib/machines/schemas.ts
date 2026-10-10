@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isoDate, optionalCount, optionalText, reasonField, requiredText } from "@/lib/forms";
+import { englishOnly } from "@/lib/text/english";
 
 /** Machines (MAC-01, MAC-03). Shared by the forms and the Server Actions. */
 
@@ -22,9 +23,10 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
 };
 
 const machineFields = {
-  brand: requiredText("Brand", 60),
-  model: requiredText("Model", 80),
-  serial_no: requiredText("Serial number", 60),
+  // Printed on invoices: English letters only (decision 33).
+  brand: requiredText("Brand", 60).refine(...englishOnly),
+  model: requiredText("Model", 80).refine(...englishOnly),
+  serial_no: requiredText("Serial number", 60).refine(...englishOnly),
   purchase_date: z
     .string()
     .default("")

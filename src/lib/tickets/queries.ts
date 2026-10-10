@@ -19,7 +19,7 @@ export const ticketFilterSchema = z.object({
   status: z.enum(TICKET_FILTERS).catch("OPEN").default("OPEN"),
 });
 
-const INVOICE = "invoice:invoices!billing_cycle_tickets_current_invoice_fkey(invoice_no, type, status, due_date, total_cents, amount_paid_cents)";
+const INVOICE = "invoice:invoices!billing_cycle_tickets_current_invoice_fkey(id, invoice_no, type, status, due_date, total_cents, amount_paid_cents)";
 const MACHINE = "machine:machines!billing_cycle_tickets_machine_fkey(id, brand, model, serial_no)";
 const LIST_COLUMNS = `id, cycle_no, cycle_date, period_start, period_end, status, status_before_overdue, stage_due_at,
   escalation_level, paused_at, is_late, agreement_id,

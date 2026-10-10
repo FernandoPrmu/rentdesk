@@ -22,7 +22,8 @@ import { type CronTicket, decideTicket, type Decision, ESCALATION_ADMIN, ESCALAT
  *
  * Steps, in order: pause/resume tickets of suspended accounts, open due cycles
  * (catching up every missed one), the ticket sweep (overdue, estimate, reminders,
- * escalation, late fee), meter photo purge, weekly overdue summaries.
+ * escalation, late fee), meter photo purge, weekly overdue summaries, then the
+ * invoice PDFs still pending (new, changed by this run, or a failed earlier try).
  *
  * - Idempotent: every write is a compare-and-set rpc; a second run the same day
  *   finds nothing to do.
@@ -38,6 +39,11 @@ import { type CronTicket, decideTicket, type Decision, ESCALATION_ADMIN, ESCALAT
 export interface PhotoStorage {
   /** Deletes meter photo objects; a missing object is not an error. */
   removeMeterPhotos(paths: string[]): Promise<void>;
+}
+
+/** Makes one pending invoice PDF (src/lib/invoices/pdf-job.ts); optional so unit tests can leave it out. */
+export interface InvoicePdfPort {
+  generate(invoiceId: string, now: Date): Promise<{ status: "SKIPPED" | "UNCHANGED" | "CREATED" }>;
 }
 
 export interface DailyJobOptions {
@@ -65,6 +71,7 @@ export const COUNT_KEYS = [
   "resumed",
   "photosDeleted",
   "summaries",
+  "pdfs",
   "skipped",
 ] as const;
 export type CronCounts = Record<(typeof COUNT_KEYS)[number], number>;
@@ -154,7 +161,7 @@ export function buildEstimate(t: CronTicket): EstimatePayload {
   };
 }
 
-export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: DailyJobOptions): Promise<DailyJobResult> {
+export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: DailyJobOptions, pdfs?: InvoicePdfPort): Promise<DailyJobResult> {
   const clock = options.clock ?? (() => Date.now());
   const started = clock();
   const budget = options.budgetMs ?? DEFAULT_BUDGET_MS;
@@ -303,6 +310,28 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
         if (skippedOrDone(r)) counts.summaries += 1;
       } catch (error) {
         record(errorEntry("summary", s.owner_id, error));
+      }
+    }
+
+    // Invoice PDFs (INV-09, decision 34): last, so late fees added above get their new version today.
+    // A failure stays PENDING (recorded on the invoice) and is tried again by the next run.
+    if (pdfs) {
+      const tried = new Set<string>();
+      for (;;) {
+        checkTime();
+        const ids = ((await rpc("rpc_cron_pending_invoice_pdfs", { p_now: now.toISOString(), p_limit: batch })) as string[]).filter((id) => !tried.has(id));
+        if (ids.length === 0) break;
+        for (const id of ids) {
+          checkTime();
+          tried.add(id);
+          try {
+            const r = await pdfs.generate(id, now);
+            if (r.status === "SKIPPED") counts.skipped += 1;
+            else counts.pdfs += 1;
+          } catch (error) {
+            record(errorEntry("invoice pdf", id, error));
+          }
+        }
       }
     }
   } catch (error) {

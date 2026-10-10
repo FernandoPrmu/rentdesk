@@ -4,6 +4,7 @@ import { cacheLife } from "next/cache";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
 import type { CurrentUser } from "@/lib/auth/current-user";
+import { BRANDING_BUCKET, logoFilePath } from "@/lib/branding/files";
 import { processLogo } from "@/lib/branding/logo-image";
 import type { CompanyInput } from "@/lib/branding/schemas";
 import { dbErrorMessage } from "@/lib/db-errors";
@@ -13,24 +14,23 @@ import type { Json } from "@/types/db";
 
 /**
  * Owner company profile and logo (BRD-01..03). The logo is stored as a PNG at
- * `branding/{owner_id}/logo.png` (private bucket) and shown through short-lived
- * signed URLs. Issued invoices keep their own branding_snapshot, so editing here
- * changes only new invoices.
+ * `branding/{owner_id}/logos/{sha256}.png` (private bucket, decision 35: never
+ * overwritten or deleted) and shown through short-lived signed URLs. Issued
+ * invoices keep their own branding_snapshot, so editing here changes only new
+ * invoices, and their later PDF versions still find the old logo.
  */
 
-export const LOGO_BUCKET = "branding";
+export const LOGO_BUCKET = BRANDING_BUCKET;
 const SIGNED_URL_SECONDS = 60 * 60;
-
-export function logoPath(ownerId: string): string {
-  return `${ownerId}/logo.png`;
-}
 
 /** The company profile of an owner, as the signed-in user may see it (RLS). */
 export async function getCompanyProfile(ownerId: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("owner_company_profiles")
-    .select("owner_id, company_name, logo_path, address, phone, email, bank_name, bank_branch, bank_account_name, bank_account_no, onboarding_completed_at, updated_at")
+    .select(
+      "owner_id, company_name, logo_path, address, phone, email, bank_name, bank_branch, bank_account_name, bank_account_no, letterhead_path, letterhead_layout, payment_instructions, onboarding_completed_at, updated_at",
+    )
     .eq("owner_id", ownerId)
     .maybeSingle();
   if (error) throw new Error(`company profile: ${error.message}`);
@@ -67,7 +67,7 @@ export async function getBranding(ownerId: string): Promise<{ companyName: strin
 /**
  * Saves company details (and completes onboarding on the first save). A new logo
  * is validated, converted to PNG and uploaded before the details are saved;
- * `removeLogo` deletes the stored logo.
+ * `remove` clears it from the profile (the file stays for old invoices).
  */
 export async function saveCompanyProfile(
   owner: CurrentUser,
@@ -76,22 +76,20 @@ export async function saveCompanyProfile(
 ): Promise<ActionResult> {
   const admin = createAdminClient();
   const details: Record<string, unknown> = { ...input };
-  const path = logoPath(owner.id);
-
   if (logo.file && logo.file.size > 0) {
     const processed = await processLogo(new Uint8Array(await logo.file.arrayBuffer()));
     if (!processed.ok) return fail(processed.error, { logo: processed.error });
+    const path = logoFilePath(owner.id, processed.png);
+    // Same bytes, same path: overwriting an existing copy changes nothing.
     const { error } = await admin.storage
       .from(LOGO_BUCKET)
-      .upload(path, processed.png, { contentType: "image/png", upsert: true, cacheControl: "60" });
+      .upload(path, processed.png, { contentType: "image/png", upsert: true, cacheControl: "3600" });
     if (error) {
       console.error("[branding] upload:", error.message);
       return fail("The logo could not be uploaded. Please try again.", { logo: "Upload failed." });
     }
     details.logo_path = path;
   } else if (logo.remove) {
-    const { error } = await admin.storage.from(LOGO_BUCKET).remove([path]);
-    if (error) console.error("[branding] remove:", error.message);
     details.logo_path = null;
   }
 

@@ -76,6 +76,11 @@ export default async function CustomerTicketPage({ params }: PageProps<"/custome
               {inv.due_date ? ` by ${formatDate(inv.due_date)}` : ""}
             </p>
           )}
+          {inv?.invoice_no && inv.id && (
+            <Link href={`/customer/bills/${inv.id}`} className={cn(buttonVariants({ variant: "outline" }), "h-12 w-full text-base")}>
+              View the bill and PDF
+            </Link>
+          )}
         </CardContent>
       </Card>
 

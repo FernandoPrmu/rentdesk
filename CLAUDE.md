@@ -30,7 +30,7 @@ Service requests, notifications, and reports sit around this core.
   `Authorization: Bearer $CRON_SECRET`. Hobby may fire anywhere within the scheduled hour,
   so the schedule `0 19 * * *` UTC lands at 00:30–01:29 Asia/Colombo.
 - **Email:** Resend (fall back to Brevo SMTP)
-- **PDF:** `@react-pdf/renderer` (server-side)
+- **PDF:** `pdf-lib` (server-side) with embedded Noto Sans; English only (decision 33)
 - **Validation:** Zod for every input, on the server
 - **Tests:** Vitest (unit), Playwright (key flows on a mobile viewport)
 - **Hosting:** Vercel Hobby (free), Node.js 24 (`engines` in package.json, `.nvmrc`).

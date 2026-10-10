@@ -5,12 +5,61 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { compressPhoto } from "@/lib/meter/compress";
+import { assessFrame, BAD_PHOTO_MESSAGE, FRAME_SAMPLE } from "@/lib/meter/frame-check";
 
 /**
  * Live meter photo (INV-03, CLAUDE.md rule 5, spec 6.5): the camera stream only,
  * rear camera preferred. There is deliberately no file input: a phone would offer
  * its gallery. The frame is compressed to about 200 KB JPEG here, on the phone.
+ *
+ * Capture safety (decision 37): the shutter is enabled only once the video is
+ * really playing (loadeddata, a real size, a few frames rendered), and a frame
+ * that is too dark, washed out or blank is refused with a request to retake it,
+ * so it never reaches the form.
  */
+
+/** Frames the video must render before the shutter is enabled. */
+const FRAMES_BEFORE_READY = 3;
+const READY_TIMEOUT_MS = 15_000;
+
+/** Resolves once the video has data, a size and `frames` new frames (rejects after the timeout). */
+function videoReady(video: HTMLVideoElement, frames: number, cancelled: () => boolean): Promise<void> {
+  // Older Safari has no requestVideoFrameCallback: fall back to animation frames.
+  const perFrame = typeof video.requestVideoFrameCallback === "function";
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error("The camera did not start")), READY_TIMEOUT_MS);
+    let seen = 0;
+    let lastTime = -1;
+    const hasFrame = () => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0;
+    const tick = () => {
+      if (cancelled()) return window.clearTimeout(timer);
+      // requestVideoFrameCallback fires once per new frame; the fallback counts time moving on.
+      if (hasFrame() && (perFrame || video.currentTime !== lastTime)) {
+        seen += 1;
+        lastTime = video.currentTime;
+      }
+      if (seen >= frames) {
+        window.clearTimeout(timer);
+        return resolve();
+      }
+      if (perFrame) video.requestVideoFrameCallback(tick);
+      else window.requestAnimationFrame(tick);
+    };
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) tick();
+    else video.addEventListener("loadeddata", tick, { once: true });
+  });
+}
+
+/** The frame, shrunk to a small sample, has enough light and detail to be a photo. */
+function frameLooksGood(frame: HTMLCanvasElement): boolean {
+  const sample = document.createElement("canvas");
+  sample.width = FRAME_SAMPLE.width;
+  sample.height = FRAME_SAMPLE.height;
+  const ctx = sample.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return true; // cannot check: the owner still compares the photo with the reading
+  ctx.drawImage(frame, 0, 0, sample.width, sample.height);
+  return assessFrame(ctx.getImageData(0, 0, sample.width, sample.height).data).ok;
+}
 
 export interface CapturedPhoto {
   blob: Blob;
@@ -47,6 +96,7 @@ export function CameraCapture({ onCaptured, onClose }: { onCaptured: (photo: Cap
   const streamRef = useRef<MediaStream | null>(null);
   const [state, setState] = useState<"starting" | "live" | "capturing" | { problem: CameraProblem }>("starting");
   const [attempt, setAttempt] = useState(0);
+  const [badPhoto, setBadPhoto] = useState(false);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -71,11 +121,11 @@ export function CameraCapture({ onCaptured, onClose }: { onCaptured: (photo: Cap
         }
         streamRef.current = stream;
         const video = videoRef.current;
-        if (video) {
-          video.srcObject = stream;
-          await video.play().catch(() => {});
-        }
-        setState("live");
+        if (!video) return;
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+        await videoReady(video, FRAMES_BEFORE_READY, () => cancelled);
+        if (!cancelled) setState("live");
       } catch (error) {
         if (!cancelled) setState({ problem: problemOf(error) });
       }
@@ -89,14 +139,21 @@ export function CameraCapture({ onCaptured, onClose }: { onCaptured: (photo: Cap
 
   async function capture() {
     const video = videoRef.current;
-    if (!video || !video.videoWidth) return;
+    if (!video || !video.videoWidth || state !== "live") return;
     setState("capturing");
+    setBadPhoto(false);
     try {
       // Freeze the frame first, then encode it at the size and quality that fit.
       const frame = document.createElement("canvas");
       frame.width = video.videoWidth;
       frame.height = video.videoHeight;
       frame.getContext("2d")?.drawImage(video, 0, 0);
+      if (!frameLooksGood(frame)) {
+        // Keep the camera running so the customer can take it again at once.
+        setBadPhoto(true);
+        setState("live");
+        return;
+      }
       const capturedAt = new Date().toISOString();
       const blob = await compressPhoto(frame.width, frame.height, canvasEncoder(frame));
       stop();
@@ -131,6 +188,16 @@ export function CameraCapture({ onCaptured, onClose }: { onCaptured: (photo: Cap
             <video ref={videoRef} playsInline muted className="absolute inset-0 size-full object-contain" data-testid="camera-video" />
             <div className="pointer-events-none absolute inset-x-6 top-1/2 h-32 -translate-y-1/2 rounded-xl border-2 border-white/70" aria-hidden />
             <p className="absolute inset-x-0 bottom-3 text-center text-sm text-white/90">Fit the meter numbers inside the frame. Make sure they are sharp.</p>
+            {state === "starting" && (
+              <p className="absolute inset-x-0 top-4 text-center text-sm text-white/90" role="status">
+                Starting the camera…
+              </p>
+            )}
+            {badPhoto && (
+              <p className="absolute inset-x-4 top-4 rounded-lg bg-destructive px-3 py-2 text-center text-sm font-medium text-white" role="alert" data-testid="bad-photo">
+                {BAD_PHOTO_MESSAGE}
+              </p>
+            )}
           </div>
           <div className="flex justify-center px-4 pt-4 pb-[max(env(safe-area-inset-bottom),1.25rem)]">
             <button

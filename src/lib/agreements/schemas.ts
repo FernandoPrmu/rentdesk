@@ -13,6 +13,7 @@ import {
   wholeNumber,
 } from "@/lib/forms";
 import type { MachineType } from "@/lib/machines/schemas";
+import { englishOnly } from "@/lib/text/english";
 
 /**
  * Agreement input (MAC-02, MAC-04, AGR-01, AGR-02, LATE-01, DEP-01..04, RET-01).
@@ -142,7 +143,7 @@ export function assignmentSchema(type: MachineType, today: string) {
     start_date: isoDate("Start date"),
     first_billing_date: isoDate("First billing date"),
     end_date: optionalIsoDate("End date"),
-    installation_location: requiredText("Installation location", 200),
+    installation_location: requiredText("Installation location", 200).refine(...englishOnly),
     initial_bw: count("Initial B&W reading"),
     initial_colour: colourCount(type, "Initial colour reading"),
     ...pricingFields(type),
@@ -194,7 +195,7 @@ export function termsEditSchema(type: MachineType, startDate: string) {
   return z
     .object({
       ...pricingFields(type),
-      installation_location: requiredText("Installation location", 200),
+      installation_location: requiredText("Installation location", 200).refine(...englishOnly),
       end_date: optionalIsoDate("End date"),
       note: optionalText("Note", 500),
     })

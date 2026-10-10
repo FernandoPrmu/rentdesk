@@ -61,7 +61,7 @@ export default async function OutstandingPage() {
                     <span className="font-semibold">{c.customerName}</span>
                     <span className="font-bold tabular-nums">{formatInvoiceMoney(c.totalCents)}</span>
                   </div>
-                  <dl className="mt-2 grid grid-cols-4 gap-1 text-xs">
+                  <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                     {AGE_BUCKETS.map((b) => (
                       <div key={b}>
                         <dt className="text-muted-foreground">{AGE_BUCKET_LABEL[b]}</dt>

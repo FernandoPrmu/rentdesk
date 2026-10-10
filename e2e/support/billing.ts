@@ -117,3 +117,15 @@ export async function openFirstCycle(agreementId: string): Promise<string> {
   ) as { ticket_id: string };
   return opened.ticket_id;
 }
+
+/** An issued invoice's id from its number (owner's tenant). */
+export async function invoiceIdByNo(ownerId: string, invoiceNo: string): Promise<string> {
+  const row = check(await service().from("invoices").select("id").eq("owner_id", ownerId).eq("invoice_no", invoiceNo).single(), "invoice by number");
+  return row!.id;
+}
+
+/** Status and what was paid of an invoice. */
+export async function invoiceState(invoiceId: string): Promise<{ status: string; paid: number; total: number }> {
+  const row = check(await service().from("invoices").select("status, amount_paid_cents, total_cents").eq("id", invoiceId).single(), "invoice state")!;
+  return { status: row.status, paid: row.amount_paid_cents, total: row.total_cents };
+}

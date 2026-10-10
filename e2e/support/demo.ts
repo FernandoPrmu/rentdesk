@@ -137,7 +137,8 @@ export const E2E_SERIAL_PREFIX = "E2E-";
 /**
  * Deletes machines the e2e tests registered (serial `E2E-*`) with everything their
  * agreements produced: tickets, readings, invoices (final invoices on return),
- * payments, deposit entries, advance credits, terms history and notifications.
+ * payments (slips, allocations, receipts and their files, credits and refunds),
+ * deposit entries, advance credits, terms history and notifications.
  * Credits of seed customers that an e2e invoice used become available again.
  * Audit entries stay.
  */
@@ -170,9 +171,27 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
       const invoices = (await db.query<{ id: string }>("select id from public.invoices where agreement_id = any($1)", [agreements])).rows.map((r) => r.id);
       await db.query("delete from public.notifications where entity_id = any($1) or entity_id = any($2)", [agreements, tickets]);
       await db.query("delete from public.deposit_transactions where agreement_id = any($1)", [agreements]);
-      await db.query("delete from public.payment_slips where payment_id in (select id from public.payments where invoice_id = any($1))", [invoices]);
-      await db.query("update public.credits set source_payment_id = null where source_payment_id in (select id from public.payments where invoice_id = any($1))", [invoices]);
-      await db.query("delete from public.payments where invoice_id = any($1)", [invoices]);
+      // Payments on these invoices (slips, allocations, receipts with their PDFs, credits and refunds they made).
+      const payments = (
+        await db.query<{ id: string }>("select distinct payment_id as id from public.payment_allocations where invoice_id = any($1)", [invoices])
+      ).rows.map((r) => r.id);
+      const { rows: slipRows } = await db.query<{ storage_path: string }>("select storage_path from public.payment_slips where payment_id = any($1)", [payments]);
+      if (slipRows.length > 0) await serviceClient().storage.from("payment-slips").remove(slipRows.map((r) => r.storage_path));
+      const { rows: receiptRows } = await db.query<{ id: string; folder: string }>(
+        "select id, owner_id || '/' || id as folder from public.receipts where payment_id = any($1)",
+        [payments],
+      );
+      await removeFolders("receipts", receiptRows.map((r) => r.folder));
+      await db.query("delete from public.notifications where entity_id = any($1)", [payments]);
+      await db.query("delete from public.receipt_pdf_versions where receipt_id = any($1)", [receiptRows.map((r) => r.id)]);
+      await db.query("delete from public.receipts where payment_id = any($1)", [payments]);
+      await db.query("delete from public.payment_allocations where payment_id = any($1)", [payments]);
+      await db.query("delete from public.payment_slips where payment_id = any($1)", [payments]);
+      await db.query("update public.payments set duplicate_of_payment_id = null where duplicate_of_payment_id = any($1)", [payments]);
+      await db.query("delete from public.credit_refunds where credit_id in (select id from public.credits where source_payment_id = any($1))", [payments]);
+      await db.query("update public.invoice_lines set credit_id = null where credit_id in (select id from public.credits where source_payment_id = any($1))", [payments]);
+      await db.query("delete from public.credits where source_payment_id = any($1)", [payments]);
+      await db.query("delete from public.payments where id = any($1)", [payments]);
       // Invoice PDFs: the files in the invoices bucket and their version rows.
       const { rows: pdfFolders } = await db.query<{ folder: string }>(
         "select owner_id || '/' || id as folder from public.invoices where id = any($1)",

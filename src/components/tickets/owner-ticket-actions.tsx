@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { FormField } from "@/components/forms/form-field";
 import { ReasonDialog } from "@/components/forms/reason-dialog";
+import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { canPerform, type TicketStatus } from "@/lib/tickets/states";
@@ -32,7 +33,10 @@ export function OwnerTicketActions({
   const router = useRouter();
   const [open, setOpen] = useState<"cancel" | "reopen" | "due" | null>(null);
   const [dueDate, setDueDate] = useState("");
-  const [pending, start] = useTransition();
+  const [running, start] = useTransition();
+  const hydrated = useHydrated();
+  // Disabled until the page is interactive: a tap before that would do nothing.
+  const pending = running || !hydrated;
   const state = { status, statusBeforeOverdue: before };
   const can = {
     cancel: canPerform("cancelTicket", "OWNER", state),
@@ -73,17 +77,17 @@ export function OwnerTicketActions({
         </Button>
       )}
       {can.due && (
-        <Button type="button" variant="outline" className="h-12 text-base" onClick={() => setOpen("due")}>
+        <Button type="button" variant="outline" className="h-12 text-base" disabled={pending} onClick={() => setOpen("due")}>
           Give a new due date
         </Button>
       )}
       {can.reopen && (
-        <Button type="button" variant="outline" className="h-12 text-base" onClick={() => setOpen("reopen")}>
+        <Button type="button" variant="outline" className="h-12 text-base" disabled={pending} onClick={() => setOpen("reopen")}>
           Reopen ticket
         </Button>
       )}
       {can.cancel && (
-        <Button type="button" variant="outline" className="h-12 text-base text-destructive" onClick={() => setOpen("cancel")}>
+        <Button type="button" variant="outline" className="h-12 text-base text-destructive" disabled={pending} onClick={() => setOpen("cancel")}>
           Cancel ticket
         </Button>
       )}

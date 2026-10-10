@@ -1,18 +1,35 @@
 import { expect, type Page, test } from "@playwright/test";
 
 import { signInCached } from "./support/auth";
-import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX } from "./support/demo";
+import { assignMachine, createMachine, submitFirstReading } from "./support/billing";
+import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 
 // One machine goes through its whole life at 360 px: register, assign to a seed
-// customer, seen by that customer, price change from the next cycle, return.
-// The machine and its agreement are deleted afterwards (and by the global setup).
+// customer, seen by that customer, price change from the next cycle, return. A
+// second machine of its own has a reading waiting for review, to show that blocks a
+// return. Both machines and everything they produced are deleted afterwards (and by
+// the global setup); no test relies on the state of a seed ticket.
 test.describe.configure({ mode: "serial" });
+
+const run = Date.now().toString(36).toUpperCase();
+const serial = `${E2E_SERIAL_PREFIX}${run}`;
+const reviewSerial = `${E2E_SERIAL_PREFIX}RVW-${run}`;
+const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
+let reviewMachineId = "";
+
+// Perera Printers' own E2E machine with cycle 1's reading waiting for the owner's review.
+test.beforeAll(async () => {
+  const owner = await profileId(DEMO.ownerLanka.username);
+  reviewMachineId = await createMachine(owner, reviewSerial, "MP 3300");
+  const agreementId = await assignMachine(owner, reviewMachineId, await profileId(DEMO.custPerera.username), today);
+  await submitFirstReading(agreementId, 100);
+});
 
 test.afterAll(async () => {
   await deleteE2eMachines(serial);
+  await deleteE2eMachines(reviewSerial);
 });
 
-const serial = `${E2E_SERIAL_PREFIX}${Date.now().toString(36).toUpperCase()}`;
 let machineUrl = "";
 let agreementUrl = "";
 
@@ -99,8 +116,8 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
     await expect(card).toContainText("Front office");
     await expect(card).toContainText("Rs. 5,000 per month");
     await expect(card).toContainText("Next meter reading");
-    // Another customer's machines never show up.
-    await expect(page.getByText("LCS-C-001")).toHaveCount(0);
+    // Another customer's machines never show up (Perera Printers' E2E machine).
+    await expect(page.getByText(reviewSerial)).toHaveCount(0);
   });
 
   test("owner changes the price: it applies from the next cycle", async ({ page }) => {
@@ -190,9 +207,7 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
 
   test("return is blocked while a meter reading waits for review (RET-01)", async ({ page }) => {
     await signInOwner(page);
-    // Seed: Perera Printers' mono machine has a reading waiting for the owner's review.
-    await page.goto("/owner/machines?q=LCS-M-002");
-    await page.getByRole("list", { name: "Machines" }).getByRole("link").first().click();
+    await page.goto(`/owner/machines/${reviewMachineId}`);
     await page.getByRole("link", { name: "Return", exact: true }).click();
     await expect(page.getByText("This machine cannot be returned yet")).toBeVisible();
     await expect(page.getByText(/so the final bill uses confirmed numbers/)).toBeVisible();

@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { formatDate } from "@/lib/format";
@@ -33,6 +34,7 @@ const METHODS = ["CASH", "CHEQUE", "BANK_TRANSFER", "DEPOSIT", "OTHER"] as const
 
 export function CreditsPanel({ credits, today, action }: { credits: CreditView[]; today: string; action: (input: RefundInput) => Promise<ActionResult<{ leftCents: number }>> }) {
   const [refunding, setRefunding] = useState<CreditView | null>(null);
+  const hydrated = useHydrated();
   if (credits.length === 0) return <p className="text-sm text-muted-foreground">No credits.</p>;
   return (
     <>
@@ -57,7 +59,7 @@ export function CreditsPanel({ credits, today, action }: { credits: CreditView[]
               ))}
             </div>
             {c.availableCents > 0 && (
-              <Button type="button" variant="outline" className="h-11" onClick={() => setRefunding(c)} data-testid="refund-credit">
+              <Button type="button" variant="outline" className="h-11" disabled={!hydrated} onClick={() => setRefunding(c)} data-testid="refund-credit">
                 Refund
               </Button>
             )}

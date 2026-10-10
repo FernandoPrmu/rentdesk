@@ -28,7 +28,8 @@ async function newBill(tag: string): Promise<{ invoiceId: string; invoiceNo: str
   serials.push(serial);
   const owner = await profileId(DEMO.ownerLanka.username);
   const customer = await profileId(DEMO.custPerera.username);
-  const agreementId = await assignMachine(owner, await createMachine(owner, serial), customer, today);
+  // Its own model: other specs filter cust.perera's Home by theirs.
+  const agreementId = await assignMachine(owner, await createMachine(owner, serial, "MP 2205"), customer, today);
   const { invoiceNo } = await issueFirstInvoice(agreementId, 100);
   return { invoiceId: await invoiceIdByNo(owner, invoiceNo), invoiceNo };
 }

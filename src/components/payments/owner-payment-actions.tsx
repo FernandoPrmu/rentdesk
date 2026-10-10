@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { FormField } from "@/components/forms/form-field";
 import { ReasonDialog } from "@/components/forms/reason-dialog";
+import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { formatDate } from "@/lib/format";
@@ -27,7 +28,10 @@ const ownerPlanText = (plan: ReturnType<typeof planAllocation>) =>
 
 function useRun() {
   const router = useRouter();
-  const [pending, start] = useTransition();
+  const hydrated = useHydrated();
+  const [running, start] = useTransition();
+  // Disabled while running, and until the page is interactive (a tap before that would do nothing).
+  const pending = running || !hydrated;
   const run = <T,>(task: () => Promise<ActionResult<T>>, success: (data: T) => string, after?: () => void) =>
     start(async () => {
       try {
@@ -146,6 +150,7 @@ export function AcceptedPaymentActions({
   move: (input: { paymentId: string; invoiceIds: string[]; reason: string }) => Promise<ActionResult>;
 }) {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [reversing, setReversing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [chosen, setChosen] = useState<string[]>(current);
@@ -155,10 +160,10 @@ export function AcceptedPaymentActions({
   return (
     <div className="space-y-3">
       <div className="grid gap-2 sm:grid-cols-2">
-        <Button type="button" variant="outline" className="h-12 gap-2 text-base" onClick={() => setMoving(true)}>
+        <Button type="button" variant="outline" className="h-12 gap-2 text-base" disabled={!hydrated} onClick={() => setMoving(true)}>
           <ArrowLeftRight className="size-5" aria-hidden /> Move to other bills
         </Button>
-        <Button type="button" variant="outline" className="h-12 gap-2 text-base text-destructive" onClick={() => setReversing(true)}>
+        <Button type="button" variant="outline" className="h-12 gap-2 text-base text-destructive" disabled={!hydrated} onClick={() => setReversing(true)}>
           <Undo2 className="size-5" aria-hidden /> Reverse payment
         </Button>
       </div>

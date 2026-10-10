@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { ChoiceSelect } from "@/components/forms/choice-select";
 import { FormError, FormField, SelectField } from "@/components/forms/form-field";
+import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { formatDate } from "@/lib/format";
@@ -35,6 +36,7 @@ export function RecordPaymentForm({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const hydrated = useHydrated();
   const [key] = useState(() => crypto.randomUUID());
   const [selected, setSelected] = useState<string[]>(view.bills.length === 1 ? [view.bills[0].id] : []);
   const [amount, setAmount] = useState("");
@@ -160,7 +162,7 @@ export function RecordPaymentForm({
             </p>
           )}
           <FormError message={formError} />
-          <Button type="submit" className="h-12 w-full text-base sm:w-auto sm:px-8" disabled={pending}>
+          <Button type="submit" className="h-12 w-full text-base sm:w-auto sm:px-8" disabled={pending || !hydrated}>
             {pending ? "Recording…" : "Record payment"}
           </Button>
         </form>

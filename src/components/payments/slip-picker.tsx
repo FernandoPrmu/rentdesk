@@ -3,6 +3,7 @@
 import { Camera, FileText, FolderOpen, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
 import { compressPhoto } from "@/lib/meter/compress";
 import { sha256Hex, SLIP_PHOTO_OPTIONS, slipExtension, slipPlan } from "@/lib/payments/slip-prepare";
@@ -65,7 +66,10 @@ export function SlipPicker({
 }) {
   const camera = useRef<HTMLInputElement>(null);
   const files = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const hydrated = useHydrated();
+  // Also busy until the page is interactive (the hidden file inputs need the script).
+  const busy = uploading || !hydrated;
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => () => {
@@ -77,7 +81,7 @@ export function SlipPicker({
     setProblem(null);
     const plan = slipPlan(file);
     if (plan.action === "REFUSE") return setProblem(plan.error);
-    setBusy(true);
+    setUploading(true);
     try {
       const originalSha256 = await sha256Hex(await file.arrayBuffer());
       const blob = plan.action === "COMPRESS" ? await toJpeg(file) : file;
@@ -101,7 +105,7 @@ export function SlipPicker({
           : "The slip could not be uploaded. Check your connection and try again.",
       );
     } finally {
-      setBusy(false);
+      setUploading(false);
       if (camera.current) camera.current.value = "";
       if (files.current) files.current.value = "";
     }
@@ -130,7 +134,7 @@ export function SlipPicker({
       ) : (
         <div className="grid grid-cols-2 gap-2">
           <Button type="button" className="h-14 gap-2 text-base" disabled={busy} onClick={() => camera.current?.click()}>
-            {busy ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Camera className="size-5" aria-hidden />} Take photo
+            {uploading ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Camera className="size-5" aria-hidden />} Take photo
           </Button>
           <Button type="button" variant="outline" className="h-14 gap-2 text-base" disabled={busy} onClick={() => files.current?.click()}>
             <FolderOpen className="size-5" aria-hidden /> Choose file
@@ -157,7 +161,7 @@ export function SlipPicker({
         data-testid="slip-file-input"
         onChange={(e) => pick(e.target.files?.[0])}
       />
-      {busy && <p className="text-sm text-muted-foreground">Uploading the slip…</p>}
+      {uploading && <p className="text-sm text-muted-foreground">Uploading the slip…</p>}
       {message && (
         <p role="alert" className="text-sm text-destructive">
           {message}

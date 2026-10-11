@@ -303,7 +303,7 @@ describe.skipIf(!DB_URL)("client business rules (linked dev database, rolled bac
         expect((await db.query("select status from public.rental_agreements where id = $1", [f.agrB1Mono])).rows[0].status).toBe("TERMINATED");
         expect((await db.query("select status from public.machines where id = $1", [f.machineBMono])).rows[0].status).toBe("AVAILABLE");
         const { rows: invoices } = await db.query(
-          "select id, status, total_cents::int from public.invoices where agreement_id = $1 order by created_at",
+          "select id, status, total_cents::int from public.invoices where agreement_id = $1 order by invoice_seq",
           [f.agrB1Mono],
         );
         expect(invoices.map((i) => i.status)).toEqual(["AWAITING_PAYMENT", "AWAITING_PAYMENT"]);

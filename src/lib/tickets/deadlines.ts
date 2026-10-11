@@ -31,6 +31,10 @@ export interface StageSettings {
   rejected_photo_retention_days: number;
   /** Spec 11.3 / rule 28: after this many rejections the owner enters the reading. */
   max_meter_rejections: number;
+  /** Rule 52: owner reminders on these days of an open dispute (platform setting). */
+  dispute_reminder_days: number[];
+  /** Rule 52: the admin is alerted on this day of an open dispute. */
+  dispute_escalation_days: number;
 }
 
 /** The platform defaults (platform_settings, spec 5.4 and 8.3); tests and fallbacks. */
@@ -52,6 +56,8 @@ export const PLATFORM_DEFAULTS: StageSettings = {
   weekly_summary_dow: 1,
   rejected_photo_retention_days: 7,
   max_meter_rejections: 3,
+  dispute_reminder_days: [3, 5],
+  dispute_escalation_days: 7,
 };
 
 const HOUR_MS = 3_600_000;
@@ -120,7 +126,7 @@ export interface ReminderMilestone extends Milestone {
   dayOffset?: number;
 }
 
-export type ReminderKind = "METER" | "REVIEW" | "SLIP_REVIEW" | "PAYMENT_DUE_SOON" | "PAYMENT_DUE_TODAY" | "PAYMENT_OVERDUE";
+export type ReminderKind = "METER" | "REVIEW" | "SLIP_REVIEW" | "PAYMENT_DUE_SOON" | "PAYMENT_DUE_TODAY" | "PAYMENT_OVERDUE" | "DISPUTE";
 
 /** Meter reminders on day 2 and day 4 (default) of the stage, before the deadline. */
 export function meterReminders(enteredAt: Date, s: StageSettings): ReminderMilestone[] {
@@ -144,6 +150,25 @@ export function ownerReviewReminders(enteredAt: Date, s: StageSettings, kind: "R
 /** Admin alerted after 3 days (default) without the owner's review (spec 5.4). */
 export function ownerReviewEscalation(enteredAt: Date, s: StageSettings, kind: "REVIEW" | "SLIP_REVIEW"): Milestone {
   return { at: addHours(enteredAt, kind === "REVIEW" ? s.review_escalation_hours : s.slip_review_escalation_hours), hourBased: true };
+}
+
+/**
+ * An open dispute (rule 52; the spec gives no time): owner reminders on day 3 and
+ * day 5 after it was raised, before the admin is alerted on day 7. Day-based.
+ */
+export function disputeReminders(raisedAt: Date, s: Pick<StageSettings, "dispute_reminder_days" | "dispute_escalation_days">): ReminderMilestone[] {
+  const start = colomboDate(raisedAt);
+  return schedule(s.dispute_reminder_days, s.dispute_escalation_days).map((d, i) => ({
+    at: startOfColomboDay(addDays(start, d)),
+    hourBased: false,
+    no: i + 1,
+    kind: "DISPUTE" as const,
+    dayOffset: d,
+  }));
+}
+
+export function disputeEscalation(raisedAt: Date, s: Pick<StageSettings, "dispute_escalation_days">): Milestone {
+  return { at: startOfColomboDay(addDays(colomboDate(raisedAt), s.dispute_escalation_days)), hourBased: false };
 }
 
 /** Before the due date: 3 days before and on the day (spec 8.3). */

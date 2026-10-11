@@ -130,9 +130,10 @@ describe("payment stage (8.3: 3 days before, on the day, overdue 1 / 7 / 14)", (
     expect(kinds(overdue(3), run("2026-11-30"))).toEqual([]);
   });
 
-  it("8.2: a slip waiting for the owner is never overdue; a dispute pauses reminders", () => {
+  it("8.2: a slip waiting for the owner is never overdue; a dispute pauses the customer's reminders and late fee", () => {
     expect(kinds(pay({ status: "PAYMENT_SUBMITTED", stage_entered_at: run("2026-10-30").toISOString() }, { status: "PAYMENT_SUBMITTED" }), run("2026-10-30"))).toEqual([]);
-    expect(kinds(pay({ status: "DISPUTED" }, { status: "DISPUTED" }), run("2026-11-30"))).toEqual([]);
+    const disputed = pay({ status: "DISPUTED", stage_entered_at: run("2026-11-28").toISOString(), owner_late_fee: { enabled: true, fee_cents: 50_000, grace_days: 0 } }, { status: "DISPUTED" });
+    expect(kinds(disputed, run("2026-11-30"))).toEqual([]);
   });
 
   it("nothing is chased when the invoice is paid", () => {
@@ -171,5 +172,40 @@ describe("late fee (PAY-13, LATE-01: after due date + grace, once)", () => {
   it("falls back to the platform default", () => {
     expect(decideTicket(owing(), run("2026-11-30"), { enabled: true, fee_cents: 10_000, grace_days: 3 })).toContainEqual({ kind: "LATE_FEE", feeCents: 10_000 });
     expect(kinds(owing(), run("2026-11-30"))).not.toContain("LATE_FEE");
+  });
+});
+
+describe("open dispute: owner reminders on day 3 and 5, admin on day 7 (rule 52)", () => {
+  const disputed = (o: Partial<CronTicket> = {}) =>
+    ticket({ status: "DISPUTED", stage_entered_at: run("2026-10-20").toISOString(), stage_due_at: null, invoice: invoice({ status: "DISPUTED" }), ...o });
+
+  it("waits until day 3, then reminds the owner", () => {
+    expect(kinds(disputed(), run("2026-10-22"))).toEqual([]);
+    expect(decideTicket(disputed(), run("2026-10-23"), PLATFORM)).toEqual([
+      { kind: "REMIND", reminder: expect.objectContaining({ no: 1, kind: "DISPUTE", dayOffset: 3 }), recipient: "OWNER" },
+    ]);
+    expect(kinds(disputed({ reminder_count: 1 }), run("2026-10-24"))).toEqual([]);
+    expect(decideTicket(disputed({ reminder_count: 1 }), run("2026-10-25"), PLATFORM)[0]).toMatchObject({ reminder: { no: 2, dayOffset: 5 } });
+  });
+
+  it("alerts the admin on day 7, once", () => {
+    expect(decideTicket(disputed({ reminder_count: 2 }), run("2026-10-27"), PLATFORM)).toEqual([{ kind: "ESCALATE_ADMIN", hours: 168, days: 7 }]);
+    expect(kinds(disputed({ reminder_count: 2, escalation_level: 2 }), run("2026-11-30"))).toEqual([]);
+  });
+
+  it("a missed run sends one reminder, the latest, not a backlog", () => {
+    expect(decideTicket(disputed(), run("2026-10-26"), PLATFORM)).toEqual([
+      { kind: "REMIND", reminder: expect.objectContaining({ no: 2 }), recipient: "OWNER" },
+    ]);
+  });
+
+  it("follows the platform settings", () => {
+    const s = { ...PLATFORM_DEFAULTS, dispute_reminder_days: [1], dispute_escalation_days: 2 };
+    expect(kinds(disputed({ settings: s }), run("2026-10-21"))).toEqual(["REMIND"]);
+    expect(kinds(disputed({ settings: s, reminder_count: 1 }), run("2026-10-22"))).toEqual(["ESCALATE_ADMIN"]);
+  });
+
+  it("a paused dispute (suspended account) waits", () => {
+    expect(kinds(disputed({ paused_at: run("2026-10-21").toISOString() }), run("2026-11-30"))).toEqual([]);
   });
 });

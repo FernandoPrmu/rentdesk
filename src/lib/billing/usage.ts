@@ -19,6 +19,11 @@ export interface KnownReading {
   /** ISO timestamp (agreement created, submission reviewed, baseline recorded). */
   at: string;
   source: ReadingSource;
+  /**
+   * BASELINE only: copies printed on the replaced meter since the reading before it
+   * (its last reading minus that reading), billed with the next reading (rule 51).
+   */
+  carried?: number;
 }
 
 /** The newest known reading (later entries win a tie). */
@@ -29,6 +34,20 @@ export function previousReading(known: KnownReading[]): KnownReading {
     if (Date.parse(k.at) >= Date.parse(latest.at)) latest = k;
   }
   return latest;
+}
+
+/**
+ * Copies from replaced meters not billed yet: the baselines recorded since the
+ * newest initial or confirmed reading (a baseline wins a tie). Same rule as
+ * app.carried_copies in the database.
+ */
+export function carriedCopies(known: KnownReading[]): number {
+  const readings = known.filter((k) => k.source !== "BASELINE").map((k) => Date.parse(k.at));
+  if (readings.length === 0) return 0;
+  const since = Math.max(...readings);
+  return known
+    .filter((k) => k.source === "BASELINE" && Date.parse(k.at) >= since)
+    .reduce((total, k) => total + assertCount(k.carried ?? 0, "Carried copies"), 0);
 }
 
 export interface CounterUsageInput {

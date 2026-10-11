@@ -11,6 +11,8 @@ import { counterUsage, type CounterType, type ReadingSource } from "./usage.ts";
  *   commitment       commitment x full cycles (+ a final partial cycle, prorated
  *                    by the real calendar days of that cycle)
  *   included copies  included x full cycles (+ the partial cycle's share), per counter
+ *   usage            current - previous (rollover rules), plus the copies printed
+ *                    on a replaced meter since the last reading (11.8, rule 51)
  *   excess           max(0, usage - included) x rate, B&W and colour separately:
  *                    unused copies on one counter never offset the other
  *   subtotal         commitment + excess + adjustments
@@ -20,7 +22,7 @@ import { counterUsage, type CounterType, type ReadingSource } from "./usage.ts";
  *   total            subtotal - credits (+ a late fee later, see late-fee.ts)
  */
 
-export const ENGINE_VERSION = "rentdesk-billing-2";
+export const ENGINE_VERSION = "rentdesk-billing-3";
 
 export type MachineType = "MONO" | "COLOUR";
 export type LineType = "COMMITMENT" | "BW_EXCESS" | "COLOUR_EXCESS" | "LATE_FEE" | "CREDIT" | "ADJUSTMENT";
@@ -41,6 +43,8 @@ export interface CounterReadingInput {
   counterMax: number | null;
   /** Confirmed usage per cycle of this counter, newest first (anomaly + rollover guard). */
   history: number[];
+  /** Copies printed on a replaced meter since the last reading (meter_baselines.carried_copies). */
+  carried?: number;
 }
 
 /** Final invoice when a machine is returned mid-cycle (spec 11.4, owner's choice). */
@@ -105,6 +109,8 @@ export interface CounterResult {
   current: number;
   counterMax: number | null;
   usage: number;
+  /** Part of `usage` printed on a replaced meter. */
+  carried: number;
   rolledOver: boolean;
   included: number;
   excess: number;
@@ -218,7 +224,7 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
         mul(perCycle, billedFull, "Included copies"),
         prorated === null ? 0 : mulDivRoundHalfUp(perCycle, prorated, cycleDays, "Prorated included copies"),
       ]);
-      const { usage, rolledOver } = counterUsage({
+      const meter = counterUsage({
         counter,
         previous: r.previous,
         current: r.current,
@@ -226,6 +232,9 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
         cycles: cyclesCovered,
         history: r.history,
       });
+      const carried = assertCount(r.carried ?? 0, `${COUNTER_LABEL[counter]} carried copies`);
+      const usage = sum([meter.usage, carried], `${COUNTER_LABEL[counter]} usage`);
+      const rolledOver = meter.rolledOver;
       const excess = excessOver(usage, included);
       const excessCents = mul(excess, rate, `${COUNTER_LABEL[counter]} excess`);
       counters.push({
@@ -235,6 +244,7 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
         current: r.current,
         counterMax: r.counterMax,
         usage,
+        carried,
         rolledOver,
         included,
         excess,
@@ -246,7 +256,9 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
       if (excess > 0) {
         lines.push({
           line_type: counter === "BW" ? "BW_EXCESS" : "COLOUR_EXCESS",
-          description: `${COUNTER_LABEL[counter]} copies above ${included.toLocaleString("en-US")} included`,
+          description:
+          `${COUNTER_LABEL[counter]} copies above ${included.toLocaleString("en-US")} included` +
+          (carried > 0 ? ` (incl. ${carried.toLocaleString("en-US")} on the replaced meter)` : ""),
           quantity: excess,
           rate_cents: rate,
           amount_cents: excessCents,
@@ -346,6 +358,7 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
         current_value: c.current,
         counter_max: c.counterMax,
         usage: c.usage,
+        carried_copies: c.carried,
         rolled_over: c.rolledOver,
         included: c.included,
         excess: c.excess,

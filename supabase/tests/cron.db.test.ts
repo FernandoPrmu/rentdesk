@@ -490,7 +490,7 @@ describe.skipIf(!DB_URL)("tickets and the daily job (linked dev database, rolled
       await isolated(db, async () => {
         const a = await agreement({ first: "2024-07-01", lateFee: ["CUSTOM", 75000] });
         const { ticketId, invoiceId } = await issued(a, "2024-07-01", "2024-07-08");
-        await db.query("select app.raise_dispute($1, $2, 'Too many copies')", [ticketId, f.custA2]);
+        await db.query("select app.raise_dispute($1, $2, gen_random_uuid(), 'Too many copies', null)", [ticketId, f.custA2]);
         await job("2024-08-30");
         expect(await feeOf(invoiceId)).toEqual({ fee: 0, total: 650_000, status: "DISPUTED" });
         expect((await tickets(a))[0].status).toBe("DISPUTED");

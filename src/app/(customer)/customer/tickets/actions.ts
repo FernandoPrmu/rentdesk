@@ -5,6 +5,7 @@ import { refresh } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
 import { currentActor } from "@/lib/auth/current-user";
 import type { ReadingErrors } from "@/lib/meter/readings";
+import { sendCustomerDisputePhoto } from "@/lib/disputes/service";
 import { submitCustomerReading } from "@/lib/meter/service";
 
 /**
@@ -22,6 +23,20 @@ export async function submitMeterReadingAction(input: {
 }): Promise<ActionResult<{ replayed: boolean }> & { fieldErrors?: ReadingErrors }> {
   const actor = await currentActor("CUSTOMER");
   const result = await submitCustomerReading(actor, input);
+  if (result.ok) refresh();
+  return result;
+}
+
+/** 11.4: the fresh live meter photo the rental company asked for during a dispute. */
+export async function sendDisputePhotoAction(input: {
+  ticketId: string;
+  photoPath: string;
+  capturedAt: string | null;
+  bw: string;
+  colour: string;
+}): Promise<ActionResult & { fieldErrors?: Record<string, string> }> {
+  const actor = await currentActor("CUSTOMER");
+  const result = await sendCustomerDisputePhoto(actor, input);
   if (result.ok) refresh();
   return result;
 }

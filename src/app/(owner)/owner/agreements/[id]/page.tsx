@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Undo2 } from "lucide-react";
+import { ArrowLeftRight, Gauge, Undo2 } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -43,11 +43,17 @@ export default async function AgreementPage({ params, searchParams }: PageProps<
   if (!uuidSchema.safeParse(id).success) notFound();
   const agreement = await getAgreement(id);
   if (!agreement) notFound();
-  const [history, deposit, advances, lateFee] = await Promise.all([
+  const supabase = await createClient();
+  const [history, deposit, advances, lateFee, baselines] = await Promise.all([
     getTermsHistory(id),
-    getDepositState(await createClient(), id),
+    getDepositState(supabase, id),
     getAdvances(id),
     getLateFeeSources(),
+    supabase
+      .from("meter_baselines")
+      .select("id, counter_type, value, previous_value, old_meter_reading, carried_copies, reason, recorded_at")
+      .eq("agreement_id", id)
+      .order("recorded_at", { ascending: false }),
   ]);
   const { assigned } = await searchParams;
   const ownerDefault = describeOwnerDefault(lateFee);
@@ -122,6 +128,37 @@ export default async function AgreementPage({ params, searchParams }: PageProps<
                 <ArrowLeftRight className="size-5" aria-hidden /> Reassign
               </Link>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Meter</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Meter replaced or reset? Record the new starting reading so the next bill measures from it (spec 11.8). Copies printed on the old meter since the last
+            reading can be carried into the next bill.
+          </p>
+          {(baselines.data ?? []).length > 0 && (
+            <ul className="divide-y text-sm" aria-label="Meter baselines" data-testid="baseline-history">
+              {(baselines.data ?? []).map((b) => (
+                <li key={b.id} className="py-2">
+                  <p className="font-medium">
+                    {formatDate(b.recorded_at.slice(0, 10))} · {b.counter_type === "BW" ? "B&W" : "Colour"} from {formatCount(b.value)}
+                    {b.previous_value !== null ? ` (was ${formatCount(b.previous_value)})` : ""}
+                    {b.carried_copies > 0 ? ` · ${formatCount(b.carried_copies)} copies on the old meter carried` : ""}
+                  </p>
+                  <p className="text-muted-foreground">{b.reason}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {live && (
+            <Link href={`/owner/agreements/${id}/baseline`} className={cn(buttonVariants({ variant: "outline" }), "h-12 gap-2 text-base")} data-testid="record-baseline">
+              <Gauge className="size-5" aria-hidden /> Record new meter baseline
+            </Link>
           )}
         </CardContent>
       </Card>

@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logDeniedAccess } from "@/lib/audit/access";
 import { INVOICE_BUCKET } from "@/lib/invoices/bucket";
 import { createClient } from "@/lib/supabase/server";
 
@@ -32,7 +33,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   let path: string | null = null;
   let name = "invoice";
   const { data: invoice } = await supabase.from("invoices").select("invoice_no, pdf_path").eq("id", id).not("invoice_no", "is", null).maybeSingle();
-  if (!invoice) return notFound("Invoice not found.");
+  if (!invoice) {
+    // 11.7 / decision 54: another tenant's or customer's file is logged, then answered like a missing one.
+    await logDeniedAccess({ id: auth.user.id, role: (auth.user.app_metadata?.role as string | undefined) ?? undefined }, "invoices", id, "/api/invoices/[id]/pdf");
+    return notFound("Invoice not found.");
+  }
   name = invoice.invoice_no ?? name;
   if (version === null) {
     path = invoice.pdf_path;

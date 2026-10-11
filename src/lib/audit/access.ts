@@ -16,26 +16,22 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export type GuardedEntity = "billing_cycle_tickets" | "invoices" | "payments" | "receipts";
 
-const OWNER_COLUMN: Record<GuardedEntity, string> = {
-  billing_cycle_tickets: "owner_id",
-  invoices: "owner_id",
-  payments: "owner_id",
-  receipts: "owner_id",
-};
-
-/** Records the attempt if the id belongs to someone else. Never throws. */
-export async function logDeniedAccess(user: Pick<CurrentUser, "id" | "role">, entity: GuardedEntity, id: string, via: string): Promise<boolean> {
+/**
+ * Records the attempt when the id belongs to another tenant or another customer
+ * (a user's own hidden row, e.g. a draft invoice, is not an attempt). Never throws.
+ */
+export async function logDeniedAccess(user: { id: string; role?: string }, entity: GuardedEntity, id: string, via: string): Promise<boolean> {
   try {
     const admin = createAdminClient();
-    const { data } = await admin.from(entity).select(`id, ${OWNER_COLUMN[entity]}`).eq("id", id).maybeSingle();
-    if (!data) return false;
+    const { data } = await admin.from(entity).select("id, owner_id, customer_id").eq("id", id).maybeSingle();
+    if (!data || data.owner_id === user.id || data.customer_id === user.id) return false;
     await admin.rpc("rpc_write_audit", {
       p_actor_id: user.id,
       p_action: "ACCESS_DENIED",
       p_entity: entity,
       p_entity_id: id,
-      p_owner_id: (data as unknown as Record<string, string>)[OWNER_COLUMN[entity]],
-      p_details: { role: user.role, via },
+      p_owner_id: data.owner_id,
+      p_details: { role: user.role ?? null, via },
     });
     return true;
   } catch (error) {

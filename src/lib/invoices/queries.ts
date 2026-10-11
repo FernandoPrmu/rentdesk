@@ -83,7 +83,7 @@ export async function getInvoiceDetail(id: string) {
   const { data, error } = await supabase
     .from("invoices")
     .select(
-      `${LIST_COLUMNS}, ticket_id, cycles_covered, subtotal_cents, late_fee_cents, credit_applied_cents, cancel_reason, cancelled_at, calculation, pdf_path, ` +
+      `${LIST_COLUMNS}, ticket_id, cycles_covered, subtotal_cents, late_fee_cents, credit_applied_cents, cancel_reason, cancelled_at, calculation, pdf_path, revision, replaces_invoice_id, ` +
         "ticket:billing_cycle_tickets!invoices_ticket_fkey(cycle_no), lines:invoice_lines(line_type, description, quantity, rate_cents, amount_cents, sort_order)",
     )
     .eq("id", id)
@@ -100,8 +100,21 @@ export async function getInvoiceDetail(id: string) {
     pdf_path: string | null;
     ticket: { cycle_no: number } | null;
     lines: { line_type: string; description: string; quantity: number; rate_cents: number; amount_cents: number; sort_order: number }[];
+    revision: number;
+    replaces_invoice_id: string | null;
   };
-  return { ...row, lines: [...row.lines].sort((a, b) => a.sort_order - b.sort_order), final: Boolean(row.calculation?.partial) };
+  // Decision 49: a corrected bill replaces a cancelled one (both stay on record).
+  const [replaces, replacedBy] = await Promise.all([
+    row.replaces_invoice_id ? supabase.from("invoices").select("id, invoice_no").eq("id", row.replaces_invoice_id).maybeSingle() : null,
+    supabase.from("invoices").select("id, invoice_no").eq("replaces_invoice_id", row.id).not("invoice_no", "is", null).maybeSingle(),
+  ]);
+  return {
+    ...row,
+    lines: [...row.lines].sort((a, b) => a.sort_order - b.sort_order),
+    final: Boolean(row.calculation?.partial),
+    replaces: replaces?.data ?? null,
+    replacedBy: replacedBy.data ?? null,
+  };
 }
 export type InvoiceDetail = NonNullable<Awaited<ReturnType<typeof getInvoiceDetail>>>;
 

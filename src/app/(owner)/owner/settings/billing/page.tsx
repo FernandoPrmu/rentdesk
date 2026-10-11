@@ -8,20 +8,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { resolveLateFee } from "@/lib/billing/late-fee";
 import { centsToRupeesInput } from "@/lib/money";
-import { getLateFeeSources } from "@/lib/settings/billing";
+import { getEstimatedBilling, getLateFeeSources } from "@/lib/settings/billing";
 
 export const metadata: Metadata = { title: "Billing settings" };
 
 /** PAY-13 / LATE-01: the owner's default late fee and grace period (platform default until set). */
 export default async function BillingSettingsPage() {
   await requireUser("OWNER");
-  const sources = await getLateFeeSources();
+  const [sources, estimates] = await Promise.all([getLateFeeSources(), getEstimatedBilling()]);
   const current = resolveLateFee({ agreement: { mode: "OWNER_DEFAULT", feeCents: null }, ...sources });
 
   return (
     <div className="max-w-2xl">
       <BackLink href="/owner/settings" label="Settings" />
-      <PageHeader title="Billing" description="Your default late fee. Changes apply to invoices that become late from now on." />
+      <PageHeader title="Billing" description="Your default late fee and estimated invoices. Changes apply from now on." />
       <Card>
         <CardContent>
           <BillingSettingsForm
@@ -30,6 +30,7 @@ export default async function BillingSettingsPage() {
               late_fee_enabled: current.enabled,
               late_fee: current.feeCents > 0 ? centsToRupeesInput(current.feeCents) : "0",
               grace_period_days: String(current.graceDays),
+              estimated_billing_enabled: estimates,
             }}
           />
         </CardContent>

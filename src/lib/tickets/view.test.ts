@@ -97,3 +97,28 @@ describe("customer Home: what you need to do now (CP-01, CP-02, rule 25)", () =>
     expect(home.waiting.map((w) => w.ticketId)).toEqual(["r", "s"]);
   });
 });
+
+describe("customer Home: a fresh meter photo for a dispute (11.4)", () => {
+  it("asks for the photo while the dispute waits for it, else shows the dispute as with the rental company", () => {
+    const row = {
+      id: "t9",
+      agreement_id: "a9",
+      cycle_no: 2,
+      cycle_date: "2026-10-01",
+      status: "DISPUTED" as const,
+      status_before_overdue: null,
+      stage_due_at: null,
+      escalation_level: 0,
+      paused_at: null,
+      invoice: null,
+      machine: "Ricoh MP",
+      last_confirmed_cycle: 2,
+    };
+    expect(customerHome([{ ...row, photo_requested: true }], new Date()).tasks).toEqual([
+      { kind: "PHOTO", ticketId: "t9", machine: "Ricoh MP", dueDate: null, overdue: false },
+    ]);
+    const waiting = customerHome([{ ...row, photo_requested: false }], new Date());
+    expect(waiting.tasks).toEqual([]);
+    expect(waiting.waiting).toEqual([{ ticketId: "t9", machine: "Ricoh MP", label: "Your dispute is being looked at" }]);
+  });
+});

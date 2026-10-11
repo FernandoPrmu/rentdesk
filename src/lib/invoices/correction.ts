@@ -1,7 +1,7 @@
 import "server-only";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
-import { addDays, isIsoDate, todayInColombo } from "@/lib/agreements/cycle-calendar";
+import { addDays, todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { loadAvailableCredits } from "@/lib/billing/context";
 import type { StoredCalculation } from "@/lib/billing/dispute";
@@ -16,7 +16,7 @@ import { formatRupees } from "@/lib/money";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { paymentDeadline, PLATFORM_DEFAULTS } from "@/lib/tickets/deadlines";
 import { canPerform, type TicketStatus } from "@/lib/tickets/states";
-import { correctInvoice, RpcError, type TicketSnapshot, TransitionError } from "@/lib/tickets/transitions";
+import { correctInvoice, RpcError, TransitionError } from "@/lib/tickets/transitions";
 
 /**
  * Correcting an issued invoice (spec 11.1, 11.3, 11.4; decision 49): a wrong

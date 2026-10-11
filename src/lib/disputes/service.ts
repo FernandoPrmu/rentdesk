@@ -372,3 +372,42 @@ export async function ownerDisputeAction(owner: CurrentUser, ticketId: string, i
 export async function afterDisputeCorrected(ticketId: string) {
   await purgeDisputePhotos(createAdminClient(), ticketId);
 }
+
+export interface ReadingRecord {
+  source: "CUSTOMER" | "OWNER_MANUAL";
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  photoDeleted: boolean;
+  readings: { counter: "BW" | "COLOUR"; previous: number; current: number; correctedFrom: number | null }[];
+}
+
+/**
+ * Spec 11.4 "Dispute raised after the meter photo was deleted: reading values,
+ * confirming user and timestamps remain as the record" (INV-10). The owner's own
+ * client: RLS limits it to the tenant.
+ */
+export async function getReadingRecord(client: Admin, invoiceId: string): Promise<ReadingRecord | null> {
+  const { data } = await client
+    .from("meter_submissions")
+    .select(
+      `source, submitted_at, reviewed_at, reviewer:profiles!meter_submissions_reviewed_by_fkey(full_name, username),
+       readings:meter_readings!meter_readings_submission_fkey(counter_type, previous_value, current_value, corrected_from_value),
+       photo:meter_photos!meter_photos_submission_fkey(deleted_at)`,
+    )
+    .eq("invoice_id", invoiceId)
+    .eq("status", "CONFIRMED")
+    .maybeSingle();
+  if (!data) return null;
+  const photo = Array.isArray(data.photo) ? data.photo[0] : data.photo;
+  return {
+    source: data.source,
+    submittedAt: data.submitted_at,
+    reviewedAt: data.reviewed_at,
+    reviewedBy: data.reviewer ? data.reviewer.full_name || data.reviewer.username : null,
+    photoDeleted: !photo || Boolean(photo.deleted_at),
+    readings: data.readings
+      .map((r) => ({ counter: r.counter_type, previous: r.previous_value, current: r.current_value, correctedFrom: r.corrected_from_value }))
+      .sort((a, b) => a.counter.localeCompare(b.counter)),
+  };
+}

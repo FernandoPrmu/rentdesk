@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/client";
  * pictures are made smaller here, the fingerprint of the original is kept for the
  * duplicate check, and the file is uploaded to the customer's private folder.
  * The server checks the stored file again before anything is recorded.
+ * Also the optional photo or PDF of a dispute (decision 47): same checks, its own bucket.
  */
 
 export interface UploadedSlip {
@@ -57,12 +58,18 @@ export function SlipPicker({
   value,
   onChange,
   error,
+  bucket = "payment-slips",
+  label = "Payment slip",
+  hint = "A photo of the bank slip, a screenshot of the transfer, or the PDF from your bank (up to 5 MB).",
 }: {
   ownerId: string;
   customerId: string;
   value: UploadedSlip | null;
   onChange: (slip: UploadedSlip | null) => void;
   error?: string;
+  bucket?: "payment-slips" | "dispute-files";
+  label?: string;
+  hint?: string;
 }) {
   const camera = useRef<HTMLInputElement>(null);
   const files = useRef<HTMLInputElement>(null);
@@ -87,7 +94,7 @@ export function SlipPicker({
       const blob = plan.action === "COMPRESS" ? await toJpeg(file) : file;
       const mimeType = plan.action === "COMPRESS" ? "image/jpeg" : plan.mimeType;
       const path = `${ownerId}/${customerId}/${crypto.randomUUID()}.${slipExtension(mimeType)}`;
-      const { error: uploadError } = await createClient().storage.from("payment-slips").upload(path, blob, { contentType: mimeType, upsert: false });
+      const { error: uploadError } = await createClient().storage.from(bucket).upload(path, blob, { contentType: mimeType, upsert: false });
       if (uploadError) throw new Error(uploadError.message);
       onChange({
         path,
@@ -102,7 +109,7 @@ export function SlipPicker({
       setProblem(
         e instanceof Error && /too large/i.test(e.message)
           ? "The picture is too large. Please take it again or choose a smaller file."
-          : "The slip could not be uploaded. Check your connection and try again.",
+          : "The file could not be uploaded. Check your connection and try again.",
       );
     } finally {
       setUploading(false);
@@ -114,7 +121,7 @@ export function SlipPicker({
   const message = problem ?? error ?? null;
   return (
     <div className="space-y-2" data-testid="slip-picker">
-      <p className="text-sm font-medium">Payment slip</p>
+      <p className="text-sm font-medium">{label}</p>
       {value ? (
         <div className="flex items-center gap-3 rounded-xl border bg-background p-3">
           {value.previewUrl ? (
@@ -161,13 +168,13 @@ export function SlipPicker({
         data-testid="slip-file-input"
         onChange={(e) => pick(e.target.files?.[0])}
       />
-      {uploading && <p className="text-sm text-muted-foreground">Uploading the slip…</p>}
+      {uploading && <p className="text-sm text-muted-foreground">Uploading…</p>}
       {message && (
         <p role="alert" className="text-sm text-destructive">
           {message}
         </p>
       )}
-      <p className="text-xs text-muted-foreground">A photo of the bank slip, a screenshot of the transfer, or the PDF from your bank (up to 5 MB).</p>
+      <p className="text-xs text-muted-foreground">{hint}</p>
     </div>
   );
 }

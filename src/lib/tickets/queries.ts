@@ -63,7 +63,7 @@ export type TicketDetail = NonNullable<Awaited<ReturnType<typeof getTicket>>>;
 /** The customer's open tickets with the last confirmed cycle per agreement (months a reading covers). */
 export async function listCustomerTicketRows(customerId: string): Promise<CustomerTicketRow[]> {
   const supabase = await createClient();
-  const [open, confirmed] = await Promise.all([
+  const [open, confirmed, photos] = await Promise.all([
     supabase
       .from("billing_cycle_tickets")
       .select(`id, agreement_id, cycle_no, cycle_date, status, status_before_overdue, stage_due_at, escalation_level, paused_at, ${MACHINE}, ${INVOICE}`)
@@ -75,9 +75,12 @@ export async function listCustomerTicketRows(customerId: string): Promise<Custom
       .select("ticket:billing_cycle_tickets!meter_submissions_ticket_fkey!inner(agreement_id, cycle_no)")
       .eq("customer_id", customerId)
       .eq("status", "CONFIRMED"),
+    // 11.4: open disputes waiting for the customer's fresh meter photo.
+    supabase.from("disputes").select("ticket_id").eq("customer_id", customerId).eq("status", "OPEN").not("photo_requested_at", "is", null).is("photo_received_at", null),
   ]);
   if (open.error) throw new Error(`customer tickets: ${open.error.message}`);
   if (confirmed.error) throw new Error(`confirmed readings: ${confirmed.error.message}`);
+  const photoTickets = new Set((photos.data ?? []).map((d) => d.ticket_id));
 
   const lastConfirmed = new Map<string, number>();
   for (const s of confirmed.data) {
@@ -96,6 +99,7 @@ export async function listCustomerTicketRows(customerId: string): Promise<Custom
     invoice: t.invoice as TicketViewInvoice | null,
     machine: `${t.machine.brand} ${t.machine.model}`,
     last_confirmed_cycle: lastConfirmed.get(t.agreement_id) ?? 0,
+    photo_requested: photoTickets.has(t.id),
   }));
 }
 

@@ -9,6 +9,7 @@ import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import { getAgreement } from "@/lib/agreements/queries";
 import { returnSchema, settlementSchema, termsEditSchema } from "@/lib/agreements/schemas";
 import { returnMachine, settleDeposit, type TermsChange, updateAgreementTerms } from "@/lib/agreements/service";
+import { type BaselineInput, recordBaseline } from "@/lib/agreements/baseline";
 import { currentActor } from "@/lib/auth/current-user";
 
 /** Owner portal: agreement terms (AGR-02, LATE-01), machine return (MAC-04, RET-01), deposit settlement (DEP-03/04). */
@@ -56,6 +57,14 @@ export async function settleDepositAction(agreementId: string, _prev: ActionResu
   const parsed = settlementSchema(todayInColombo()).safeParse(formValues(formData));
   if (!parsed.success) return fail(CHECK_FIELDS, fieldErrorsFrom(parsed.error.issues));
   const result = await settleDeposit(actor, agreementId, parsed.data);
+  if (result.ok) refresh();
+  return result;
+}
+
+/** 11.2 / 11.8: a new meter baseline after a replacement or reset (decision 51). */
+export async function recordBaselineAction(input: BaselineInput): Promise<ActionResult & { fieldErrors?: Record<string, string> }> {
+  const actor = await currentActor("OWNER");
+  const result = await recordBaseline(actor, input);
   if (result.ok) refresh();
   return result;
 }

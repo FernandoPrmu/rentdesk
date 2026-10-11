@@ -31,6 +31,17 @@ export async function getLateFeeSources(): Promise<Pick<LateFeeSources, "owner" 
   };
 }
 
+/** Spec 11.6 / decision 22: does the owner bill an estimate when no reading arrives (owner, else platform)? */
+export async function getEstimatedBilling(): Promise<boolean> {
+  const supabase = await createClient();
+  const [platform, owner] = await Promise.all([
+    supabase.from("platform_settings").select("estimated_billing_enabled").single(),
+    supabase.from("owner_settings").select("estimated_billing_enabled").maybeSingle(),
+  ]);
+  if (platform.error) throw new Error(`platform settings: ${platform.error.message}`);
+  return owner.data?.estimated_billing_enabled ?? platform.data.estimated_billing_enabled;
+}
+
 export async function saveBillingSettings(actor: CurrentUser, input: BillingSettingsInput): Promise<ActionResult> {
   const supabase = await createClient();
   const { error } = await supabase.from("owner_settings").upsert(
@@ -39,6 +50,7 @@ export async function saveBillingSettings(actor: CurrentUser, input: BillingSett
       late_fee_enabled: input.late_fee_enabled,
       late_fee_cents: input.late_fee,
       grace_period_days: input.grace_period_days,
+      estimated_billing_enabled: input.estimated_billing_enabled,
     },
     { onConflict: "owner_id" },
   );

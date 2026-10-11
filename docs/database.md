@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0031`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0032`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -55,14 +55,18 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `deposit_transactions` | Security deposit ledger per agreement: received, deducted (paid an invoice), refunded, retained. Append-only, never below zero |
 | Service | `service_requests` | Service requests (spec 7): machine, type, toner colours, part, description, urgency, preferred date, photo (`photo_*`, bucket `service-photos`), technician and planned visit, work done, parts, the owner's own cost (`cost_cents`, not readable by clients), the charge for the next bill (`charge_*`, decision 59), reopen count, rating, escalation level and time, idempotency key |
 | | `service_request_history` | The status trail: every status change (trigger, with the function's note and metadata) and the other steps (`kind`: NOTE, ASSIGNMENT, ESCALATION, RATING, CHARGE) |
-| Cross-cutting | `notifications` | In-app centre and email/SMS outbox (delivery status); `owner_id` null for platform alerts to admins (daily job, decision 53) |
-| | `notification_templates` | Global (`owner_id` null) and per-owner templates |
+| Cross-cutting | `notifications` | The in-app centre (Realtime): one row per recipient, `read_at`; `owner_id` null for platform alerts to admins (daily job, decision 53) |
+| | `notification_deliveries` | Email / SMS / WhatsApp outbox and delivery log (0032, decision 65): one row per notification and channel, written in the business transaction; recipient, category (ESSENTIAL / UPDATE / REMINDER), status (PENDING → SENT / FAILED / SKIPPED), attempts, next attempt, claim lease, provider id, the subject and address actually used. `notification_id` null for a direct send (login details) |
+| | `notification_events` | Delivery catalogue (decision 66): which events have an email (category) and SMS; mirrors `src/lib/notifications/events.ts` |
+| | `notification_preferences` | Per user: reminder emails and update emails on/off (decision 68). Essential emails ignore it |
+| | `notification_templates` | Email templates (decision 71): global (`owner_id` null, the admin's edits) and per-owner overrides; built-in defaults live in code. Written only through `rpc_save_notification_template` / `rpc_reset_notification_template` (0032) |
 | | `idempotency_keys` | Request de-duplication for server actions |
 | | `login_attempts` | Rate limiting / lockout input |
 | | `audit_logs` | Append-only audit trail, written by triggers and `app.write_audit()` |
 | | `cron_runs` | One row per run of the daily job: trigger, the "now" used (simulated outside production), status, counts, errors, work remaining |
 | Views | `customer_balances` | Outstanding amount per customer: issued, unpaid invoices minus `amount_paid_cents` (security invoker, so RLS applies). Credits are not netted: they are shown apart and come off the next invoices (decision 45) |
 | | `agreement_deposit_balances` | Deposit received / deducted / refunded / retained / held per agreement (security invoker) |
+| | `notification_log` | The delivery log (NOT-05): in-app rows and their deliveries, one row per notification and channel (security invoker: both tables' RLS applies) |
 
 ```mermaid
 erDiagram
@@ -129,8 +133,11 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | receipt counters | read all | read own | — | — |
 | deposit transactions, deposit balances (view) | read all | read | read own | — |
 | service requests + history | read all | read (not `cost_cents`: server only) | read own (not `cost_cents`) | — |
-| notifications | read all | read tenant delivery log | read own; set `read_at` | — |
-| templates | read all; manage global | read global + own; manage own | — | — |
+| notifications | read all | read tenant delivery log | read own; set `read_at` on own in-app rows | — |
+| notification deliveries, `notification_log` | read all | read own tenant | — (own in-app rows only, through the view) | — |
+| notification preferences | read own | read own | read own | — |
+| notification events (catalogue) | read | read | read | — |
+| templates | read all (writes through `rpc_save_notification_template`) | read global + own (same) | — | — |
 | audit logs | read all | read own tenant | — | — |
 | cron runs | read all | — | — | — |
 | login_attempts, idempotency_keys | — | — | — | — |
@@ -148,11 +155,11 @@ using the service role:
 - payments, allocations, payment slips, receipts and their counters and PDF versions, disputes, credits and credit refunds
 - deposit transactions (append-only even for the service role)
 - service requests and their history (owners and customers act through the `rpc_*` functions, 0031)
-- inserts into `notifications`
+- inserts into `notifications`; `notification_deliveries`, `notification_preferences` and `notification_templates` (0032)
 - `idempotency_keys`, `login_attempts`, `audit_logs` and `cron_runs`
 
-Customers write only through server actions. Clients have no DELETE grants except on an owner's own
-notification templates. `audit_logs` is append-only even for the service role.
+Customers write only through server actions. Clients have no DELETE grants (owners lost theirs on
+notification templates in 0032). `audit_logs` is append-only even for the service role.
 
 ### Atomic workflow functions (`app` schema, called through `public.rpc_*`)
 
@@ -202,6 +209,12 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `add_ticket_comment` / `edit_ticket_comment` | Decision 50: the ticket's customer or owner; 1-1,000 characters; idempotent; 30 per author per ticket per hour (`TOO_MANY_COMMENTS`); edits by the author within 5 minutes (`EDIT_WINDOW_OVER`), audited old → new |
 | `resend_invoice_notification` | Spec 11.4: owner sends an issued invoice's notice again; `NOTE` event (`INVOICE_RESENT`), audit; not twice within 10 minutes |
 | `carried_copies`, `verify_carried_copies`, `expected_estimate_credits`, `verify_estimate_credits` | Facts the meter and final invoice checks compare with the engine's calculation: copies carried from replaced meters (0027), estimated invoices to credit (0028) |
+| `enqueue_notifications` | Writes the in-app rows and (0032) for catalogue events the email delivery, plus SMS / WhatsApp when switched on, in the caller's transaction: recipient address, category, PENDING or SKIPPED (`NO_EMAIL`, `OPTED_OUT`). An item may say `"email": false` |
+| `claim_deliveries` / `record_delivery_result` / `email_quota` | The sender (decision 67): quota per UTC day and month (Resend sends only); claim due deliveries (emails up to the allowance, essential first, `FOR UPDATE SKIP LOCKED`, 2-minute lease and claim token; expires old reminders; with `p_essential_only` defers the rest to the next UTC day); record SENT / RETRY (FAILED after the last attempt) / FAILED / SKIPPED / POSTPONE, refusing a stale token; a failure alerts the owner (customer emails) or the admins (`alert_delivery_failed`). `delivery_context` gives the sender the message, recipient, branding, effective template and PDF to attach |
+| `mark_delivery_bounced` / `log_direct_delivery` | The Resend webhook's bounce, failure or complaint (once; alert); the login-details email, logged after it was sent without the password (decision 70) |
+| `save_notification_template` / `reset_notification_template` | Admin: global text; owner: own override (RD403 otherwise); only email events of the catalogue; audited by the table trigger |
+| `save_notification_preferences` / `set_admin_email` | The user's own email switches; the admin's alert address on `profiles.email` |
+| `notify_contact_changed` (trigger) | A new email on `customers` / `owners` queues the test message to the new address (spec 11.8, decision 75) |
 | `notify_admins_once`, `cron_last_success`, `cron_orphan_dispute_files` | Daily job: platform alerts to the admins once per key, the last finished run (missed-run alert after 30 hours), dispute files never sent |
 | `create_estimated_invoice` | Daily job (rule 22): after the meter deadline, when the owner bills estimates, a draft estimated invoice from the engine (`verify_estimated_invoice`, credits checked) → `PENDING_OWNER_REVIEW`; once per ticket |
 | `mark_ticket_overdue`, `record_ticket_reminder`, `escalate_ticket`, `apply_late_fee`, `set_ticket_pause` | Daily job steps (rules 20-24). Compare-and-set under the ticket lock: a step already done returns `{skipped}`. `apply_late_fee` re-checks the amount (ticket snapshot → owner → platform), the grace period, once only, never with a slip waiting or a dispute |
@@ -212,7 +225,7 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `login_gate_state` | Lock state, recent failures for the username and for the IP, and the thresholds, in one call |
 | `record_login_attempt` | Records an attempt under a profile row lock. A wrong password counts; at the threshold `locked_until` is set (audit `LOCKOUT`). Success clears the lock and sets `last_login_at` (audit `LOGIN`). Failures write `LOGIN_FAILED` |
 | `session_state` | Role, status, owner status, `must_change_password`, onboarding and session timeouts for the route guard |
-| `set_account_status` | Admin → owner, owner → own customer only. Reason required (stored in the audit entry). In-app notification to the user |
+| `set_account_status` | Admin → owner, owner → own customer only. Reason required (stored in the audit entry). The user is notified (in-app and email); since 0032 an owner's change is also told to that owner's active customers (decision 75) |
 | `reset_account_password` | Same parent rule. Sets `must_change_password`, clears the lockout, audit `PASSWORD_RESET`. Call it **before** setting the new password through the Auth Admin API: it is the permission check |
 | `complete_password_change` | Clears `must_change_password` (audit `PASSWORD_CHANGED`) |
 | `update_owner` / `update_customer` | Account details with the same parent rule |
@@ -439,6 +452,36 @@ app's own per-account and per-IP limits above protect logins instead.
   rejection, on the final invoice, carried by a correction, refused after the return), the discount credit, rating rules, RLS on requests,
   the trail and photos, the hidden cost.
 
+## Notifications and email (migration 0032)
+
+- **Outbox (decision 65).** `app.enqueue_notifications` (every workflow function calls it) writes the in-app row and, for
+  events in `notification_events`, a `notification_deliveries` row per channel in the same transaction. Nothing is sent
+  from the database: server code (`src/lib/notifications/outbox.ts`) claims due rows after the request (`after()`) and in the
+  daily job's last step, renders and sends them through Resend, and records the outcome. A rolled-back change has no row.
+- **Claims.** `claim_deliveries` locks with `FOR UPDATE SKIP LOCKED` and gives the batch a claim token and a 2-minute lease;
+  `record_delivery_result` accepts only the current token, so a sender that lost its lease cannot overwrite a newer result.
+  Resend's `Idempotency-Key` is the delivery id.
+- **Retries and limits (decisions 67, 69).** `next_attempt_at` carries the backoff (5 min, 20 min, 80 min, about 5 h),
+  `email_max_attempts` (5) ends in FAILED. `email_quota` counts Resend sends per UTC day and month against
+  `email_daily_limit` (100) and `email_monthly_limit` (3,000); inside `email_essential_reserve` (20) only ESSENTIAL rows are
+  claimed and the rest move to the next UTC midnight; REMINDER rows older than `email_reminder_expiry_days` (3) are skipped.
+- **Preferences (decision 68).** `notification_preferences` (no row = everything on); `delivery_opted_out` is checked when a
+  row is queued, so a turned-off email is logged as SKIPPED.
+- **Templates (decision 71).** Owners lost their direct insert/update/delete grants and policies; `save_notification_template`
+  checks who may change which row. The variables are checked by the server before it calls it.
+- **Read state.** Users still update only `read_at`, now only on their own **in-app** rows (policy re-created).
+- **Realtime.** `notifications` was already in the `supabase_realtime` publication (0007); the bell subscribes with the user's
+  token and a `user_id` filter, and RLS decides what it receives.
+- **Grants.** New tables: `select` for authenticated (RLS decides) and select / insert / update for the service role (no
+  delete: cleanups go through `SUPABASE_DB_URL`). New functions are revoked from anon and authenticated; their `rpc_*`
+  wrappers are service-role only (`rls.db.test.ts`).
+- **Tests.** `notifications.db.test.ts`: the catalogue equals the TypeScript one, rows written with the change and gone with a
+  rollback (and invisible to another connection until commit), no address / opted out / in-app only, retries with backoff to
+  FAILED and the owner's alert, a permanent error, the claim lease and stale tokens, the cap (essential only, deferral to the
+  next UTC day, nothing at the limit, expiry), templates (owner → global → built-in, who may change which, reset, no direct
+  writes), the bill's PDF (wait, then attach), owner suspension told to customers, bounces and direct sends, RLS on
+  deliveries, the log view and preferences. The sender runs with a fake transport: nothing is sent.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -463,6 +506,7 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
     test needs two connections, so it commits a fixture and deletes it afterwards.
   - `DB_TEST_APPLY_MIGRATIONS=1` also applies not-yet-pushed migrations inside the test transaction
     first.
+- `notifications.db.test.ts`: the email outbox and sender (see above).
 - `payments.db.test.ts`: every payment flow, SQL split = TypeScript split, duplicates, receipts gap-free and under concurrency (committed
   fixture, skipped with `DB_TEST_APPLY_MIGRATIONS=1`), orphan slips, RLS on slips, allocations, receipts and refunds.
 - `npm run db:seed` (`scripts/seed.ts`) creates demo accounts, machines, agreements and tickets in

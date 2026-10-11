@@ -11,12 +11,12 @@ says otherwise. Written in task 8; decision numbers refer to `docs/decisions.md`
 rolled back), `E2E` = Playwright at 360 px (`e2e/*.spec.ts`). Short names: `scen` = `scenarios.db.test.ts`,
 `cron` = `cron.db.test.ts`, `meter` = `meter-review.db.test.ts`, `pay` = `payments.db.test.ts`,
 `rules` = `business-rules.db.test.ts`, `mach` = `machines.db.test.ts`, `wf` = `workflow.db.test.ts`,
-`acc` = `accounts.db.test.ts`, `bill` = `billing.db.test.ts`.
+`acc` = `accounts.db.test.ts`, `bill` = `billing.db.test.ts`, `not` = `notifications.db.test.ts`.
 
-Deferred across the board, because email, SMS and WhatsApp need NOT-02/NOT-03 (SMS and WhatsApp
-need a paid provider): every notification below is written in-app in the same transaction as the
-change (the outbox, `src/lib/notifications/service.ts`); email delivery, retries and channel
-fallback plug into that one place later.
+Notifications (task 10): every notification below is written in-app, and for the events of the
+delivery catalogue also as an email delivery, in the same transaction as the change (the outbox,
+decision 65); emails are sent after the response and retried by the daily job (decision 67). SMS and
+WhatsApp stay deferred: they need a paid provider (NOT-03, decision 74).
 
 ## 11.1 Design principles
 
@@ -28,14 +28,14 @@ fallback plug into that one place later.
 | Idempotent submissions | Keys on readings, slips, manual payments, returns, disputes and comments; retries return the first result | DB `wf`, `meter`, `pay`, `scen` (dispute, comment replays) | done |
 | Money records never silently edited or deleted | Corrections cancel and reissue (new number, `replaces_invoice_id`, revision 2; rule 49); credits are new rows and lines; reversals and moves are new events (rule 43) | DB `scen`, `pay` | done |
 | Every rejection needs a reason and returns to a clear earlier stage | Reading, slip, estimate and dispute rejections | DB `meter`, `pay`, `scen` | done |
-| Fallback channels; the in-app ticket is the source of truth | In-app now; the ticket and its bill are always in the portal | — | partial: fallback channels wait for NOT-02/03 |
+| Fallback channels; the in-app ticket is the source of truth | In-app and email for every hand-over (spec 9, decision 66); a failed email is retried, then the owner is alerted; the ticket and its bill are always in the portal | U `outbox.test.ts`; DB `not`; E2E `notifications.spec.ts` | partial: SMS / WhatsApp as further channels need a paid provider (NOT-03) |
 
 ## 11.2 Meter submission stage
 
 | Scenario | How RentDesk handles it | Screens | Tests | Status |
 | --- | --- | --- | --- | --- |
 | Customer does not open or submit the ticket | Reminders day 2 and 4; day 5 Overdue and the owner alerted; the owner waits, enters the reading, or (if enabled in Settings › Billing) an estimated draft is prepared for review | Customer Home, owner Tickets, Settings › Billing | U `decide.test.ts`; DB `cron` (meter stage, estimates) | done |
-| Notification not delivered | Ticket stays visible in the portal; in-app notification written | Customer Home | — | partial: retries, other channel and "all channels failed" alert need NOT-02/03/05 |
+| Notification not delivered | **Task 10.** The in-app notification is always written and the ticket stays in the portal; the email is retried with backoff (5 min, 20 min, 80 min, about 5 h; decision 67); a bad address fails at once; a bounce or spam complaint reported by Resend (webhook) fails it too. Then the **owner is alerted** in-app ("Email to X could not be delivered", link to the customer) and can correct the address; everything is in the delivery log | Owner notifications, Settings › Emails › Delivery log, customer profile | U `outbox.test.ts`, `policy.test.ts` (webhook); DB `not` (retries → FAILED → owner alert, 4xx, bounce) | partial: no SMS / WhatsApp fallback channel (NOT-03, paid provider) |
 | Camera denied, missing or broken | Step-by-step help, never a file picker; the customer writes to the owner in the ticket's **messages** (TKT-11); the owner enters the reading with a note | Meter page, ticket messages, owner "Enter the reading" | E2E `meter.spec.ts` (denied), `comments.spec.ts`; DB `meter` (manual entry), `scen` (comments) | done |
 | Photo blurry, dark or unreadable | Capture guide, retake, dark/blank frames refused (rule 37); the owner rejects with a reason | Meter page, owner review | U `frame-check.test.ts`; E2E `meter.spec.ts` (reject → resend) | done |
 | Reading lower than the previous one | Blocked with a clear message, no invoice; after a meter reset or replacement the owner records a **new baseline** (rule 51) and the reading is accepted | Meter page, agreement › Meter › "Record new meter baseline" | U `usage.test.ts`, `dispute.test.ts`; DB `scen` (reset); E2E `baseline.spec.ts` | done |
@@ -56,7 +56,7 @@ fallback plug into that one place later.
 | Owner rejects the reading | Reason required; back to Meter requested; after 3 rejections the owner enters it (rule 28) | Owner review, customer ticket | DB `meter`; E2E `meter.spec.ts` | done |
 | Owner corrects the reading | Draft recalculated, note saved, customer sees old and new values; **the customer may dispute** the issued bill (task 8) | Owner review, customer ticket and bill | DB `meter`, `scen` | done |
 | Confirmation fails (system error) | One transaction; the photo is deleted only after the invoice is issued | — | DB `meter` | done |
-| Owner suspended or deactivated mid-cycle | Open tickets pause and resume with deadlines moved forward (rule 24); the owner's customers are blocked at sign-in with "Your provider's account is not active right now" | Login | DB `cron`, `acc`; E2E `account-management.spec.ts` | partial: telling customers by email waits for NOT-02 |
+| Owner suspended or deactivated mid-cycle | Open tickets pause and resume with deadlines moved forward (rule 24); the owner's customers are blocked at sign-in with "Your provider's account is not active right now". **Task 10:** the owner's active customers are told by email (and in-app) when the owner is suspended, reactivated or closed (decision 75) | Login; the customers' email | DB `cron`, `acc`, `not` (customers told); E2E `account-management.spec.ts` | done |
 | Agreement edited during an open cycle | Applies from the next cycle; open tickets keep their terms (rule 3) | Agreement page | DB `mach`, `rules` | done |
 
 ## 11.4 Invoice and dispute stage
@@ -66,7 +66,7 @@ fallback plug into that one place later.
 | Customer disputes a confirmed invoice | **Task 8.** "Dispute this bill": reason (required) and an optional photo or PDF (slip checks, own private bucket); once per bill (rule 47). Ticket and bill Disputed; reminders and late fee pause; the owner is told; owner reminders day 3 and 5, admin day 7 (rule 52). The owner answers: **reject** (explanation, optional new due date), **correct the bill** (cancel and reissue, rule 49) or **give a credit** (taken off the bill, the rest kept as credit, rule 48). Customer told at each step; audited (`DISPUTE_*`, `INVOICE_CORRECTED`) | Customer bill › Dispute, customer ticket; owner ticket (dispute panel), "Correct the bill" | U `dispute.test.ts`, `decide.test.ts`, `transitions.test.ts`; DB `scen` (raise, reject, credit, covered → closed, corrected, cancel ends it, escalation); E2E `disputes.spec.ts` | done |
 | Calculation or rate error after confirmation | **Task 8.** "Correct the bill": corrected reading(s) or adjustment lines, recalculated by the engine; the old invoice is cancelled (number voided, CANCELLED PDF version) and the corrected one issued with a new number; money already paid becomes a credit taken off it; a paid (closed) ticket is reopened first; a reading can change only while it is the latest (later readings or baselines: adjustment lines) | Owner ticket › Correct the bill; invoice pages show "Corrected, replaces …" / "Pay the corrected bill … instead" | U `dispute.test.ts`; DB `scen` (reopen + paid → credit, adjustment with part payment, refusals, later reading, estimate) | done |
 | Dispute after the meter photo was deleted | The owner's dispute panel shows the reading on record: values, who confirmed and when, the photo deleted on confirmation (INV-10). The owner may **ask for a fresh meter photo**: the customer gets a Home task and takes it with the live camera, typing what the meter shows; the photo is deleted when the dispute ends | Owner dispute panel; customer Home task, ticket › Take a fresh meter photo | DB `scen` (fresh photo, storage rule, deletion) | done |
-| Invoice notification not delivered | The bill stays in the portal; **"Send the bill again"** on the owner's invoice page (ticket event, audit, not twice within 10 minutes) | Owner invoice page | DB `scen` (resend) | partial: retries wait for NOT-02 |
+| Invoice notification not delivered | The bill stays in the portal; the bill email (PDF attached) is retried (decision 67) and the owner alerted when it fails; **"Send the bill again"** on the owner's invoice page sends it again with the PDF (ticket event, audit, not twice within 10 minutes) | Owner invoice page, delivery log | DB `scen` (resend), `not` (retries, PDF attached) | done |
 | Zero usage in the cycle | Commitment charged; ZERO anomaly flag | Owner review | U `anomaly.test.ts`, `invoice.test.ts` | done |
 | Machine returned or agreement ended mid-cycle | Closing reading, final invoice (prorated or full, rule 5), machine Available; unpaid bills stay payable (RET-01) | Return form | DB `mach`, `rules`; E2E `machines.spec.ts`, `deposits.spec.ts` | done |
 
@@ -117,12 +117,12 @@ fallback plug into that one place later.
 | --- | --- | --- | --- | --- |
 | Customer account suspended | No new tickets; open tickets frozen; the owner can still act; resumes on reactivation | Owner customer profile | DB `cron`, `acc` | done |
 | Customer forgets the password | Owner resets: new temporary password, forced change | Owner customer profile | DB `acc`; E2E `account-management.spec.ts` | done |
-| Customer changes phone or email | The owner updates the details | Owner customer profile | DB `acc` | partial: the test notification needs NOT-02/03 |
+| Customer changes phone or email | The owner updates the details; **task 10:** a new email address gets a test message at once ("From now on, emails … will be sent to …", decision 75), in the delivery log | Owner customer profile, delivery log | DB `acc`, `not` (test message written with the change) | partial: a test SMS for a new phone number needs NOT-03 (paid provider) |
 | Machine replaced or swapped | Return the old machine with its closing reading (final bill), assign the replacement with its own starting reading (or Reassign) | Return, Assign | DB `scen` (swap), `mach`, `rules` | done |
 | Temporary replacement while a machine is repaired | Not in the spec | — | — | deferred: not in the spec; a permanent swap (above) or a baseline covers today's cases |
 | Meter replaced or reset | **Task 8:** "Record new meter baseline" with a reason; the old meter's last reading (optional) carries the copies printed on it into the next bill (rule 51); blocked while a reading waits for review; ticket event, audit, customer told | Agreement › Meter | U `dispute.test.ts`; DB `scen`; E2E `baseline.spec.ts` | done |
 | Customer leaves with an unpaid balance | Deactivated; the balance stays on record and in Outstanding | Owner customer profile, Outstanding | DB `acc`, `mach` (balances) | done |
-| Owner leaves the platform | Admin deactivates; data kept; the owner's customers are blocked with a message at sign-in | Admin › Owners | DB `acc`; E2E `account-management.spec.ts` | partial: telling customers by email needs NOT-02 |
+| Owner leaves the platform | Admin deactivates; data kept; the owner's customers are blocked with a message at sign-in and told by email that the company has left RentDesk (decision 75) | Admin › Owners | DB `acc`, `not`; E2E `account-management.spec.ts` | done |
 
 ## Service requests (spec 7; task 9)
 

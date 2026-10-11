@@ -123,3 +123,21 @@ fallback plug into that one place later.
 | Meter replaced or reset | **Task 8:** "Record new meter baseline" with a reason; the old meter's last reading (optional) carries the copies printed on it into the next bill (rule 51); blocked while a reading waits for review; ticket event, audit, customer told | Agreement › Meter | U `dispute.test.ts`; DB `scen`; E2E `baseline.spec.ts` | done |
 | Customer leaves with an unpaid balance | Deactivated; the balance stays on record and in Outstanding | Owner customer profile, Outstanding | DB `acc`, `mach` (balances) | done |
 | Owner leaves the platform | Admin deactivates; data kept; the owner's customers are blocked with a message at sign-in | Admin › Owners | DB `acc`; E2E `account-management.spec.ts` | partial: telling customers by email needs NOT-02 |
+
+## Service requests (spec 7; task 9)
+
+Section 11 has no service rows; these are the service request paths that could otherwise be left waiting, held
+to the same principle (a defined status, a reason, a notification and an audit entry). `srv` = `service.db.test.ts`.
+
+| Scenario | How RentDesk handles it | Screens | Tests | Status |
+| --- | --- | --- | --- | --- |
+| Owner does not acknowledge a request | Reminder to the owner, then the admins, by urgency: URGENT and HIGH 4 h / 8 h, NORMAL and LOW 24 h / 48 h (owner settings; rule 61); at the daily run, so up to a day late on Vercel Hobby | Owner service list (Not acknowledged in time, Escalated), Admin › Escalations | U `rules.test.ts`, `daily.test.ts`; DB `srv` | done |
+| Double tap or lost connection when sending a request | Idempotency key checked under a lock: the retry returns the first request; "Tap Send again: it is never sent twice" on a slow connection (rule 47's pattern) | Request service | DB `srv` | done |
+| Photo invalid, too large or not a picture | Checked on the phone and again on the stored bytes; the file is removed and the customer adds it again (rule 58) | Request service | U `slip-check.test.ts`; DB `srv` (folder) | done |
+| Request for a machine not rented to the customer | Refused (another customer's machine, a spare one, a returned one) | — | DB `srv` | done |
+| The fix did not work | Customer: "No, still not fixed" with what is wrong → In progress, counted, owner told | Customer request page | DB `srv`; E2E `service.spec.ts` | done |
+| Customer never confirms the fix | Home keeps asking ("Is it fixed?"); the owner can close it | Customer Home, owner request page | DB `srv` | done |
+| Request no longer needed | Cancel with a reason: the customer while New, the owner at any open step; a charge not yet billed is dropped, one already on a bill blocks the cancel (correct that bill) | Request pages | DB `srv` | done |
+| Charge decided after the machine went back | Refused with a clear message (no next bill); the final invoice on return bills charges still waiting | Owner request page, Return | DB `srv` | done |
+| Charge while a reading waits for review | The charge waits for the next bill; a rejected draft frees the charges it held | — | DB `srv` | done |
+| Owner suspended or customer suspended | Their requests stop escalating; the owner can still act | — | DB `srv` | done |

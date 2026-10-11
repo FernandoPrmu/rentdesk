@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0029`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0031`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -53,7 +53,8 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `disputes` | Invoice disputes, one per invoice (decision 47): reason, optional file (`attachment_*`, bucket `dispute-files`), the answer (`resolution_kind` REJECTED / CORRECTED / CREDIT / CANCELLED, `resolution`, `credit_id`, `replacement_invoice_id`, `new_due_date`), the fresh meter photo request (`photo_requested_at`, note, `photo_received_at`, `photo_readings`) |
 | | `credits` | Overpayments, credits from cancelled invoices, advances (with agreement, date received, method, reference; or the payment that made them, `source_payment_id`). CREDIT invoice lines point at the credit they use (`invoice_lines.credit_id`). `refunded_cents`; status `VOID` when the payment that made it is reversed |
 | | `deposit_transactions` | Security deposit ledger per agreement: received, deducted (paid an invoice), refunded, retained. Append-only, never below zero |
-| Service | `service_requests` / `service_request_history` | Requests and their status trail (trigger-written) |
+| Service | `service_requests` | Service requests (spec 7): machine, type, toner colours, part, description, urgency, preferred date, photo (`photo_*`, bucket `service-photos`), technician and planned visit, work done, parts, the owner's own cost (`cost_cents`, not readable by clients), the charge for the next bill (`charge_*`, decision 59), reopen count, rating, escalation level and time, idempotency key |
+| | `service_request_history` | The status trail: every status change (trigger, with the function's note and metadata) and the other steps (`kind`: NOTE, ASSIGNMENT, ESCALATION, RATING, CHARGE) |
 | Cross-cutting | `notifications` | In-app centre and email/SMS outbox (delivery status); `owner_id` null for platform alerts to admins (daily job, decision 53) |
 | | `notification_templates` | Global (`owner_id` null) and per-owner templates |
 | | `idempotency_keys` | Request de-duplication for server actions |
@@ -127,7 +128,7 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | payments, allocations, slips, disputes, credits, refunds, receipts (+ PDF versions) | read all | read | read own | — |
 | receipt counters | read all | read own | — | — |
 | deposit transactions, deposit balances (view) | read all | read | read own | — |
-| service requests + history | read all | read | read own | — |
+| service requests + history | read all | read (not `cost_cents`: server only) | read own (not `cost_cents`) | — |
 | notifications | read all | read tenant delivery log | read own; set `read_at` | — |
 | templates | read all; manage global | read global + own; manage own | — | — |
 | audit logs | read all | read own tenant | — | — |
@@ -146,7 +147,7 @@ using the service role:
 - the company profile (`owner_company_profiles`, since 0022)
 - payments, allocations, payment slips, receipts and their counters and PDF versions, disputes, credits and credit refunds
 - deposit transactions (append-only even for the service role)
-- service requests and their history
+- service requests and their history (owners and customers act through the `rpc_*` functions, 0031)
 - inserts into `notifications`
 - `idempotency_keys`, `login_attempts`, `audit_logs` and `cron_runs`
 
@@ -193,6 +194,11 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `request_dispute_photo` / `submit_dispute_photo` | The fresh meter photo (decision 55): the owner asks (note), the customer sends a live photo in the ticket's folder with the reading(s); a `meter_photos` row of the dispute, deleted when the dispute ends (trigger on `disputes`) |
 | `correct_issued_invoice` | Decision 49: owner, reason, new due date; refused with a slip waiting (`SLIP_WAITING`), on a closed ticket (`REOPEN_FIRST`) and for a reading that is no longer the latest (`LATER_READING`). Cancels the invoice (number voided, money paid → `CANCELLED_INVOICE` credit), checks the engine's corrected invoice against the original (`verify_corrected_invoice`) and the credits, issues it with a new number (`replaces_invoice_id`, revision + 1), replaces a corrected reading (old submission `SUPERSEDED`, a confirmed owner reading with `corrected_from_value`), resolves an open dispute as CORRECTED, moves the ticket to `AWAITING_PAYMENT` (closes it when credits cover it). Event `CORRECTION`, audit `INVOICE_CORRECTED` |
 | `record_meter_baseline` | Decision 51: owner, live agreement, reason, per counter the new value and optionally the old meter's last reading (not below the last known reading); refused while a reading or estimate waits for review (`REVIEW_PENDING`). Event `BASELINE` on the newest open ticket, audit `METER_BASELINE_RECORDED` |
+| `raise_service_request` | Decision 58: customer, a machine they rent now, type, toner colours (mono = black, colour = at least one), description, urgency, preferred date (today to a year), optional checked photo in their folder; idempotency key checked under an advisory lock (an overlapping retry returns the first request); 10 per customer per hour. Audit `SERVICE_REQUEST_RAISED`; the owner's notification in the same transaction |
+| `service_request_action` | Decision 57: every step after raising (ACKNOWLEDGE, ASSIGN, START, RESOLVE, CLOSE by the owner; CONFIRM, REOPEN by the customer; CANCEL by either; NOTE) under the request lock: role, tenant and `service_transition_allowed`; RESOLVE records work, parts and cost and optionally the charge (refused once the agreement ended, `AGREEMENT_ENDED`) and a breakdown discount (a `SERVICE_DISCOUNT` credit); CANCEL drops a charge not yet billed and is refused while it is on a bill (`CHARGE_BILLED`). Trail row, audit `SERVICE_REQUEST_<ACTION>`, notifications |
+| `rate_service_request` | SRV-09: the request's customer, once, only when Closed, 1-5 and a comment (≤ 500). Audit `SERVICE_REQUEST_RATED` |
+| `escalate_service_request`, `cron_service_candidates`, `cron_orphan_service_photos` | Decision 61: compare-and-set escalation of a request still New (level 1 owner, 2 admin; skipped when acknowledged or already there), the daily job's candidates with the owner's settings (active accounts only), unsent photos older than 2 days |
+| `service_charges_free`, `check_invoice_service_charges` | Decision 59: an agreement's charges not on a live invoice; the deferred constraint trigger on `invoices` that checks, at commit, that a new normal invoice lists exactly those (a recalculated draft keeps its own, a corrected one carries the replaced bill's), each with its ADJUSTMENT line, none on two bills, none on an estimate |
 | `add_ticket_comment` / `edit_ticket_comment` | Decision 50: the ticket's customer or owner; 1-1,000 characters; idempotent; 30 per author per ticket per hour (`TOO_MANY_COMMENTS`); edits by the author within 5 minutes (`EDIT_WINDOW_OVER`), audited old → new |
 | `resend_invoice_notification` | Spec 11.4: owner sends an issued invoice's notice again; `NOTE` event (`INVOICE_RESENT`), audit; not twice within 10 minutes |
 | `carried_copies`, `verify_carried_copies`, `expected_estimate_credits`, `verify_estimate_credits` | Facts the meter and final invoice checks compare with the engine's calculation: copies carried from replaced meters (0027), estimated invoices to credit (0028) |
@@ -411,6 +417,28 @@ app's own per-account and per-IP limits above protect logins instead.
   reading, estimate, tampering), baselines (carried copies, reset, refusals), estimate reconciliation, comments (RLS,
   edits, rate limit, audit), dispute files, resend, admin alerts, machine swap.
 
+## Service requests (migrations 0030–0031)
+
+- **Enum value (0030)**, in its own migration: credit kind `SERVICE_DISCOUNT` (decision 60).
+- **Workflow.** `raise_service_request`, `service_request_action` and `rate_service_request` lock the request (an advisory lock on the key
+  for raising) and write the request, the trail, the audit entry and the notifications in one transaction. The status trigger now
+  records the function's actor, note and metadata (`app.status_note`, `app.status_meta`, transaction-local and reset after each change).
+- **Charges on the next bill** (decision 59). No column on invoice lines: an invoice's `calculation.service_charges` lists the charges it
+  bills (id, description, amount). A charge is "on a bill" while a live invoice (not rejected or cancelled) lists it; drafts reserve it.
+  The check runs as a **deferred constraint trigger** (`invoices_service_charges`) because the lines are written after the invoice row:
+  in a request it fires at commit. Tests that need it call `SET CONSTRAINTS ALL IMMEDIATE` (`service.db.test.ts`, `committed()`).
+- **Discount** (decision 60): `credits.service_request_id` (unique) links the `SERVICE_DISCOUNT` credit to its request.
+- **Owner's cost** (decision 64): `authenticated` has column grants on `service_requests` without `cost_cents` (and the idempotency key);
+  `select *` by a client is therefore refused. The server reads the cost with the service role after RLS showed the row.
+- **Grants.** New functions are revoked from anon and authenticated; the wrappers `rpc_raise_service_request`, `rpc_service_request_action`,
+  `rpc_rate_service_request`, `rpc_escalate_service_request`, `rpc_cron_service_candidates`, `rpc_cron_orphan_service_photos` are
+  service-role only (`rls.db.test.ts`).
+- **Tests.** `service.db.test.ts`: raising (owner told at once, URGENT / HIGH titles, idempotent, toner colours, rented machine, photo folder),
+  the full lifecycle with trail and audit, refusals by role and tenant, reopen, cancel rules, escalation by urgency through the daily job's
+  own step (also suspended accounts and a missed day), the charge on the next reading (refused without it, held by a draft, freed by a
+  rejection, on the final invoice, carried by a correction, refused after the return), the discount credit, rating rules, RLS on requests,
+  the trail and photos, the hidden cost.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -423,6 +451,7 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 | `receipts` | 10 MB; PDF | Server writes only. `{owner_id}/{receipt_id}/v{n}.pdf`: owner (own tenant), the payment's customer and admin read |
 | `branding` | 5 MB; PNG, JPEG, SVG, PDF | Server writes only (0022). Owner, their customers and admin read. Logos at `{owner_id}/logos/{sha256}.png` (max 512 px, SVG rasterised on the server; older `{owner_id}/logo.png` still valid), letterheads at `{owner_id}/letterheads/{sha256}.{pdf,jpg,png}`. Never overwritten or deleted (rule 35) |
 | `dispute-files` | 5 MB; JPEG, PNG, PDF | Customer uploads into `{owner}/{customer}/` (own folder). The server checks the stored file before recording it with the dispute; the owner and admin read only files sent with a dispute, the customer their folder. Unsent files purged after 2 days (0027) |
+| `service-photos` | 5 MB; JPEG, PNG | Customer uploads into `{owner}/{customer}/` (own folder, 0031). The server checks the stored file before recording it with the request; the owner and admin read only photos sent with a request, the customer their folder. Unsent photos purged after 2 days |
 | `invoices` | 10 MB; PDF | Server writes only. `{owner_id}/{invoice_id}/v{n}.pdf`: owner (own tenant), the invoice's customer (issued invoices only) and admin read. `{owner_id}/preview/sample.pdf`: the owner's sample preview |
 
 ## Tests and seed

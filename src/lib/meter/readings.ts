@@ -78,6 +78,8 @@ export interface CounterPreview {
   previous: number;
   current: number;
   usage: number;
+  /** Part of the usage printed on a replaced meter (decision 51). */
+  carried: number;
   included: number;
   excess: number;
   rolledOver: boolean;
@@ -103,6 +105,7 @@ export function previewReading(context: MeterContext, typed: TypedText): Preview
       previous: c.previous,
       current: c.current,
       usage: c.usage,
+      carried: c.carried,
       included: c.included,
       excess: c.excess,
       rolledOver: c.rolledOver,

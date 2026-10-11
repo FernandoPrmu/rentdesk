@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { addCommentAction, editCommentAction } from "@/app/actions/comments";
+import { CommentThread } from "@/components/comments/comment-thread";
+import { DisputeCard } from "@/components/disputes/dispute-card";
+import { OwnerDisputeActions } from "@/components/disputes/owner-dispute-actions";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { dueText, TicketFlagBadges, TicketStatusBadge } from "@/components/tickets/ticket-display";
@@ -10,32 +14,49 @@ import { TicketTimeline } from "@/components/tickets/ticket-timeline";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
+import { deniedNotFound } from "@/lib/audit/access";
 import { requireUser } from "@/lib/auth/current-user";
+import { listComments } from "@/lib/comments/service";
+import { getReadingRecord, getTicketDispute } from "@/lib/disputes/service";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 import { INVOICE_STATUS_LABEL } from "@/lib/status-labels";
 import { waitingPaymentId } from "@/lib/tickets/owner-actions";
+import { createClient } from "@/lib/supabase/server";
 import { getTicket } from "@/lib/tickets/queries";
-import { isMeterStage } from "@/lib/tickets/states";
+import { canPerform, isMeterStage } from "@/lib/tickets/states";
 import { currentDue, nextStep } from "@/lib/tickets/view";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { ticketAction } from "../actions";
+import { disputeAction, ticketAction } from "../actions";
 
 export const metadata: Metadata = { title: "Ticket" };
 
-/** TKT-06, TKT-10: the current stage, who must act, the due date, the owner's actions and the full history. */
+/**
+ * TKT-06, TKT-10, TKT-11: the current stage, who must act, the due date, the owner's
+ * actions, the dispute and its answers (11.4), correcting the bill (decision 49),
+ * the messages with the customer and the full history.
+ */
 export default async function OwnerTicketPage({ params }: PageProps<"/owner/tickets/[id]">) {
-  await requireUser("OWNER");
+  const owner = await requireUser("OWNER");
   const { id } = await params;
   if (!uuidSchema.safeParse(id).success) notFound();
   const ticket = await getTicket(id);
-  if (!ticket) notFound();
+  if (!ticket) return deniedNotFound(owner, "billing_cycle_tickets", id, "/owner/tickets/[id]");
   const now = new Date();
   const step = nextStep(ticket);
   const inv = ticket.invoice;
-  const waiting = ticket.status === "PAYMENT_SUBMITTED" ? await waitingPaymentId(ticket.id) : null;
+  const supabase = await createClient();
+  const [waiting, dispute, comments, company] = await Promise.all([
+    ticket.status === "PAYMENT_SUBMITTED" ? waitingPaymentId(ticket.id) : null,
+    getTicketDispute(supabase, ticket.id),
+    listComments(supabase, ticket.id),
+    supabase.from("owner_company_profiles").select("company_name").eq("owner_id", owner.id).maybeSingle(),
+  ]);
+  const record = dispute?.status === "OPEN" && inv?.id ? await getReadingRecord(supabase, inv.id) : null;
+  const state = { status: ticket.status, statusBeforeOverdue: ticket.status_before_overdue };
+  const canCorrect = ticket.status !== "DISPUTED" && canPerform("correctInvoice", "OWNER", state) && Boolean(inv?.invoice_no);
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -91,6 +112,14 @@ export default async function OwnerTicketPage({ params }: PageProps<"/owner/tick
           <div className="mt-4">
             <OwnerTicketActions ticketId={ticket.id} status={ticket.status} before={ticket.status_before_overdue} today={todayInColombo()} action={ticketAction} />
           </div>
+          {canCorrect && (
+            <Link href={`/owner/tickets/${ticket.id}/correct`} className={cn(buttonVariants({ variant: "outline" }), "mt-2 h-12 w-full text-base sm:w-auto sm:px-6")} data-testid="correct-bill">
+              Correct the bill
+            </Link>
+          )}
+          {ticket.status === "CLOSED" && inv?.invoice_no && (
+            <p className="mt-2 text-sm text-muted-foreground">To correct a bill that was already paid, reopen the ticket first (with a reason).</p>
+          )}
           <p className="mt-4 text-sm text-muted-foreground">
             Period {formatDate(ticket.period_start)} to {formatDate(ticket.period_end)} ({ticket.cycle_length_days} days).{" "}
             <Link href={`/owner/agreements/${ticket.agreement_id}`} className="underline underline-offset-4">
@@ -123,6 +152,33 @@ export default async function OwnerTicketPage({ params }: PageProps<"/owner/tick
           </CardContent>
         </Card>
       )}
+
+      {dispute && (
+        <DisputeCard dispute={dispute} audience="owner" invoiceHref="/owner/invoices" record={record}>
+          {ticket.status === "DISPUTED" && (
+            <OwnerDisputeActions
+              ticketId={ticket.id}
+              today={todayInColombo()}
+              leftToPayCents={inv ? inv.total_cents - inv.amount_paid_cents : 0}
+              photoPending={Boolean(dispute.photo && !dispute.photo.receivedAt)}
+              action={disputeAction}
+            />
+          )}
+        </DisputeCard>
+      )}
+
+      <Card>
+        <CardContent>
+          <CommentThread
+            ticketId={ticket.id}
+            viewerId={owner.id}
+            comments={comments}
+            names={{ owner: company.data?.company_name ?? "Rental company", customer: ticket.customer.name }}
+            add={addCommentAction}
+            edit={editCommentAction}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

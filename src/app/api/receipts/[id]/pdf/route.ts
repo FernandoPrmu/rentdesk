@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logDeniedAccess } from "@/lib/audit/access";
 import { RECEIPT_BUCKET } from "@/lib/payments/receipt-pdf/job";
 import { createClient } from "@/lib/supabase/server";
 
@@ -29,7 +30,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!auth.user) return NextResponse.redirect(new URL("/login", request.url), 303);
 
   const { data: receipt } = await supabase.from("receipts").select("receipt_no, pdf_path").eq("id", id).maybeSingle();
-  if (!receipt) return notFound("Receipt not found.");
+  if (!receipt) {
+    // 11.7 / decision 54: another tenant's or customer's file is logged, then answered like a missing one.
+    await logDeniedAccess({ id: auth.user.id, role: (auth.user.app_metadata?.role as string | undefined) ?? undefined }, "receipts", id, "/api/receipts/[id]/pdf");
+    return notFound("Receipt not found.");
+  }
   let path = receipt.pdf_path;
   let name = receipt.receipt_no;
   if (version !== null) {

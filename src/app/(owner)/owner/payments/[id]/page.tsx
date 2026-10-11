@@ -8,6 +8,7 @@ import { AllocationList, DuplicateNotice, PaymentStatusBadge, paymentAmount, Rec
 import { BackLink } from "@/components/portal/back-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
+import { deniedNotFound } from "@/lib/audit/access";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { formatInvoiceMoney } from "@/lib/invoices/pdf/format";
@@ -31,7 +32,7 @@ export default async function OwnerPaymentPage({ params }: PageProps<"/owner/pay
   const { id } = await params;
   if (!uuidSchema.safeParse(id).success) notFound();
   const p = await getPaymentDetail(await createClient(), id);
-  if (!p) notFound();
+  if (!p) return deniedNotFound(owner, "payments", id, "/owner/payments/[id]");
   const receipt = p.receipts[0];
   const accepted = p.status === "ACCEPTED" || p.status === "PARTIAL";
   const [verify, move] = await Promise.all([

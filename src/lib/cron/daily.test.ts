@@ -155,3 +155,40 @@ describe("buildEstimate (11.6, rule 13)", () => {
     expect(calls.some(([fn]) => fn === "rpc_cron_pending_invoice_pdfs")).toBe(false);
   });
 });
+
+describe("admin alerts about the daily job (11.7, rule 53)", () => {
+  const alerts = (calls: [string, Record<string, unknown>][]) => calls.filter(([fn]) => fn === "rpc_notify_admins_once").map(([, a]) => a);
+
+  it("no run finished for 30 hours or more: the admins are told once that day", async () => {
+    const { rpc, calls } = fakeRpc({ rpc_cron_last_success: () => "2026-10-08T01:00:00+05:30" });
+    await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });
+    const sent = alerts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].p_dedupe_key).toBe("cron-missed:2026-10-10");
+    expect(sent[0].p_notifications).toEqual([expect.objectContaining({ user_id: "admin-1", event: "cron.missed", link: "/admin/jobs", title: "Daily job did not run" })]);
+    expect((sent[0].p_notifications as { body: string }[])[0].body).toMatch(/48 hours/);
+  });
+
+  it("yesterday's run is fine; a first run ever is fine", async () => {
+    for (const last of ["2026-10-09T01:10:00+05:30", null]) {
+      const { rpc, calls } = fakeRpc({ rpc_cron_last_success: () => last });
+      await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });
+      expect(alerts(calls)).toEqual([]);
+    }
+  });
+
+  it("a run with errors alerts the admins after it is recorded", async () => {
+    const { rpc, calls } = fakeRpc({
+      rpc_cron_last_success: () => "2026-10-09T01:10:00+05:30",
+      rpc_cron_overdue_summaries: () => {
+        throw new Error("database unavailable");
+      },
+    });
+    const result = await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });
+    expect(result.status).toBe("FAILED");
+    const finish = calls.findIndex(([fn]) => fn === "rpc_cron_finish_run");
+    const alert = calls.findIndex(([fn]) => fn === "rpc_notify_admins_once");
+    expect(alert).toBeGreaterThan(finish);
+    expect(alerts(calls)[0]).toMatchObject({ p_dedupe_key: "cron-failed:run-1" });
+  });
+});

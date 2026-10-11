@@ -553,34 +553,180 @@ export async function clearOverdue(rpc: Rpc, actor: Actor, ticket: TicketSnapsho
 // Disputes, cancel, reopen
 // -----------------------------------------------------------------------------
 
-const disputeSchema = z.object({ reason: reasonText });
+const attachmentSchema = z.object({
+  storagePath: z.string().min(1).max(300),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  mimeType: z.enum(["image/jpeg", "image/png", "application/pdf"]),
+  sizeBytes: z.number().int().positive(),
+});
 
-/** 11.4 / CP-06: the customer disputes the issued invoice; reminders and late fees pause. */
+const disputeSchema = z.object({
+  idempotencyKey: z.uuid(),
+  reason: reasonText,
+  attachment: attachmentSchema.nullable().default(null),
+  context: z.object({ invoiceNo: z.string().nullable().default(null) }).default({ invoiceNo: null }),
+});
+
+/** 11.4 / CP-06: the customer disputes the issued invoice (once, rule 47); reminders and late fees pause. */
 export async function raiseDispute(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof disputeSchema>) {
   assertTransition("raiseDispute", actor, ticket);
   const i = parse(disputeSchema, input);
-  return rpc("rpc_raise_dispute", {
+  return (await rpc("rpc_raise_dispute", {
+    p_ticket_id: ticket.id,
+    p_actor_id: actorId(actor),
+    p_idempotency_key: i.idempotencyKey,
+    p_reason: i.reason,
+    p_attachment: i.attachment
+      ? { storage_path: i.attachment.storagePath, sha256: i.attachment.sha256, mime_type: i.attachment.mimeType, size_bytes: i.attachment.sizeBytes }
+      : null,
+    p_notifications: notificationsFor("dispute.raised", [owner(ticket.owner_id)], context(ticket, { reason: i.reason, invoiceNo: i.context.invoiceNo })),
+  })) as { dispute_id: string; replayed: boolean };
+}
+
+const rejectDisputeSchema = z.object({
+  reason: reasonText,
+  /** A new due date (today or later), or null to keep it. */
+  dueDate: isoDate.nullable().default(null),
+  stageDueAt: z.date(),
+  context: z
+    .object({ invoiceNo: z.string().nullable().default(null), dueDate: isoDate.nullable().default(null) })
+    .default({ invoiceNo: null, dueDate: null }),
+});
+
+/** 11.4 / rule 47: the dispute is rejected with an explanation; the invoice stands. */
+export async function rejectDispute(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof rejectDisputeSchema>) {
+  assertTransition("rejectDispute", actor, ticket);
+  const i = parse(rejectDisputeSchema, input);
+  return (await rpc("rpc_reject_dispute", {
     p_ticket_id: ticket.id,
     p_actor_id: actorId(actor),
     p_reason: i.reason,
-    p_notifications: notificationsFor("dispute.raised", [owner(ticket.owner_id)], context(ticket, { reason: i.reason })),
+    p_due_date: i.dueDate,
+    p_stage_due_at: iso(i.stageDueAt),
+    p_notifications: notificationsFor(
+      "dispute.rejected",
+      [customer(ticket.customer_id)],
+      context(ticket, { reason: i.reason, invoiceNo: i.context.invoiceNo, dueDate: i.dueDate ?? i.context.dueDate ?? undefined }),
+    ),
+  })) as { due_date: string };
+}
+
+const creditDisputeSchema = z.object({
+  reason: reasonText,
+  creditId: z.uuid(),
+  amountCents: positiveCents,
+  /** From creditOnIssuedInvoice (src/lib/billing/dispute.ts); the rpc checks it. */
+  line: z.custom<InvoicePayload["lines"][number]>((v) => typeof v === "object" && v !== null, { message: "The credit line is required" }),
+  totalCents: cents,
+  leftOverCents: cents,
+  stageDueAt: z.date(),
+  context: z.object({ invoiceNo: z.string().nullable().default(null) }).default({ invoiceNo: null }),
+});
+
+/** 11.4 / rule 48: a credit off the disputed bill; the rest stays a credit; a covered bill closes. */
+export async function creditDispute(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof creditDisputeSchema>) {
+  assertTransition("creditDispute", actor, ticket);
+  const i = parse(creditDisputeSchema, input);
+  return (await rpc("rpc_credit_dispute", {
+    p_ticket_id: ticket.id,
+    p_actor_id: actorId(actor),
+    p_reason: i.reason,
+    p_credit_id: i.creditId,
+    p_amount_cents: i.amountCents,
+    p_line: i.line,
+    p_total_cents: i.totalCents,
+    p_stage_due_at: iso(i.stageDueAt),
+    p_notifications: notificationsFor(
+      "dispute.credit",
+      [customer(ticket.customer_id)],
+      context(ticket, { reason: i.reason, amountCents: i.amountCents, invoiceNo: i.context.invoiceNo, creditCents: i.leftOverCents }),
+    ),
+  })) as { status: TicketStatus; applied_cents: number; left_over_cents: number; total_cents: number };
+}
+
+const correctInvoiceSchema = z.object({
+  invoiceId: z.uuid(),
+  reason: reasonText,
+  /** null: readings unchanged (adjustment lines only). */
+  readings: z
+    .custom<MeterReadingRow[]>((v) => Array.isArray(v) && v.length > 0)
+    .nullable()
+    .default(null),
+  invoice: z.custom<InvoicePayload | EstimatePayload>((v) => typeof v === "object" && v !== null, { message: "The invoice is required" }),
+  paidCreditId: z.uuid().nullable().default(null),
+  dueDate: isoDate,
+  stageDueAt: z.date(),
+  context: z
+    .object({ totals: z.string().default(""), creditCents: cents.default(0) })
+    .default({ totals: "", creditCents: 0 }),
+});
+
+/**
+ * 11.1, 11.3, 11.4 / rule 49: the owner corrects an issued invoice. The old one is
+ * cancelled (number voided, money paid kept as credit) and the corrected one, built
+ * by the billing engine (buildCorrectedInvoice), is issued with a new number.
+ */
+export async function correctInvoice(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof correctInvoiceSchema>) {
+  assertTransition("correctInvoice", actor, ticket);
+  const i = parse(correctInvoiceSchema, input);
+  return (await rpc("rpc_correct_issued_invoice", {
+    p_ticket_id: ticket.id,
+    p_actor_id: actorId(actor),
+    p_invoice_id: i.invoiceId,
+    p_reason: i.reason,
+    p_readings: i.readings,
+    p_invoice: i.invoice,
+    p_paid_credit_id: i.paidCreditId,
+    p_due_date: i.dueDate,
+    p_stage_due_at: iso(i.stageDueAt),
+    p_notifications: notificationsFor(
+      "invoice.corrected",
+      [customer(ticket.customer_id)],
+      context(ticket, {
+        reason: i.reason,
+        amountCents: i.invoice.total_cents,
+        dueDate: i.dueDate,
+        totals: i.context.totals,
+        creditCents: i.context.creditCents,
+      }),
+    ),
+  })) as { status: TicketStatus; invoice_id: string; invoice_no: string; old_invoice_id: string; old_invoice_no: string };
+}
+
+const photoRequestSchema = z.object({ note: z.string().trim().max(500).default("") });
+
+/** 11.4: the owner asks for a fresh live meter photo to check the disputed reading. */
+export async function requestDisputePhoto(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof photoRequestSchema>) {
+  assertTransition("requestDisputePhoto", actor, ticket);
+  const i = parse(photoRequestSchema, input);
+  return rpc("rpc_request_dispute_photo", {
+    p_ticket_id: ticket.id,
+    p_actor_id: actorId(actor),
+    p_note: i.note || null,
+    p_notifications: notificationsFor("dispute.photo_requested", [customer(ticket.customer_id)], context(ticket, { reason: i.note || undefined })),
   });
 }
 
-const resolveSchema = z.object({ outcome: z.enum(["RESOLVED", "REJECTED"]), resolution: reasonText, stageDueAt: z.date() });
+const disputePhotoSchema = z.object({
+  storagePath: z.string().min(1).max(300),
+  capturedAt: z.date().optional(),
+  readings: z
+    .array(z.object({ counter_type: z.enum(["BW", "COLOUR"]), value: z.number().int().nonnegative() }))
+    .min(1)
+    .max(2),
+});
 
-/** 11.4: the owner answers without cancelling the invoice (rejected, or resolved with a credit). */
-export async function resolveDispute(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof resolveSchema>) {
-  assertTransition("resolveDispute", actor, ticket);
-  const i = parse(resolveSchema, input);
-  return rpc("rpc_resolve_dispute", {
+/** 11.4: the customer's fresh live meter photo and the reading(s) it shows. */
+export async function sendDisputePhoto(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof disputePhotoSchema>) {
+  assertTransition("sendDisputePhoto", actor, ticket);
+  const i = parse(disputePhotoSchema, input);
+  return (await rpc("rpc_submit_dispute_photo", {
     p_ticket_id: ticket.id,
     p_actor_id: actorId(actor),
-    p_outcome: i.outcome,
-    p_resolution: i.resolution,
-    p_stage_due_at: iso(i.stageDueAt),
-    p_notifications: notificationsFor("dispute.resolved", [customer(ticket.customer_id)], context(ticket, { reason: i.resolution })),
-  });
+    p_photo: { storage_path: i.storagePath, captured_at: i.capturedAt ? iso(i.capturedAt) : null },
+    p_readings: i.readings,
+    p_notifications: notificationsFor("dispute.photo_received", [owner(ticket.owner_id)], context(ticket)),
+  })) as { photo_id: string; replayed: boolean };
 }
 
 const reasonSchema = z.object({ reason: reasonText });

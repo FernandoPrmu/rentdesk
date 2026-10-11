@@ -9,6 +9,7 @@ import { BackLink } from "@/components/portal/back-link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
+import { deniedNotFound } from "@/lib/audit/access";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { formatInvoiceMoney } from "@/lib/invoices/pdf/format";
@@ -29,12 +30,12 @@ const NEXT_STEP: Record<string, string> = {
 
 /** CP-05: one payment: status, bills, receipt and the slip (RLS: own payments). */
 export default async function CustomerPaymentPage({ params, searchParams }: PageProps<"/customer/payments/[id]">) {
-  await requireUser("CUSTOMER");
+  const user = await requireUser("CUSTOMER");
   const { id } = await params;
   const { sent } = await searchParams;
   if (!uuidSchema.safeParse(id).success) notFound();
   const p = await getPaymentDetail(await createClient(), id);
-  if (!p) notFound();
+  if (!p) return deniedNotFound(user, "payments", id, "/customer/payments/[id]");
   const receipt = p.receipts[0];
   return (
     <div className="space-y-4">

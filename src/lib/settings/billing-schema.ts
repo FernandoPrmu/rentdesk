@@ -4,10 +4,14 @@ import { type LateFeeSources, type ResolvedLateFee, resolveLateFee } from "@/lib
 import { rupees, wholeNumber } from "@/lib/forms";
 import { formatRupees } from "@/lib/money";
 
-/** Settings › Billing (PAY-13): the owner's default late fee. */
+/** Settings › Billing (PAY-13): the owner's default late fee; estimated invoices (spec 11.6, decision 22). */
 export const billingSettingsSchema = z
   .object({
     late_fee_enabled: z
+      .string()
+      .default("")
+      .transform((v) => v === "on"),
+    estimated_billing_enabled: z
       .string()
       .default("")
       .transform((v) => v === "on"),

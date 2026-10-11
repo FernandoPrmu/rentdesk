@@ -98,7 +98,7 @@ describe("calculateInvoice: basics", () => {
   it("puts every input and result in the calculation record", () => {
     const r = mono(2600);
     expect(r.calculation).toMatchObject({
-      engine: "rentdesk-billing-2",
+      engine: "rentdesk-billing-3",
       type: "NORMAL",
       cycles_covered: 1,
       terms: { commitment_cents: RS(5000), bw_included: 2000, bw_rate_cents: 250, colour_included: null, colour_rate_cents: null },

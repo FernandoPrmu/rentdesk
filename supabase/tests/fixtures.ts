@@ -250,12 +250,13 @@ export async function deleteFixture(db: pg.Client, f: Fixture) {
       "deposit_transactions",
       "invoice_pdf_versions",
       "invoice_lines",
+      // Disputes point at their credit and fresh photo (0027): photos, disputes, then credits.
+      "meter_photos",
+      "disputes",
       "credit_refunds",
       "credits",
-      "disputes",
       "payments",
       "meter_readings",
-      "meter_photos",
     ]) {
       await db.query(`delete from public.${table} where owner_id = any($1::uuid[])`, [owners]);
     }

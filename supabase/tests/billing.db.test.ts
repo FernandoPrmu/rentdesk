@@ -67,7 +67,7 @@ describe.skipIf(!DB_URL)("billing engine wiring (linked dev database, rolled bac
       await asPostgres(db);
       const inv = await db.query("select total_cents::int, cycles_covered, calculation from public.invoices where id = $1", [rows[0].r.invoice_id]);
       expect(inv.rows[0]).toMatchObject({ total_cents: 650_000, cycles_covered: 1 });
-      expect(inv.rows[0].calculation).toMatchObject({ engine: "rentdesk-billing-2", counters: [{ usage: 2600, excess: 600 }] });
+      expect(inv.rows[0].calculation).toMatchObject({ engine: "rentdesk-billing-3", counters: [{ usage: 2600, excess: 600 }] });
       expect(await count(db, "select 1 from public.invoice_lines where invoice_id = $1", [rows[0].r.invoice_id])).toBe(2);
     });
   });

@@ -205,10 +205,17 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
         "update public.credits set status = 'AVAILABLE', applied_to_invoice_id = null, applied_at = null where applied_to_invoice_id = any($1)",
         [invoices],
       );
+      // Disputes point at their credit and corrected invoice; their files and fresh meter photos go first.
+      const { rows: disputeFiles } = await db.query<{ attachment_path: string }>(
+        "select attachment_path from public.disputes where ticket_id = any($1) and attachment_path is not null",
+        [tickets],
+      );
+      if (disputeFiles.length > 0) await serviceClient().storage.from("dispute-files").remove(disputeFiles.map((r) => r.attachment_path));
+      await db.query("delete from public.meter_photos where dispute_id in (select id from public.disputes where ticket_id = any($1))", [tickets]);
+      await db.query("delete from public.disputes where ticket_id = any($1)", [tickets]);
       await db.query("delete from public.credits where agreement_id = any($1) or source_invoice_id = any($2)", [agreements, invoices]);
       await db.query("update public.billing_cycle_tickets set current_invoice_id = null where id = any($1)", [tickets]);
       await db.query("update public.meter_submissions set invoice_id = null where ticket_id = any($1)", [tickets]);
-      await db.query("delete from public.disputes where ticket_id = any($1)", [tickets]);
       await db.query("delete from public.invoices where id = any($1)", [invoices]);
       await db.query("delete from public.meter_photos where submission_id in (select id from public.meter_submissions where ticket_id = any($1))", [tickets]);
       await db.query("delete from public.meter_readings where submission_id in (select id from public.meter_submissions where ticket_id = any($1))", [tickets]);

@@ -51,6 +51,13 @@ export interface NotificationContext {
   balanceCents?: number;
   /** Kept as a customer credit. */
   creditCents?: number;
+  days?: number;
+  /** The start of a message (comments). */
+  preview?: string;
+  /** "Rs. 12,800.00 → Rs. 12,000.00" (corrected invoices). */
+  totals?: string;
+  /** When a daily job last succeeded (ISO timestamp). */
+  lastRunAt?: string;
 }
 
 type Template = (c: NotificationContext) => { title: string; body: string };
@@ -101,6 +108,14 @@ const TEMPLATES = {
   "ticket.escalated": (c) => ({
     title: `Owner has not acted for ${c.hours ?? "?"} hours`,
     body: `${c.customer ?? "A customer"}, ${machine(c)}, cycle ${c.cycleNo ?? "?"}: the owner has not reviewed it yet.`,
+  }),
+  "dispute.reminder": (c) => ({
+    title: `Dispute waiting for your answer: ${c.customer ?? "customer"}`,
+    body: `${bill(c)} for ${machine(c)} has been disputed for ${c.days ?? "?"} days. Please reject it, correct the bill or give a credit.`,
+  }),
+  "dispute.escalated": (c) => ({
+    title: `Dispute not answered for ${c.days ?? "?"} days`,
+    body: `${c.customer ?? "A customer"}, ${machine(c)}, cycle ${c.cycleNo ?? "?"}: the owner has not answered the dispute yet.`,
   }),
   "ticket.paused": (c) => ({
     title: `Billing paused: ${machine(c)}`,
@@ -190,7 +205,43 @@ const TEMPLATES = {
     body: `Your rental company paid back ${money(c)} of your credit.${reason(c)}`,
   }),
   "dispute.raised": (c) => ({ title: `Bill disputed: ${c.customer ?? "customer"}`, body: `${bill(c)} for ${machine(c)}.${reason(c)}` }),
-  "dispute.resolved": (c) => ({ title: `Answer to your dispute: ${machine(c)}`, body: `${c.reason ?? ""}`.trim() }),
+  "dispute.rejected": (c) => ({
+    title: `Dispute not accepted: ${machine(c)}`,
+    body: `${bill(c)} stays as it is${c.dueDate ? `; please pay by ${formatDate(c.dueDate)}` : ""}.${reason(c)}`,
+  }),
+  "dispute.credit": (c) => ({
+    title: `Credit given: ${money(c)}`,
+    body: `Your rental company took ${money(c)} off ${c.invoiceNo ? `bill ${c.invoiceNo}` : "your bill"} for ${machine(c)}.${credit(c)}${reason(c)}`,
+  }),
+  "dispute.photo_requested": (c) => ({
+    title: `Please send a fresh meter photo: ${machine(c)}`,
+    body: `To check your dispute, your rental company asks for a new photo of the meter.${reason(c)}`,
+  }),
+  "dispute.photo_received": (c) => ({
+    title: `Fresh meter photo received: ${c.customer ?? "customer"}`,
+    body: `The photo for the dispute on ${machine(c)} is ready to check.`,
+  }),
+  "invoice.corrected": (c) => ({
+    title: `Corrected bill: ${money(c)}`,
+    body: `${bill(c)} for ${machine(c)} replaces the earlier one (${c.totals ?? ""}). It is due on ${c.dueDate ? formatDate(c.dueDate) : "?"}.${credit(c)}${reason(c)}`,
+  }),
+  "invoice.resent": (c) => ({
+    title: `Your bill: ${money(c)}`,
+    body: `${bill(c)} for ${machine(c)}${c.dueDate ? `, due on ${formatDate(c.dueDate)}` : ""}. Sent again by your rental company.`,
+  }),
+  "comment.added": (c) => ({ title: `New message: ${c.customer ?? machine(c)}`, body: c.preview ?? "" }),
+  "meter.baseline": (c) => ({
+    title: `New meter recorded: ${machine(c)}`,
+    body: `Your rental company recorded a new starting reading (${c.changes ?? ""}). Next time, read the new meter.${reason(c)}`,
+  }),
+  "cron.failed": (c) => ({
+    title: "Daily job had problems",
+    body: `The daily job of ${c.dueDate ? formatDate(c.dueDate) : "today"} did not finish cleanly (${c.count ?? 0} ${c.count === 1 ? "error" : "errors"}). Check Admin › Daily job.`,
+  }),
+  "cron.missed": (c) => ({
+    title: "Daily job did not run",
+    body: `No daily job finished for ${c.hours ?? "?"} hours (last: ${c.lastRunAt ? formatDate(c.lastRunAt.slice(0, 10)) : "?"}). This run caught up; check the scheduler.`,
+  }),
   "ticket.cancelled": (c) => ({ title: `Billing ticket cancelled: ${machine(c)}`, body: `Cycle ${c.cycleNo ?? "?"} was cancelled.${reason(c)}` }),
   "ticket.reopened": (c) => ({ title: `Billing ticket reopened: ${machine(c)}`, body: `Cycle ${c.cycleNo ?? "?"} was reopened.${reason(c)}` }),
   "ticket.due_date_changed": (c) => ({
@@ -211,6 +262,9 @@ const TICKET_LINK: Record<RecipientRole, string> = {
   OWNER: "/owner/tickets/{entity_id}",
   ADMIN: "/admin/escalations",
 };
+
+/** Admin alerts about the daily job link to its log. */
+export const JOBS_LINK = "/admin/jobs";
 
 export function notificationsFor(
   event: NotificationEvent,

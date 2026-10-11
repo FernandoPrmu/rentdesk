@@ -2,6 +2,8 @@ import { formatCount, formatDateTime } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 import type { CustomerTicketDetail } from "@/lib/tickets/queries";
 
+import { describeBaseline, describeNote } from "./ticket-timeline";
+
 type Event = CustomerTicketDetail["events"][number];
 
 /** The customer's view of a ticket's history (CP-02): plain words, nothing internal (escalations are left out). */
@@ -24,12 +26,22 @@ function describe(e: Event): string | null {
       return "Your rental company entered the reading";
     case "PAYMENT":
       return m.reversed_cents ? "A payment was taken back" : "A payment was moved to another bill";
+    case "BASELINE":
+      return describeBaseline(m);
+    case "NOTE":
+      return describeNote(m, "customer");
     case "CORRECTION": {
+      if (m.replaces_invoice_no) return `Bill corrected: ${m.invoice_no} replaces ${m.replaces_invoice_no} (${formatRupees(Number(m.total_to ?? 0))})`;
       const changes = (m.changes as { counter_type: string; from: number; to: number }[] | undefined) ?? [];
       const text = changes.map((c) => `${c.counter_type === "BW" ? "B&W" : "Colour"} ${formatCount(c.from)} → ${formatCount(c.to)}`).join(", ");
       return `Reading corrected${text ? `: ${text}` : ""}`;
     }
     default:
+      if (e.from_status === "DISPUTED" && m.dispute_outcome === "REJECTED") return "Your dispute was not accepted";
+      if (e.from_status === "DISPUTED" && m.dispute_outcome === "CREDIT") return `Credit of ${formatRupees(Number(m.credit_cents ?? 0))} given`;
+      // A bill covered by a credit or a corrected bill closes in two steps (decision 48); only the second is news.
+      if ((m.dispute_outcome || m.replaces_invoice_id) && e.to_status === "PAYMENT_SUBMITTED") return null;
+      if ((m.dispute_outcome || m.replaces_invoice_id) && e.to_status === "CLOSED") return "Paid in full by credit";
       switch (e.to_status) {
         case "PENDING_OWNER_REVIEW":
           return m.estimated ? "Estimated bill prepared (no reading received)" : "Reading sent";

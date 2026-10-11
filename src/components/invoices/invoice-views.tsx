@@ -140,7 +140,15 @@ export function InvoicePdfButton({ invoice }: { invoice: Pick<InvoiceDetail, "id
 
 const KIND_LABEL = (i: InvoiceDetail) => (i.type === "ESTIMATED" ? "Estimated" : i.final ? "Final invoice" : null);
 
-export function InvoiceDetailView({ invoice, showCustomer }: { invoice: InvoiceDetail; showCustomer?: boolean }) {
+export function InvoiceDetailView({ invoice, showCustomer, hrefBase }: { invoice: InvoiceDetail; showCustomer?: boolean; hrefBase?: string }) {
+  const link = (i: { id: string; invoice_no: string | null }) =>
+    hrefBase ? (
+      <Link href={`${hrefBase}/${i.id}`} className="font-medium underline underline-offset-4">
+        {i.invoice_no}
+      </Link>
+    ) : (
+      <span className="font-medium">{i.invoice_no}</span>
+    );
   const kind = KIND_LABEL(invoice);
   const open = isOpen(invoice.status);
   return (
@@ -151,7 +159,13 @@ export function InvoiceDetailView({ invoice, showCustomer }: { invoice: InvoiceD
             <h1 className="text-2xl font-bold tracking-tight">{invoice.invoice_no}</h1>
             <InvoiceStatusBadge status={invoice.status} />
             {kind && <Badge variant="outline">{kind}</Badge>}
+            {invoice.replaces && <Badge variant="outline">Corrected</Badge>}
           </div>
+          {invoice.replaces && (
+            <p className="text-sm" data-testid="invoice-replaces">
+              Corrected bill: replaces {link(invoice.replaces)}, which was cancelled.
+            </p>
+          )}
           <div>
             <p className="text-sm text-muted-foreground">{open ? "To pay" : "Total"}</p>
             <p className="text-3xl font-bold tabular-nums" data-testid="invoice-amount">
@@ -185,8 +199,9 @@ export function InvoiceDetailView({ invoice, showCustomer }: { invoice: InvoiceD
             </dd>
           </dl>
           {invoice.status === "CANCELLED" && (
-            <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+            <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" data-testid="invoice-cancelled">
               Cancelled{invoice.cancel_reason ? `: ${invoice.cancel_reason}` : ""}. Do not pay this invoice.
+              {invoice.replacedBy && <> Pay the corrected bill {link(invoice.replacedBy)} instead.</>}
             </p>
           )}
           <InvoicePdfButton invoice={invoice} />

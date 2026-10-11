@@ -2,17 +2,24 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { addCommentAction, editCommentAction } from "@/app/actions/comments";
+import { CommentThread } from "@/components/comments/comment-thread";
+import { DisputeCard } from "@/components/disputes/dispute-card";
 import { BackLink } from "@/components/portal/back-link";
 import { CustomerTimeline } from "@/components/tickets/customer-timeline";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
+import { deniedNotFound } from "@/lib/audit/access";
 import { requireUser } from "@/lib/auth/current-user";
+import { listComments } from "@/lib/comments/service";
+import { getTicketDispute } from "@/lib/disputes/service";
 import { formatCount, formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 import { TICKET_STATUS_LABEL } from "@/lib/status-labels";
+import { createClient } from "@/lib/supabase/server";
 import { getCustomerTicket } from "@/lib/tickets/queries";
-import { isMeterStage } from "@/lib/tickets/states";
+import { isMeterStage, isPaymentStage } from "@/lib/tickets/states";
 import { currentDue, nextStep, ticketFlags } from "@/lib/tickets/view";
 import { cn } from "@/lib/utils";
 
@@ -21,14 +28,22 @@ export const metadata: Metadata = { title: "Billing ticket" };
 /**
  * The customer's billing ticket (CP-02): status, next step, deadline, the readings
  * sent and how they were reviewed (rejection reason, corrections as old → new), and
- * the history. Sending the reading is on the meter page. RLS: own tickets only.
+ * the history, the dispute and its answer, and the messages with the rental company
+ * (TKT-11). Sending the reading is on the meter page. RLS: own tickets only.
  */
 export default async function CustomerTicketPage({ params }: PageProps<"/customer/tickets/[id]">) {
   const user = await requireUser("CUSTOMER");
   const { id } = await params;
   if (!uuidSchema.safeParse(id).success) notFound();
   const ticket = await getCustomerTicket(id);
-  if (!ticket) notFound();
+  if (!ticket) return deniedNotFound(user, "billing_cycle_tickets", id, "/customer/tickets/[id]");
+  const supabase = await createClient();
+  const [dispute, comments, company] = await Promise.all([
+    getTicketDispute(supabase, ticket.id),
+    listComments(supabase, ticket.id),
+    supabase.from("owner_company_profiles").select("company_name").maybeSingle(),
+  ]);
+  const photoAsked = ticket.status === "DISPUTED" && dispute?.status === "OPEN" && dispute.photo && !dispute.photo.receivedAt;
   const step = nextStep(ticket);
   const due = currentDue(ticket);
   const overdue = ticketFlags(ticket, new Date()).overdue;
@@ -81,13 +96,25 @@ export default async function CustomerTicketPage({ params }: PageProps<"/custome
               Pay and send slip
             </Link>
           )}
+          {photoAsked && (
+            <Link href={`/customer/tickets/${ticket.id}/photo`} className={cn(buttonVariants(), "h-12 w-full text-base")} data-testid="send-fresh-photo">
+              Take a fresh meter photo
+            </Link>
+          )}
           {inv?.invoice_no && inv.id && (
             <Link href={`/customer/bills/${inv.id}`} className={cn(buttonVariants({ variant: "outline" }), "h-12 w-full text-base")}>
               View the bill and PDF
             </Link>
           )}
+          {!dispute && inv?.id && isPaymentStage({ status: ticket.status, statusBeforeOverdue: ticket.status_before_overdue }) && ticket.status !== "REOPENED" && (
+            <Link href={`/customer/bills/${inv.id}/dispute`} className={cn(buttonVariants({ variant: "ghost" }), "h-12 w-full text-base")}>
+              Something wrong with the bill? Dispute it
+            </Link>
+          )}
         </CardContent>
       </Card>
+
+      {dispute && <DisputeCard dispute={dispute} audience="customer" invoiceHref="/customer/bills" />}
 
       {latest && latest.status !== "REJECTED" && (
         <Card>
@@ -115,6 +142,20 @@ export default async function CustomerTicketPage({ params }: PageProps<"/custome
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardContent>
+          <CommentThread
+            ticketId={ticket.id}
+            viewerId={user.id}
+            comments={comments}
+            names={{ owner: company.data?.company_name ?? "Your rental company", customer: "You" }}
+            add={addCommentAction}
+            edit={editCommentAction}
+            readOnly={Boolean(ticket.paused_at)}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

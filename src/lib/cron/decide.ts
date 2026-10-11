@@ -2,6 +2,8 @@ import type { IsoDate } from "../agreements/cycle-calendar.ts";
 import { type LateFeeMode, lateFeeDue, type LateFeeSources, resolveLateFee } from "../billing/late-fee.ts";
 import {
   colomboDate,
+  disputeEscalation,
+  disputeReminders,
   dueReminder,
   meterDeadline,
   meterReminders,
@@ -82,8 +84,8 @@ export type Decision =
   /** Spec 11.6: estimated invoice (draft) for the owner. */
   | { kind: "ESTIMATE" }
   | { kind: "REMIND"; reminder: ReminderMilestone; recipient: "CUSTOMER" | "OWNER" }
-  /** Owner did not act on a reading or slip: admin alerted (level 2). */
-  | { kind: "ESCALATE_ADMIN"; hours: number }
+  /** Owner did not act on a reading, slip (hours) or dispute (days): admin alerted (level 2). */
+  | { kind: "ESCALATE_ADMIN"; hours: number; days?: number }
   | { kind: "LATE_FEE"; feeCents: number };
 
 /** Admin escalation level; 1 = owner alerted (customer stages). */
@@ -138,6 +140,16 @@ export function decideTicket(t: CronTicket, now: Date, platform: PlatformLateFee
     if (reminder) out.push({ kind: "REMIND", reminder, recipient: "OWNER" });
     if (t.escalation_level < ESCALATION_ADMIN && reached(ownerReviewEscalation(entered, s, kind), now)) {
       out.push({ kind: "ESCALATE_ADMIN", hours: kind === "REVIEW" ? s.review_escalation_hours : s.slip_review_escalation_hours });
+    }
+    return out;
+  }
+
+  // Rule 52: an open dispute waits for the owner; reminders, then the admin.
+  if (t.status === "DISPUTED") {
+    const reminder = dueReminder(disputeReminders(entered, s), t.reminder_count, now);
+    if (reminder) out.push({ kind: "REMIND", reminder, recipient: "OWNER" });
+    if (t.escalation_level < ESCALATION_ADMIN && reached(disputeEscalation(entered, s), now)) {
+      out.push({ kind: "ESCALATE_ADMIN", hours: s.dispute_escalation_days * 24, days: s.dispute_escalation_days });
     }
     return out;
   }

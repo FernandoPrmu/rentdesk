@@ -749,14 +749,30 @@ export type Database = {
       }
       disputes: {
         Row: {
+          attachment_mime: string | null
+          attachment_path: string | null
+          attachment_sha256: string | null
+          attachment_size: number | null
           created_at: string
+          credit_id: string | null
           customer_id: string
           id: string
+          idempotency_key: string | null
           invoice_id: string
+          new_due_date: string | null
           owner_id: string
+          photo_readings: Json | null
+          photo_received_at: string | null
+          photo_request_note: string | null
+          photo_requested_at: string | null
+          photo_requested_by: string | null
           raised_by: string
           reason: string
+          replacement_invoice_id: string | null
           resolution: string | null
+          resolution_kind:
+            | Database["public"]["Enums"]["dispute_resolution_kind"]
+            | null
           resolved_at: string | null
           resolved_by: string | null
           status: Database["public"]["Enums"]["dispute_status"]
@@ -764,14 +780,30 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attachment_mime?: string | null
+          attachment_path?: string | null
+          attachment_sha256?: string | null
+          attachment_size?: number | null
           created_at?: string
+          credit_id?: string | null
           customer_id: string
           id?: string
+          idempotency_key?: string | null
           invoice_id: string
+          new_due_date?: string | null
           owner_id: string
+          photo_readings?: Json | null
+          photo_received_at?: string | null
+          photo_request_note?: string | null
+          photo_requested_at?: string | null
+          photo_requested_by?: string | null
           raised_by: string
           reason: string
+          replacement_invoice_id?: string | null
           resolution?: string | null
+          resolution_kind?:
+            | Database["public"]["Enums"]["dispute_resolution_kind"]
+            | null
           resolved_at?: string | null
           resolved_by?: string | null
           status?: Database["public"]["Enums"]["dispute_status"]
@@ -779,14 +811,30 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attachment_mime?: string | null
+          attachment_path?: string | null
+          attachment_sha256?: string | null
+          attachment_size?: number | null
           created_at?: string
+          credit_id?: string | null
           customer_id?: string
           id?: string
+          idempotency_key?: string | null
           invoice_id?: string
+          new_due_date?: string | null
           owner_id?: string
+          photo_readings?: Json | null
+          photo_received_at?: string | null
+          photo_request_note?: string | null
+          photo_requested_at?: string | null
+          photo_requested_by?: string | null
           raised_by?: string
           reason?: string
+          replacement_invoice_id?: string | null
           resolution?: string | null
+          resolution_kind?:
+            | Database["public"]["Enums"]["dispute_resolution_kind"]
+            | null
           resolved_at?: string | null
           resolved_by?: string | null
           status?: Database["public"]["Enums"]["dispute_status"]
@@ -794,6 +842,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "disputes_credit_id_fkey"
+            columns: ["credit_id"]
+            isOneToOne: false
+            referencedRelation: "credits"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "disputes_customer_fkey"
             columns: ["customer_id", "owner_id"]
@@ -823,11 +878,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "disputes_photo_requested_by_fkey"
+            columns: ["photo_requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "disputes_raised_by_fkey"
             columns: ["raised_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "disputes_replacement_fkey"
+            columns: ["replacement_invoice_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id", "owner_id"]
           },
           {
             foreignKeyName: "disputes_resolved_by_fkey"
@@ -1118,6 +1187,7 @@ export type Database = {
           period_end: string
           period_start: string
           replaces_invoice_id: string | null
+          revision: number
           status: Database["public"]["Enums"]["invoice_status"]
           subtotal_cents: number
           ticket_id: string
@@ -1158,6 +1228,7 @@ export type Database = {
           period_end: string
           period_start: string
           replaces_invoice_id?: string | null
+          revision?: number
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_cents: number
           ticket_id: string
@@ -1198,6 +1269,7 @@ export type Database = {
           period_end?: string
           period_start?: string
           replaces_invoice_id?: string | null
+          revision?: number
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_cents?: number
           ticket_id?: string
@@ -1375,9 +1447,12 @@ export type Database = {
       meter_baselines: {
         Row: {
           agreement_id: string
+          carried_copies: number
           counter_type: Database["public"]["Enums"]["counter_type"]
           id: string
+          old_meter_reading: number | null
           owner_id: string
+          previous_value: number | null
           reason: string
           recorded_at: string
           recorded_by: string
@@ -1385,9 +1460,12 @@ export type Database = {
         }
         Insert: {
           agreement_id: string
+          carried_copies?: number
           counter_type: Database["public"]["Enums"]["counter_type"]
           id?: string
+          old_meter_reading?: number | null
           owner_id: string
+          previous_value?: number | null
           reason: string
           recorded_at?: string
           recorded_by?: string
@@ -1395,9 +1473,12 @@ export type Database = {
         }
         Update: {
           agreement_id?: string
+          carried_copies?: number
           counter_type?: Database["public"]["Enums"]["counter_type"]
           id?: string
+          old_meter_reading?: number | null
           owner_id?: string
+          previous_value?: number | null
           reason?: string
           recorded_at?: string
           recorded_by?: string
@@ -1440,11 +1521,12 @@ export type Database = {
           created_at: string
           delete_requested_at: string | null
           deleted_at: string | null
+          dispute_id: string | null
           expires_at: string | null
           id: string
           owner_id: string
           storage_path: string
-          submission_id: string
+          submission_id: string | null
           uploaded_at: string
         }
         Insert: {
@@ -1452,11 +1534,12 @@ export type Database = {
           created_at?: string
           delete_requested_at?: string | null
           deleted_at?: string | null
+          dispute_id?: string | null
           expires_at?: string | null
           id?: string
           owner_id: string
           storage_path: string
-          submission_id: string
+          submission_id?: string | null
           uploaded_at?: string
         }
         Update: {
@@ -1464,14 +1547,22 @@ export type Database = {
           created_at?: string
           delete_requested_at?: string | null
           deleted_at?: string | null
+          dispute_id?: string | null
           expires_at?: string | null
           id?: string
           owner_id?: string
           storage_path?: string
-          submission_id?: string
+          submission_id?: string | null
           uploaded_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "meter_photos_dispute_fkey"
+            columns: ["dispute_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "disputes"
+            referencedColumns: ["id", "owner_id"]
+          },
           {
             foreignKeyName: "meter_photos_owner_id_fkey"
             columns: ["owner_id"]
@@ -2360,6 +2451,8 @@ export type Database = {
       }
       platform_settings: {
         Row: {
+          dispute_escalation_days: number
+          dispute_reminder_days: number[]
           estimated_billing_enabled: boolean
           grace_period_days: number
           id: boolean
@@ -2394,6 +2487,8 @@ export type Database = {
           weekly_summary_dow: number
         }
         Insert: {
+          dispute_escalation_days?: number
+          dispute_reminder_days?: number[]
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -2428,6 +2523,8 @@ export type Database = {
           weekly_summary_dow?: number
         }
         Update: {
+          dispute_escalation_days?: number
+          dispute_reminder_days?: number[]
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -3109,25 +3206,34 @@ export type Database = {
       ticket_comments: {
         Row: {
           author_id: string
+          author_role: Database["public"]["Enums"]["user_role"] | null
           body: string
           created_at: string
+          edited_at: string | null
           id: string
+          idempotency_key: string | null
           owner_id: string
           ticket_id: string
         }
         Insert: {
           author_id: string
+          author_role?: Database["public"]["Enums"]["user_role"] | null
           body: string
           created_at?: string
+          edited_at?: string | null
           id?: string
+          idempotency_key?: string | null
           owner_id: string
           ticket_id: string
         }
         Update: {
           author_id?: string
+          author_role?: Database["public"]["Enums"]["user_role"] | null
           body?: string
           created_at?: string
+          edited_at?: string | null
           id?: string
+          idempotency_key?: string | null
           owner_id?: string
           ticket_id?: string
         }
@@ -3307,6 +3413,8 @@ export type Database = {
       }
       owner_settings_effective: {
         Row: {
+          dispute_escalation_days: number | null
+          dispute_reminder_days: number[] | null
           estimated_billing_enabled: boolean | null
           grace_period_days: number | null
           late_fee_cents: number | null
@@ -3346,6 +3454,16 @@ export type Database = {
     }
     Functions: {
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      rpc_add_ticket_comment: {
+        Args: {
+          p_actor_id: string
+          p_body: string
+          p_idempotency_key: string
+          p_notifications?: Json
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       rpc_apply_late_fee: {
         Args: {
           p_invoice_id: string
@@ -3370,6 +3488,13 @@ export type Database = {
           p_today: string
         }
         Returns: Json
+      }
+      rpc_carried_copies: {
+        Args: {
+          p_agreement_id: string
+          p_counter: Database["public"]["Enums"]["counter_type"]
+        }
+        Returns: number
       }
       rpc_claim_invoice_pdf: {
         Args: { p_invoice_id: string; p_now: string }
@@ -3396,6 +3521,21 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_correct_issued_invoice: {
+        Args: {
+          p_actor_id: string
+          p_due_date: string
+          p_invoice: Json
+          p_invoice_id: string
+          p_notifications?: Json
+          p_paid_credit_id: string
+          p_readings: Json
+          p_reason: string
+          p_stage_due_at: string
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       rpc_correct_meter_reading: {
         Args: {
           p_actor_id: string
@@ -3416,6 +3556,20 @@ export type Database = {
           p_now: string
           p_stage_due_at: string
           p_ticket_id: string
+        }
+        Returns: Json
+      }
+      rpc_credit_dispute: {
+        Args: {
+          p_actor_id: string
+          p_amount_cents: number
+          p_credit_id: string
+          p_line: Json
+          p_notifications?: Json
+          p_reason: string
+          p_stage_due_at: string
+          p_ticket_id: string
+          p_total_cents: number
         }
         Returns: Json
       }
@@ -3448,6 +3602,14 @@ export type Database = {
         }
         Returns: undefined
       }
+      rpc_cron_last_success: {
+        Args: { p_before: string; p_job: string; p_run_id: string }
+        Returns: string
+      }
+      rpc_cron_orphan_dispute_files: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
+      }
       rpc_cron_orphan_photos: {
         Args: { p_limit: number; p_now: string }
         Returns: Json
@@ -3471,6 +3633,10 @@ export type Database = {
       }
       rpc_cron_ticket_candidates: {
         Args: { p_after: string; p_limit: number }
+        Returns: Json
+      }
+      rpc_edit_ticket_comment: {
+        Args: { p_actor_id: string; p_body: string; p_comment_id: string }
         Returns: Json
       }
       rpc_escalate_ticket: {
@@ -3510,6 +3676,10 @@ export type Database = {
           p_reminder_no: number
           p_ticket_id: string
         }
+        Returns: Json
+      }
+      rpc_notify_admins_once: {
+        Args: { p_dedupe_key: string; p_notifications: Json }
         Returns: Json
       }
       rpc_notify_once: {
@@ -3561,6 +3731,8 @@ export type Database = {
       rpc_raise_dispute: {
         Args: {
           p_actor_id: string
+          p_attachment?: Json
+          p_idempotency_key: string
           p_notifications?: Json
           p_reason: string
           p_ticket_id: string
@@ -3622,6 +3794,16 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_record_meter_baseline: {
+        Args: {
+          p_actor_id: string
+          p_agreement_id: string
+          p_counters: Json
+          p_notifications?: Json
+          p_reason: string
+        }
+        Returns: Json
+      }
       rpc_record_receipt_pdf: {
         Args: {
           p_hash: string
@@ -3654,6 +3836,17 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_reject_dispute: {
+        Args: {
+          p_actor_id: string
+          p_due_date: string
+          p_notifications?: Json
+          p_reason: string
+          p_stage_due_at: string
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       rpc_reject_meter_submission: {
         Args: {
           p_actor_id: string
@@ -3666,19 +3859,25 @@ export type Database = {
         }
         Returns: Json
       }
-      rpc_reset_account_password: {
-        Args: { p_actor_id: string; p_target_id: string }
-        Returns: Json
-      }
-      rpc_resolve_dispute: {
+      rpc_request_dispute_photo: {
         Args: {
           p_actor_id: string
+          p_note: string
           p_notifications?: Json
-          p_outcome: Database["public"]["Enums"]["dispute_status"]
-          p_resolution: string
-          p_stage_due_at?: string
           p_ticket_id: string
         }
+        Returns: Json
+      }
+      rpc_resend_invoice_notification: {
+        Args: {
+          p_actor_id: string
+          p_invoice_id: string
+          p_notifications?: Json
+        }
+        Returns: Json
+      }
+      rpc_reset_account_password: {
+        Args: { p_actor_id: string; p_target_id: string }
         Returns: Json
       }
       rpc_return_machine: {
@@ -3753,6 +3952,16 @@ export type Database = {
           p_agreement_id: string
           p_settlement: Json
           p_today: string
+        }
+        Returns: Json
+      }
+      rpc_submit_dispute_photo: {
+        Args: {
+          p_actor_id: string
+          p_notifications?: Json
+          p_photo: Json
+          p_readings: Json
+          p_ticket_id: string
         }
         Returns: Json
       }
@@ -3852,12 +4061,14 @@ export type Database = {
         | "CANCELLED_INVOICE"
         | "ADVANCE"
         | "MANUAL"
+        | "DISPUTE"
       credit_status: "AVAILABLE" | "APPLIED" | "REFUNDED" | "VOID"
       deposit_transaction_kind:
         | "RECEIVED"
         | "DEDUCTED"
         | "REFUNDED"
         | "RETAINED"
+      dispute_resolution_kind: "REJECTED" | "CORRECTED" | "CREDIT" | "CANCELLED"
       dispute_status: "OPEN" | "RESOLVED" | "REJECTED"
       idempotency_scope:
         | "METER_SUBMISSION"
@@ -4088,6 +4299,7 @@ export const Constants = {
         "CANCELLED_INVOICE",
         "ADVANCE",
         "MANUAL",
+        "DISPUTE",
       ],
       credit_status: ["AVAILABLE", "APPLIED", "REFUNDED", "VOID"],
       deposit_transaction_kind: [
@@ -4096,6 +4308,7 @@ export const Constants = {
         "REFUNDED",
         "RETAINED",
       ],
+      dispute_resolution_kind: ["REJECTED", "CORRECTED", "CREDIT", "CANCELLED"],
       dispute_status: ["OPEN", "RESOLVED", "REJECTED"],
       idempotency_scope: [
         "METER_SUBMISSION",

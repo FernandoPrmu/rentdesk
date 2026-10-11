@@ -1,6 +1,6 @@
 import { calculateInvoice } from "../billing/invoice.ts";
 import { addLateFee } from "../billing/late-fee.ts";
-import { admins, customer, type NotificationContext, notificationsFor, owner } from "../notifications/service.ts";
+import { admins, customer, JOBS_LINK, type NotificationContext, notificationsFor, owner } from "../notifications/service.ts";
 import { colomboDate, lastDayBefore, meterDeadline, reviewDeadline } from "../tickets/deadlines.ts";
 import {
   createEstimate,
@@ -42,6 +42,8 @@ export interface PhotoStorage {
   removeMeterPhotos(paths: string[]): Promise<void>;
   /** Deletes payment slip files never sent with a payment (decision 41); optional in unit tests. */
   removePaymentSlips?(paths: string[]): Promise<void>;
+  /** Deletes dispute files never sent with a dispute (rule 47); optional in unit tests. */
+  removeDisputeFiles?(paths: string[]): Promise<void>;
 }
 
 /** Makes one pending invoice PDF (src/lib/invoices/pdf-job.ts); optional so unit tests can leave it out. */
@@ -133,7 +135,11 @@ const REMINDER_EVENT = {
   PAYMENT_DUE_SOON: "payment.due_soon",
   PAYMENT_DUE_TODAY: "payment.due_today",
   PAYMENT_OVERDUE: "payment.overdue",
+  DISPUTE: "dispute.reminder",
 } as const;
+
+/** 11.7: the admin is alerted when no run finished for this long (rule 53). */
+export const MISSED_RUN_HOURS = 30;
 
 /** The estimated invoice for a ticket (commitment only, credits auto-applied: rule 13). */
 export function buildEstimate(t: CronTicket): EstimatePayload {
@@ -143,6 +149,7 @@ export function buildEstimate(t: CronTicket): EstimatePayload {
     CANCELLED_INVOICE: "paid on a cancelled invoice",
     ESTIMATE_RECONCILIATION: "estimate",
     MANUAL: "credit",
+    DISPUTE: "dispute credit",
   };
   const result = calculateInvoice({
     terms: {
@@ -206,8 +213,20 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
   }
 
   let fatal: unknown = null;
+  let adminIds: string[] = [];
   try {
     const ctx = (await rpc("rpc_cron_context", {})) as { admin_ids: string[]; platform_late_fee: PlatformLateFee };
+    adminIds = ctx.admin_ids;
+
+    // 11.7 / rule 53: the scheduler failed or ran late: tell the admins (once a day). This run catches up.
+    const last = (await rpc("rpc_cron_last_success", { p_job: "daily", p_before: now.toISOString(), p_run_id: begun.run_id })) as string | null;
+    const gapHours = typeof last === "string" ? Math.floor((now.getTime() - Date.parse(last)) / 3_600_000) : 0;
+    if (typeof last === "string" && gapHours >= MISSED_RUN_HOURS && adminIds.length > 0) {
+      await rpc("rpc_notify_admins_once", {
+        p_dedupe_key: `cron-missed:${today}`,
+        p_notifications: notificationsFor("cron.missed", admins(adminIds), { hours: gapHours, lastRunAt: last }, { link: JOBS_LINK }),
+      });
+    }
 
     // h. Pause / resume (TKT-12). First, so the sweep below sees the right state.
     await syncPauses(rpc, now, null, batch, counts, record, checkTime);
@@ -309,6 +328,20 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
       }
     }
 
+    // Dispute files uploaded but never sent with a dispute, older than 2 days (rule 47). One batch per run.
+    if (storage.removeDisputeFiles) {
+      checkTime();
+      const files = (await rpc("rpc_cron_orphan_dispute_files", { p_now: now.toISOString(), p_limit: batch })) as string[];
+      if (files.length > 0) {
+        try {
+          await storage.removeDisputeFiles(files);
+          counts.slipsDeleted += files.length;
+        } catch (error) {
+          record(errorEntry("orphan dispute files", undefined, error));
+        }
+      }
+    }
+
     // Weekly overdue summary to owners (spec 5.4, 8.3).
     checkTime();
     const summaries = (await rpc("rpc_cron_overdue_summaries", { p_today: today })) as {
@@ -385,6 +418,17 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
 
   const status: DailyJobResult["status"] = fatal ? "FAILED" : remaining || errors.length > 0 ? "PARTIAL" : "SUCCESS";
   await rpc("rpc_cron_finish_run", { p_run_id: begun.run_id, p_status: status, p_counts: counts, p_errors: errors, p_remaining: remaining });
+  // 11.7 / rule 53: a failed run, or one with errors, alerts the admins (work left over for the next run does not).
+  if ((fatal || errors.length > 0) && adminIds.length > 0) {
+    try {
+      await rpc("rpc_notify_admins_once", {
+        p_dedupe_key: `cron-failed:${begun.run_id}`,
+        p_notifications: notificationsFor("cron.failed", admins(adminIds), { dueDate: today, count: errors.length }, { link: JOBS_LINK }),
+      });
+    } catch (error) {
+      console.error("[daily job] admin alert:", error instanceof Error ? error.message : error);
+    }
+  }
   return { runId: begun.run_id, status, counts, errors, remaining };
 }
 
@@ -433,6 +477,7 @@ async function applyDecisions(
             [recipient],
             ticketContext(t, {
               byDate,
+              days: d.reminder.kind === "DISPUTE" ? d.reminder.dayOffset : undefined,
               amountCents: inv ? inv.total_cents - inv.amount_paid_cents : undefined,
               dueDate: inv?.due_date ?? undefined,
               invoiceNo: inv?.invoice_no,
@@ -448,8 +493,10 @@ async function applyDecisions(
           p_status: t.status,
           p_level: ESCALATION_ADMIN,
           p_now: now.toISOString(),
-          p_reason: `Owner has not acted for ${d.hours} hours`,
-          p_notifications: notificationsFor("ticket.escalated", admins(adminIds), ticketContext(t, { hours: d.hours })),
+          p_reason: d.days ? `Dispute not answered for ${d.days} days` : `Owner has not acted for ${d.hours} hours`,
+          p_notifications: d.days
+            ? notificationsFor("dispute.escalated", admins(adminIds), ticketContext(t, { days: d.days, invoiceNo: inv?.invoice_no }))
+            : notificationsFor("ticket.escalated", admins(adminIds), ticketContext(t, { hours: d.hours })),
         });
         if (done(r)) counts.escalated += 1;
         break;

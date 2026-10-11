@@ -90,9 +90,19 @@ export interface CustomerTicketRow extends TicketView {
   machine: string;
   /** Highest cycle with a confirmed reading for this agreement (0 = none yet). */
   last_confirmed_cycle: number;
+  /** An open dispute on it waits for a fresh meter photo (11.4). */
+  photo_requested?: boolean;
 }
 
 export type CustomerTask =
+  | {
+      /** 11.4: the rental company asked for a fresh meter photo to check a dispute. */
+      kind: "PHOTO";
+      ticketId: string;
+      machine: string;
+      dueDate: null;
+      overdue: false;
+    }
   | {
       kind: "METER";
       ticketId: string;
@@ -153,6 +163,8 @@ export function customerHome(rows: CustomerTicketRow[], now: Date): CustomerHome
         dueDate: r.invoice.due_date,
         overdue: ticketFlags(r, now).overdue,
       });
+    } else if (r.status === "DISPUTED" && r.photo_requested) {
+      tasks.push({ kind: "PHOTO", ticketId: r.id, machine: r.machine, dueDate: null, overdue: false });
     } else if (WAITING_LABEL[r.status]) {
       waiting.push({ ticketId: r.id, machine: r.machine, label: WAITING_LABEL[r.status]! });
     }

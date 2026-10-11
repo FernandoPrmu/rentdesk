@@ -170,12 +170,51 @@ export const ACTIONS = {
     to: ["DISPUTED"],
     reason: true,
   },
-  resolveDispute: {
-    label: "Answer the dispute",
+  /** 11.4 / rule 47: the invoice stands; the due date may be moved. */
+  rejectDispute: {
+    label: "Reject the dispute",
     actors: ["OWNER"],
     from: ["DISPUTED"],
     to: ["AWAITING_PAYMENT"],
     reason: true,
+  },
+  /**
+   * 11.4 / rule 48: a credit taken off the bill. When it covers the bill the rpc
+   * closes the ticket along the payment edges (app.close_if_settled).
+   */
+  creditDispute: {
+    label: "Give a credit",
+    actors: ["OWNER"],
+    from: ["DISPUTED"],
+    to: ["AWAITING_PAYMENT"],
+    reason: true,
+  },
+  /**
+   * 11.1, 11.3, 11.4 / rule 49: cancel and reissue the invoice with a corrected reading
+   * or adjustment lines (a closed ticket is reopened first). The rpc moves the ticket
+   * to Awaiting payment along the allowed edges (it may already be there), and closes
+   * it when credits cover the corrected bill.
+   */
+  correctInvoice: {
+    label: "Correct the invoice",
+    actors: ["OWNER"],
+    from: ["AWAITING_PAYMENT", "PARTIALLY_PAID", "DISPUTED", "REOPENED"],
+    overdueFrom: PAYMENT_STAGE,
+    to: [],
+    reason: true,
+  },
+  /** 11.4: the owner asks for a fresh live meter photo while the dispute is open. */
+  requestDisputePhoto: {
+    label: "Ask for a fresh meter photo",
+    actors: ["OWNER"],
+    from: ["DISPUTED"],
+    to: [],
+  },
+  sendDisputePhoto: {
+    label: "Send a fresh meter photo",
+    actors: ["CUSTOMER"],
+    from: ["DISPUTED"],
+    to: [],
   },
   cancelTicket: {
     label: "Cancel the ticket",

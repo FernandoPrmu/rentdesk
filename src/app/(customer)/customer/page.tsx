@@ -1,4 +1,4 @@
-import { CircleCheck, Clock, Gauge, Receipt, TriangleAlert } from "lucide-react";
+import { Camera, CircleCheck, Clock, Gauge, Receipt, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -73,6 +73,24 @@ export default async function CustomerHomePage() {
 }
 
 function TaskCard({ task }: { task: CustomerTask }) {
+  if (task.kind === "PHOTO") {
+    return (
+      <Card data-testid="task-photo">
+        <CardContent className="space-y-3">
+          <div className="flex items-start gap-3">
+            <Camera className="mt-0.5 size-8 shrink-0 text-primary" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-lg font-semibold">Send a fresh meter photo</p>
+              <p className="text-sm text-muted-foreground">{task.machine} · your rental company needs it to check your dispute</p>
+            </div>
+          </div>
+          <Link href={`/customer/tickets/${task.ticketId}/photo`} className={cn(buttonVariants(), "h-12 w-full text-base")}>
+            Take the photo
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
   const meter = task.kind === "METER";
   const Icon = meter ? Gauge : Receipt;
   return (

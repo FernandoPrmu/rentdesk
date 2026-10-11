@@ -8,7 +8,7 @@ import {
   type MachineType,
   type Terms,
 } from "./invoice.ts";
-import { type CounterType, type KnownReading, previousReading } from "./usage.ts";
+import { carriedCopies, type CounterType, type KnownReading, previousReading } from "./usage.ts";
 
 /**
  * Builds the rpc_submit_meter_reading payload (readings + draft invoice) for a
@@ -89,6 +89,7 @@ export function readingInputs(
       current,
       counterMax: c.counterMax,
       history: c.history,
+      carried: carriedCopies(c.known),
     };
   }
   if (machineType === "MONO" && typed.COLOUR !== undefined && typed.COLOUR !== null) {

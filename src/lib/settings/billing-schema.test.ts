@@ -4,13 +4,16 @@ import { billingSettingsSchema, describeLateFee, describeOwnerDefault } from "./
 
 describe("Settings › Billing (PAY-13)", () => {
   it("parses the checkbox, rupees and grace days", () => {
-    expect(billingSettingsSchema.parse({ late_fee_enabled: "on", late_fee: "500", grace_period_days: "7" })).toEqual({
+    expect(billingSettingsSchema.parse({ late_fee_enabled: "on", late_fee: "500", grace_period_days: "7", estimated_billing_enabled: "on" })).toEqual({
       late_fee_enabled: true,
+      estimated_billing_enabled: true,
       late_fee: 50_000,
       grace_period_days: 7,
     });
     // An unticked checkbox is not sent at all.
-    expect(billingSettingsSchema.parse({ late_fee: "0", grace_period_days: "3" }).late_fee_enabled).toBe(false);
+    const off = billingSettingsSchema.parse({ late_fee: "0", grace_period_days: "3" });
+    expect(off.late_fee_enabled).toBe(false);
+    expect(off.estimated_billing_enabled).toBe(false);
   });
 
   it("needs an amount when the late fee is on", () => {

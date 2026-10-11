@@ -65,8 +65,30 @@ const CASES: Record<Exclude<TicketAction, "paymentWithdrawn">, { call: (rpc: Rpc
   },
   markOverdue: { call: (r, a, t) => T.markOverdue(r, a, t, { now: NOW, reminderNo: 0, escalationLevel: 1 }), rpc: "rpc_mark_ticket_overdue" },
   clearOverdue: { call: (r, a, t) => T.clearOverdue(r, a, t, { reason: "Agreed by phone", dueDate: "2026-10-20", stageDueAt: NOW }), rpc: "rpc_transition_ticket" },
-  raiseDispute: { call: (r, a, t) => T.raiseDispute(r, a, t, { reason: "Too many copies" }), rpc: "rpc_raise_dispute" },
-  resolveDispute: { call: (r, a, t) => T.resolveDispute(r, a, t, { outcome: "REJECTED", resolution: "Reading checked", stageDueAt: NOW }), rpc: "rpc_resolve_dispute" },
+  raiseDispute: { call: (r, a, t) => T.raiseDispute(r, a, t, { idempotencyKey: ID, reason: "Too many copies" }), rpc: "rpc_raise_dispute" },
+  rejectDispute: { call: (r, a, t) => T.rejectDispute(r, a, t, { reason: "Reading checked", dueDate: "2026-10-20", stageDueAt: NOW }), rpc: "rpc_reject_dispute" },
+  creditDispute: {
+    call: (r, a, t) =>
+      T.creditDispute(r, a, t, {
+        reason: "Goodwill",
+        creditId: ID,
+        amountCents: 100_000,
+        line: { line_type: "CREDIT", description: "Credit given (dispute)", quantity: 1, rate_cents: -100_000, amount_cents: -100_000, credit_id: ID },
+        totalCents: 400_000,
+        leftOverCents: 0,
+        stageDueAt: NOW,
+      }),
+    rpc: "rpc_credit_dispute",
+  },
+  correctInvoice: {
+    call: (r, a, t) => T.correctInvoice(r, a, t, { invoiceId: ID, reason: "Reading confirmed by mistake", invoice, dueDate: "2026-10-20", stageDueAt: NOW }),
+    rpc: "rpc_correct_issued_invoice",
+  },
+  requestDisputePhoto: { call: (r, a, t) => T.requestDisputePhoto(r, a, t, { note: "Please photograph the counter page" }), rpc: "rpc_request_dispute_photo" },
+  sendDisputePhoto: {
+    call: (r, a, t) => T.sendDisputePhoto(r, a, t, { storagePath: `${OWNER}/${ID}/f.jpg`, readings: [{ counter_type: "BW", value: 12 }] }),
+    rpc: "rpc_submit_dispute_photo",
+  },
   cancelTicket: { call: (r, a, t) => T.cancelTicket(r, a, t, { reason: "Created in error" }), rpc: "rpc_transition_ticket" },
   reopenTicket: { call: (r, a, t) => T.reopenTicket(r, a, t, { reason: "Cheque returned" }), rpc: "rpc_transition_ticket" },
   requestPaymentAgain: { call: (r, a, t) => T.requestPaymentAgain(r, a, t, { stageDueAt: NOW, amountCents: 1, dueDate: "2026-10-20" }), rpc: "rpc_transition_ticket" },

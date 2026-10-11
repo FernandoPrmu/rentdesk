@@ -6,7 +6,24 @@ import { addDays, type FinalCycle } from "../../src/lib/agreements/cycle-calenda
 import type { Terms } from "../../src/lib/billing/invoice.ts";
 import { buildMeterSubmission, type MeterContext } from "../../src/lib/billing/meter-invoice.ts";
 import { buildReturnInvoice, type ReturnContext } from "../../src/lib/billing/return-invoice.ts";
-import type { CounterType } from "../../src/lib/billing/usage.ts";
+import type { CounterType, KnownReading } from "../../src/lib/billing/usage.ts";
+
+/**
+ * The previous reading (app.last_known_reading) and the copies carried from a
+ * replaced meter (app.carried_copies) as KnownReading entries: a baseline entry
+ * with the same value carries the copies (it wins the tie, like in the database).
+ */
+async function knownFromDb(db: pg.Client, agreementId: string, counter: CounterType): Promise<KnownReading[]> {
+  const { rows } = await db.query<{ v: string; c: string }>("select app.last_known_reading($1, $2)::text as v, app.carried_copies($1, $2)::text as c", [
+    agreementId,
+    counter,
+  ]);
+  const value = Number(rows[0].v);
+  const carried = Number(rows[0].c);
+  const known: KnownReading[] = [{ value, at: "2026-01-01T00:00:00Z", source: "READING" }];
+  if (carried > 0) known.push({ value, at: "2026-01-01T00:00:00Z", source: "BASELINE", carried });
+  return known;
+}
 
 /**
  * Builds rpc_return_machine payloads in the database tests: the facts come from
@@ -54,9 +71,8 @@ export async function returnContextFromDb(db: pg.Client, agreementId: string, to
   const machineType = info[0].type as Terms["machineType"];
   const counters: ReturnContext["counters"] = {};
   for (const counter of (machineType === "COLOUR" ? ["BW", "COLOUR"] : ["BW"]) as CounterType[]) {
-    const { rows } = await db.query<{ v: string }>("select app.last_known_reading($1, $2)::text as v", [agreementId, counter]);
     counters[counter] = {
-      known: [{ value: Number(rows[0].v), at: "2026-01-01T00:00:00Z", source: "READING" }],
+      known: await knownFromDb(db, agreementId, counter),
       counterMax: counter === "BW" ? info[0].bw_max : info[0].colour_max,
       history: [],
     };
@@ -69,9 +85,18 @@ export async function returnContextFromDb(db: pg.Client, agreementId: string, to
     dueDays: t.due_days,
     final,
     counters,
-    estimateCredits: [],
+    estimateCredits: await estimateCreditsFromDb(db, agreementId, final.cycleNo),
     credits: credits[0].c.map((c) => ({ id: c.id, amountCents: Number(c.available_cents) })),
   };
+}
+
+/** Issued estimated invoices the next reading credits (app.expected_estimate_credits, like the TypeScript loader). */
+async function estimateCreditsFromDb(db: pg.Client, agreementId: string, beforeCycle: number) {
+  const { rows } = await db.query<{ e: { invoice_no: string | null; cycle_no: number; amount_cents: number }[] }>(
+    "select app.expected_estimate_credits($1, $2) as e",
+    [agreementId, beforeCycle],
+  );
+  return rows[0].e.map((x) => ({ invoiceNo: x.invoice_no, cycleNo: x.cycle_no, amountCents: Number(x.amount_cents) }));
 }
 
 /** Engine context for a ticket's meter reading, from the database (like loadMeterContext). */
@@ -92,8 +117,7 @@ export async function meterContextFromDb(
   const t = rows[0];
   const counters: MeterContext["counters"] = {};
   for (const counter of (t.machine_type === "COLOUR" ? ["BW", "COLOUR"] : ["BW"]) as CounterType[]) {
-    const { rows: r } = await db.query<{ v: string }>("select app.last_known_reading($1, $2)::text as v", [t.agreement_id, counter]);
-    counters[counter] = { known: [{ value: Number(r[0].v), at: "2026-01-01T00:00:00Z", source: "READING" }], counterMax: null, history: [] };
+    counters[counter] = { known: await knownFromDb(db, t.agreement_id, counter), counterMax: null, history: [] };
   }
   const excluded = options.creditsExcluded ?? [];
   const { rows: credits } = await db.query<{ c: { id: string; available_cents: number }[] }>("select app.available_credits($1, $2) as c", [
@@ -104,7 +128,7 @@ export async function meterContextFromDb(
     terms: { machineType: t.machine_type, commitmentCents: t.c, bwIncluded: t.bi, bwRateCents: t.br, colourIncluded: t.ci, colourRateCents: t.cr },
     cyclesCovered: t.cycle_no - t.last_confirmed,
     counters,
-    estimateCredits: [],
+    estimateCredits: await estimateCreditsFromDb(db, t.agreement_id, t.cycle_no),
     credits: credits[0].c.filter((c) => !excluded.includes(c.id)).map((c) => ({ id: c.id, amountCents: Number(c.available_cents) })),
     creditsExcluded: excluded,
   };

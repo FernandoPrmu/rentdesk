@@ -5,6 +5,8 @@ import { refresh } from "next/cache";
 import { type ActionResult, fail } from "@/lib/action-result";
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { currentActor } from "@/lib/auth/current-user";
+import { type OwnerDisputeAction, ownerDisputeAction } from "@/lib/disputes/service";
+import { type CorrectionInput, submitCorrection } from "@/lib/invoices/correction";
 import { setInvoiceCredit } from "@/lib/invoices/credits";
 import type { ReadingErrors } from "@/lib/meter/readings";
 import { confirmReview, correctReview, enterReadingForCustomer, rejectReview } from "@/lib/meter/service";
@@ -61,4 +63,17 @@ export async function ticketAction(ticketId: string, input: OwnerTicketAction): 
   const actor = await currentActor("OWNER");
   if (!uuidSchema.safeParse(ticketId).success) return fail("This ticket was not found.");
   return done(await ownerTicketAction(actor, ticketId, input));
+}
+
+/** 11.4: reject a dispute, give a credit, or ask for a fresh meter photo (decisions 47-48). */
+export async function disputeAction(ticketId: string, input: OwnerDisputeAction): Promise<ActionResult<{ status?: string }>> {
+  const actor = await currentActor("OWNER");
+  if (!uuidSchema.safeParse(ticketId).success) return fail("This ticket was not found.");
+  return done(await ownerDisputeAction(actor, ticketId, input));
+}
+
+/** 11.1, 11.3, 11.4: cancel and reissue the bill with a corrected reading or adjustment lines (decision 49). */
+export async function correctInvoiceAction(input: CorrectionInput): Promise<ActionResult<{ invoiceNo: string; invoiceId: string }>> {
+  const actor = await currentActor("OWNER");
+  return done(await submitCorrection(actor, input));
 }

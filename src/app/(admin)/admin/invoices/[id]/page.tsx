@@ -21,7 +21,7 @@ export default async function AdminInvoicePage({ params }: PageProps<"/admin/inv
   return (
     <div className="max-w-3xl space-y-4">
       <BackLink href="/admin/invoices" label="Invoices" />
-      <InvoiceDetailView invoice={invoice} showCustomer />
+      <InvoiceDetailView invoice={invoice} showCustomer hrefBase="/admin/invoices" />
       <section className="space-y-2" aria-labelledby="admin-invoice-payments">
         <h2 id="admin-invoice-payments" className="text-lg font-semibold">Payments</h2>
         <PaymentList payments={payments} hrefBase={null} audience="OWNER" empty="No payments for this invoice." />

@@ -36,6 +36,7 @@ const CREDIT_LABEL: Record<string, string> = {
   CANCELLED_INVOICE: "paid on a cancelled invoice",
   ESTIMATE_RECONCILIATION: "estimate",
   MANUAL: "credit",
+  DISPUTE: "dispute credit",
 };
 
 function fail(what: string, message?: string): never {
@@ -70,7 +71,7 @@ async function loadCounters(
       )
       .eq("status", "CONFIRMED")
       .eq("ticket.agreement_id", agreementId),
-    client.from("meter_baselines").select("counter_type, value, recorded_at").eq("agreement_id", agreementId),
+    client.from("meter_baselines").select("counter_type, value, recorded_at, carried_copies").eq("agreement_id", agreementId),
   ]);
   if (agreement.error) fail("agreement", agreement.error.message);
   if (machine.error) fail("machine", machine.error.message);
@@ -92,7 +93,7 @@ async function loadCounters(
       if (r) known.push({ value: r.current_value, at: s.reviewed_at ?? s.submitted_at, source: "READING" });
     }
     for (const b of baselines.data.filter((x) => x.counter_type === counter)) {
-      known.push({ value: b.value, at: b.recorded_at, source: "BASELINE" });
+      known.push({ value: b.value, at: b.recorded_at, source: "BASELINE", carried: b.carried_copies });
     }
 
     counters[counter] = {
@@ -135,7 +136,8 @@ export async function loadAvailableCredits(client: Client, customerId: string, e
     .from("credits")
     .select("id, kind, amount_cents, refunded_cents, created_at")
     .eq("customer_id", customerId)
-    .eq("status", "AVAILABLE")
+    // APPLIED too: a credit used up by the invoice being recalculated (excludeInvoiceId) is free again.
+    .in("status", ["AVAILABLE", "APPLIED"])
     .order("created_at")
     .order("id");
   if (error) fail("credits", error.message);
@@ -197,6 +199,19 @@ export async function loadMeterContext(
     credits,
     creditsExcluded: options.creditsExcluded ?? [],
   };
+}
+
+/** The counters of an agreement as the next bill will see them (previous reading, carried copies): the baseline screen. */
+export async function loadAgreementCounters(client: Client, agreementId: string) {
+  const { data: agreement, error } = await client
+    .from("rental_agreements")
+    .select("id, machine_id, machine:machines!rental_agreements_machine_fkey(type)")
+    .eq("id", agreementId)
+    .maybeSingle();
+  if (error) fail("agreement", error.message);
+  if (!agreement) throw new BillingError("INVALID_INPUT", "Agreement not found");
+  const { counters } = await loadCounters(client, agreement.id, agreement.machine_id, agreement.machine.type);
+  return { machineType: agreement.machine.type, counters };
 }
 
 /** The final invoice of a return on `today` (Asia/Colombo). */

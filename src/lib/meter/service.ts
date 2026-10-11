@@ -182,8 +182,8 @@ export const customerReadingSchema = z.object({
   capturedAt: z.iso.datetime({ offset: true }).nullable().default(null),
 });
 
-/** The photo the browser uploaded: in this ticket's folder, a JPEG, not too large (rule 30). */
-async function checkPhoto(admin: Admin, t: TicketRow, path: string): Promise<string | null> {
+/** The photo the browser uploaded: in this ticket's folder, a JPEG, not too large (rule 30). Also the fresh photo of a dispute. */
+export async function checkMeterPhotoFile(admin: Admin, t: { owner_id: string; id: string }, path: string): Promise<string | null> {
   if (!new RegExp(`^${t.owner_id}/${t.id}/[0-9a-f-]{36}\\.jpg$`).test(path)) return "The photo is not for this ticket.";
   const { data, error } = await admin.storage.from(PHOTO_BUCKET).download(path);
   if (error || !data) return "The photo did not arrive. Please try again.";
@@ -209,7 +209,7 @@ export async function submitCustomerReading(
     const { data: earlier } = await admin.from("meter_submissions").select("id, ticket_id").eq("idempotency_key", i.idempotencyKey).maybeSingle();
     if (earlier) return earlier.ticket_id === t.id ? ok({ replayed: true }) : fail("Please reload the page and try again.");
 
-    const photoProblem = await checkPhoto(admin, t, i.photoPath);
+    const photoProblem = await checkMeterPhotoFile(admin, t, i.photoPath);
     if (photoProblem) return fail(photoProblem);
 
     const context = await loadMeterContext(admin, t.id);

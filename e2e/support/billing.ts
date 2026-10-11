@@ -137,3 +137,10 @@ export async function invoiceState(invoiceId: string): Promise<{ status: string;
   const row = check(await service().from("invoices").select("status, amount_paid_cents, total_cents").eq("id", invoiceId).single(), "invoice state")!;
   return { status: row.status, paid: row.amount_paid_cents, total: row.total_cents };
 }
+
+/** Audit entries of an action on an entity by an actor (11.7: denied access is logged). */
+export async function auditCount(action: string, entityId: string, actorId: string): Promise<number> {
+  const { count, error } = await service().from("audit_logs").select("id", { count: "exact", head: true }).eq("action", action).eq("entity_id", entityId).eq("actor_id", actorId);
+  if (error) throw new Error(`e2e audit: ${error.message}`);
+  return count ?? 0;
+}

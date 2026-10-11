@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 
 import { signInCached } from "./support/auth";
-import { assignMachine, createMachine, openFirstCycle } from "./support/billing";
+import { assignMachine, auditCount, createMachine, openFirstCycle } from "./support/billing";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 
 // Ticket messages at 360 px (TKT-11, CP-06; decision 50): the customer writes (camera
@@ -14,8 +14,10 @@ const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).for
 const run = Date.now().toString(36).toUpperCase();
 const serial = `${E2E_SERIAL_PREFIX}MSG-${run}`;
 
+const serials = [serial];
+
 test.afterAll(async () => {
-  await deleteE2eMachines(serial);
+  for (const s of serials) await deleteE2eMachines(s);
 });
 
 const asCustomer = (page: Page) => signInCached(page, DEMO.custPerera, "/customer");
@@ -65,4 +67,17 @@ test("a message thread both ways: customer writes and edits, owner answers", asy
   await expect(answer).toBeVisible();
   await expect(answer).not.toContainText("You");
   await expect(page.getByTestId("comment-thread").getByTestId("comment")).toHaveCount(2);
+});
+
+test("another customer opening this ticket gets 'not found', and the attempt is logged (11.7)", async ({ page }) => {
+  const owner = await profileId(DEMO.ownerLanka.username);
+  const customer = await profileId(DEMO.custPerera.username);
+  const silva = await profileId(DEMO.custSilva.username);
+  const agreementId = await assignMachine(owner, await createMachine(owner, `${serial}-2`, "MP 2304"), customer, today);
+  serials.push(`${serial}-2`);
+  const ticketId = await openFirstCycle(agreementId);
+  await signInCached(page, DEMO.custSilva, "/customer");
+  await page.goto(`/customer/tickets/${ticketId}`);
+  await expect(page.getByText("This page could not be found.")).toBeVisible();
+  await expect.poll(() => auditCount("ACCESS_DENIED", ticketId, silva)).toBe(1);
 });

@@ -96,7 +96,8 @@ export function ReadingPreview({ preview, audience }: { preview: Preview; audien
               {c.rolledOver && <span className="text-muted-foreground"> (counter went past its maximum)</span>}
             </p>
             <p className="text-sm text-muted-foreground">
-              {formatCount(c.previous)} → {formatCount(c.current)} · {formatCount(c.included)} included
+              {formatCount(c.previous)} → {formatCount(c.current)}
+              {c.carried > 0 ? ` + ${formatCount(c.carried)} on the replaced meter` : ""} · {formatCount(c.included)} included
               {c.excess > 0 ? ` · ${formatCount(c.excess)} extra` : ""}
             </p>
             {c.warning && (

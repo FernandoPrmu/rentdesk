@@ -1793,6 +1793,177 @@ export type Database = {
           },
         ]
       }
+      notification_deliveries: {
+        Row: {
+          attempts: number
+          category: string
+          channel: Database["public"]["Enums"]["notification_channel"]
+          claim_token: string | null
+          claimed_until: string | null
+          created_at: string
+          event: string
+          id: string
+          last_error: string | null
+          next_attempt_at: string
+          notification_id: string | null
+          owner_id: string | null
+          priority: number
+          provider: string | null
+          provider_id: string | null
+          recipient: string | null
+          sent_at: string | null
+          sent_to: string | null
+          status: string
+          subject: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          category: string
+          channel: Database["public"]["Enums"]["notification_channel"]
+          claim_token?: string | null
+          claimed_until?: string | null
+          created_at?: string
+          event: string
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          notification_id?: string | null
+          owner_id?: string | null
+          priority?: number
+          provider?: string | null
+          provider_id?: string | null
+          recipient?: string | null
+          sent_at?: string | null
+          sent_to?: string | null
+          status?: string
+          subject?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          category?: string
+          channel?: Database["public"]["Enums"]["notification_channel"]
+          claim_token?: string | null
+          claimed_until?: string | null
+          created_at?: string
+          event?: string
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          notification_id?: string | null
+          owner_id?: string | null
+          priority?: number
+          provider?: string | null
+          provider_id?: string | null
+          recipient?: string | null
+          sent_at?: string | null
+          sent_to?: string | null
+          status?: string
+          subject?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_deliveries_notification_id_fkey"
+            columns: ["notification_id"]
+            isOneToOne: false
+            referencedRelation: "notifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_deliveries_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "notification_deliveries_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_deliveries_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_events: {
+        Row: {
+          category: string
+          email: boolean
+          event: string
+          sms: boolean
+        }
+        Insert: {
+          category: string
+          email?: boolean
+          event: string
+          sms?: boolean
+        }
+        Update: {
+          category?: string
+          email?: boolean
+          event?: string
+          sms?: boolean
+        }
+        Relationships: []
+      }
+      notification_preferences: {
+        Row: {
+          email_reminders: boolean
+          email_updates: boolean
+          owner_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          email_reminders?: boolean
+          email_updates?: boolean
+          owner_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          email_reminders?: boolean
+          email_updates?: boolean
+          owner_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_preferences_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owner_settings_effective"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "notification_preferences_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_preferences_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notification_templates: {
         Row: {
           body: string
@@ -2463,6 +2634,11 @@ export type Database = {
         Row: {
           dispute_escalation_days: number
           dispute_reminder_days: number[]
+          email_daily_limit: number
+          email_essential_reserve: number
+          email_max_attempts: number
+          email_monthly_limit: number
+          email_reminder_expiry_days: number
           estimated_billing_enabled: boolean
           grace_period_days: number
           id: boolean
@@ -2493,12 +2669,19 @@ export type Database = {
           slip_review_deadline_hours: number
           slip_review_escalation_hours: number
           slip_review_reminder_hours: number[]
+          sms_enabled: boolean
           updated_at: string
           weekly_summary_dow: number
+          whatsapp_enabled: boolean
         }
         Insert: {
           dispute_escalation_days?: number
           dispute_reminder_days?: number[]
+          email_daily_limit?: number
+          email_essential_reserve?: number
+          email_max_attempts?: number
+          email_monthly_limit?: number
+          email_reminder_expiry_days?: number
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -2529,12 +2712,19 @@ export type Database = {
           slip_review_deadline_hours?: number
           slip_review_escalation_hours?: number
           slip_review_reminder_hours?: number[]
+          sms_enabled?: boolean
           updated_at?: string
           weekly_summary_dow?: number
+          whatsapp_enabled?: boolean
         }
         Update: {
           dispute_escalation_days?: number
           dispute_reminder_days?: number[]
+          email_daily_limit?: number
+          email_essential_reserve?: number
+          email_max_attempts?: number
+          email_monthly_limit?: number
+          email_reminder_expiry_days?: number
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -2565,8 +2755,10 @@ export type Database = {
           slip_review_deadline_hours?: number
           slip_review_escalation_hours?: number
           slip_review_reminder_hours?: number[]
+          sms_enabled?: boolean
           updated_at?: string
           weekly_summary_dow?: number
+          whatsapp_enabled?: boolean
         }
         Relationships: []
       }
@@ -2574,6 +2766,7 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string | null
+          email: string | null
           failed_login_count: number
           full_name: string
           id: string
@@ -2589,6 +2782,7 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          email?: string | null
           failed_login_count?: number
           full_name?: string
           id: string
@@ -2604,6 +2798,7 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          email?: string | null
           failed_login_count?: number
           full_name?: string
           id?: string
@@ -3490,6 +3685,25 @@ export type Database = {
           },
         ]
       }
+      notification_log: {
+        Row: {
+          attempts: number | null
+          channel: Database["public"]["Enums"]["notification_channel"] | null
+          created_at: string | null
+          event: string | null
+          id: string | null
+          last_error: string | null
+          notification_id: string | null
+          owner_id: string | null
+          read_at: string | null
+          recipient: string | null
+          sent_at: string | null
+          status: string | null
+          title: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
       owner_settings_effective: {
         Row: {
           dispute_escalation_days: number | null
@@ -3574,6 +3788,16 @@ export type Database = {
           p_counter: Database["public"]["Enums"]["counter_type"]
         }
         Returns: number
+      }
+      rpc_claim_deliveries: {
+        Args: {
+          p_email_limit: number
+          p_essential_only: boolean
+          p_lease_seconds?: number
+          p_now: string
+          p_other_limit?: number
+        }
+        Returns: Json
       }
       rpc_claim_invoice_pdf: {
         Args: { p_invoice_id: string; p_now: string }
@@ -3726,6 +3950,7 @@ export type Database = {
         Args: { p_actor_id: string; p_body: string; p_comment_id: string }
         Returns: Json
       }
+      rpc_email_quota: { Args: { p_now: string }; Returns: Json }
       rpc_escalate_service_request: {
         Args: {
           p_level: number
@@ -3747,8 +3972,28 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_log_direct_delivery: {
+        Args: {
+          p_error: string
+          p_event: string
+          p_now: string
+          p_owner_id: string
+          p_provider: string
+          p_provider_id: string
+          p_recipient: string
+          p_sent_to: string
+          p_status: string
+          p_subject: string
+          p_user_id: string
+        }
+        Returns: string
+      }
       rpc_login_gate_state: {
         Args: { p_ip: unknown; p_username: string }
+        Returns: Json
+      }
+      rpc_mark_delivery_bounced: {
+        Args: { p_provider_id: string; p_reason: string }
         Returns: Json
       }
       rpc_mark_invoice_pdf_failed: {
@@ -3878,6 +4123,21 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_record_delivery_result: {
+        Args: {
+          p_error?: string
+          p_id: string
+          p_next_attempt_at?: string
+          p_now: string
+          p_outcome: string
+          p_provider?: string
+          p_provider_id?: string
+          p_sent_to?: string
+          p_subject?: string
+          p_token: string
+        }
+        Returns: Json
+      }
       rpc_record_invoice_pdf: {
         Args: {
           p_hash: string
@@ -3998,6 +4258,10 @@ export type Database = {
         Args: { p_actor_id: string; p_target_id: string }
         Returns: Json
       }
+      rpc_reset_notification_template: {
+        Args: { p_actor_id: string; p_event: string; p_owner_id: string }
+        Returns: Json
+      }
       rpc_return_machine: {
         Args: {
           p_actor_id: string
@@ -4024,6 +4288,20 @@ export type Database = {
         Args: { p_owner_id: string; p_template: Json }
         Returns: Json
       }
+      rpc_save_notification_preferences: {
+        Args: { p_reminders: boolean; p_updates: boolean; p_user_id: string }
+        Returns: Json
+      }
+      rpc_save_notification_template: {
+        Args: {
+          p_actor_id: string
+          p_body: string
+          p_event: string
+          p_owner_id: string
+          p_subject: string
+        }
+        Returns: Json
+      }
       rpc_service_request_action: {
         Args: {
           p_action: string
@@ -4042,6 +4320,10 @@ export type Database = {
           p_status: Database["public"]["Enums"]["account_status"]
           p_target_id: string
         }
+        Returns: Json
+      }
+      rpc_set_admin_email: {
+        Args: { p_actor_id: string; p_email: string }
         Returns: Json
       }
       rpc_set_invoice_credit: {

@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0025`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0028`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -35,14 +35,14 @@ and workflow functions. It is **not** exposed through the Data API.
 | Fleet | `machines` | Brand, model, serial, `MONO`/`COLOUR`, status, counter maximum (rollover) |
 | | `rental_agreements` | Current terms, installation, initial/closing readings, `first_billing_date`, cycle calendar (`next_cycle_no/date`), `billing_day` (the first billing date's day of the month; cycles are monthly), late fee setting, return idempotency key |
 | | `agreement_terms_history` | Every version of the pricing terms (commitment, included copies, rates, due days, late fee setting), who changed it, when, and the cycle it applies from. Append-only |
-| | `meter_baselines` | New baseline after a meter reset or replacement |
+| | `meter_baselines` | New baseline after a meter reset or replacement: value, the reading it replaced (`previous_value`), the old meter's last reading and the copies carried into the next bill (`carried_copies`, decision 51). Written only by `record_meter_baseline` |
 | Billing cycle | `billing_cycle_tickets` | One per agreement per cycle (unique `(agreement_id, cycle_no)`); terms snapshot; stage clock (`stage_entered_at`, `stage_due_at`, `reminder_count`, `escalation_level`, `paused_at`) |
 | | `ticket_events` | Every transition: actor, from, to, reason |
-| | `ticket_comments` | Customer/owner comments |
+| | `ticket_comments` | Ticket messages between the customer and the owner (TKT-11): author and role, body (≤ 1,000), `edited_at`, idempotency key; audited on insert and update (decision 50) |
 | | `meter_submissions` | Each reading attempt (idempotency key, server timestamp, review outcome) |
 | | `meter_readings` | Per-counter previous/current values, kept permanently |
-| | `meter_photos` | Temporary photo record; the file is deleted on confirm, the row stays |
-| | `invoices` / `invoice_lines` | Draft → issued invoice; number assigned on issue; branding snapshot; PDF state (`pdf_status`, `pdf_revision`, `pdf_path`, attempts, last error) |
+| | `meter_photos` | Temporary photo record of a submission, or of a dispute (`dispute_id`: the fresh meter photo, decision 55); the file is deleted on confirm or when the dispute ends, the row stays |
+| | `invoices` / `invoice_lines` | Draft → issued invoice; number assigned on issue; branding snapshot; PDF state (`pdf_status`, `pdf_revision`, `pdf_path`, attempts, last error); a corrected invoice points at the cancelled one it replaces (`replaces_invoice_id`, `revision`, decision 49) |
 | | `invoice_pdf_versions` | Every PDF made for an invoice (`v1`, `v2`, …): reason, template, content hash, size, the customer and machine printed on v1. Append-only |
 | | `invoice_counters` | Per-owner, gap-free invoice sequence |
 | Payments | `payments` | Money received: a customer slip or an owner-recorded payment (cash, cheque, transfer, advance, security deposit). Status `SUBMITTED` → `ACCEPTED` / `PARTIAL` / `REJECTED`, later `REVERSED`; accepted amount, credit made, duplicate flag and reasons (`FILE`, `REFERENCE`) |
@@ -50,11 +50,11 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `payment_slips` | File path (`{owner}/{customer}/{id}.{jpg,png,pdf}`), SHA-256 of the stored file and of the file as chosen (`original_sha256`), MIME type, size, retention date |
 | | `receipts` / `receipt_counters` / `receipt_pdf_versions` | One receipt per accepted payment, numbered per owner without gaps (`RCT-000001`); content snapshot (payment, bills paid, balance after, credit, customer's outstanding), branding snapshot, PDF state; status `ISSUED` / `REVERSED`. PDF versions are append-only |
 | | `credit_refunds` | Credits paid back to the customer (amount, date, method, reference). Append-only |
-| | `disputes` | Invoice disputes |
+| | `disputes` | Invoice disputes, one per invoice (decision 47): reason, optional file (`attachment_*`, bucket `dispute-files`), the answer (`resolution_kind` REJECTED / CORRECTED / CREDIT / CANCELLED, `resolution`, `credit_id`, `replacement_invoice_id`, `new_due_date`), the fresh meter photo request (`photo_requested_at`, note, `photo_received_at`, `photo_readings`) |
 | | `credits` | Overpayments, credits from cancelled invoices, advances (with agreement, date received, method, reference; or the payment that made them, `source_payment_id`). CREDIT invoice lines point at the credit they use (`invoice_lines.credit_id`). `refunded_cents`; status `VOID` when the payment that made it is reversed |
 | | `deposit_transactions` | Security deposit ledger per agreement: received, deducted (paid an invoice), refunded, retained. Append-only, never below zero |
 | Service | `service_requests` / `service_request_history` | Requests and their status trail (trigger-written) |
-| Cross-cutting | `notifications` | In-app centre and email/SMS outbox (delivery status) |
+| Cross-cutting | `notifications` | In-app centre and email/SMS outbox (delivery status); `owner_id` null for platform alerts to admins (daily job, decision 53) |
 | | `notification_templates` | Global (`owner_id` null) and per-owner templates |
 | | `idempotency_keys` | Request de-duplication for server actions |
 | | `login_attempts` | Rate limiting / lockout input |
@@ -119,8 +119,8 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | agreements | read all | read | read their own | — |
 | agreement terms history | read all | read | — | — |
 | customer balances (view) | read all | read | read own | — |
-| meter baselines | read all | read, insert | — | — |
-| tickets, events, comments, submissions, readings | read all | read | read own | — |
+| meter baselines | read all | read (writes through `rpc_record_meter_baseline`) | — | — |
+| tickets, events, comments, submissions, readings | read all | read (comments through `rpc_add_ticket_comment`) | read own (comments the same way) | — |
 | meter photos (rows and files) | rows only | read | — | — |
 | invoices, lines | read all | read | read own, **not DRAFT/REJECTED** | — |
 | invoice PDF versions (rows and files) | read all | read | read own issued invoices | — |
@@ -140,6 +140,7 @@ using the service role:
 - `profiles`, `owners`, inserts into `customers`
 - `rental_agreements`, `agreement_terms_history` and `machines.status` (migration 0014)
 - tickets, events and comments
+- meter baselines (since 0027)
 - meter submissions, readings and photos
 - invoices, invoice lines, invoice counters and invoice PDF versions (append-only)
 - the company profile (`owner_company_profiles`, since 0022)
@@ -186,7 +187,16 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `settle_invoice_payment` | Internal (decision 42): sets what is paid on an invoice and walks its ticket through the allowed transitions, one event each; the invoice status follows |
 | `claim_receipt_pdf`, `record_receipt_pdf`, `mark_receipt_pdf_failed`, `cron_pending_receipt_pdfs`, `cron_orphan_slips` | Receipt PDFs (like invoice PDFs) and the daily purge of slip files never sent |
 | `transition_ticket` | Cancel (reason; supersedes a pending reading, ends an open dispute), reopen (reason), back to payment, clear an overdue payment (reason + `p_due_date`); the invoice follows. Disputes use their own functions |
-| `raise_dispute` / `resolve_dispute` | Customer disputes an issued invoice (reason) → `DISPUTED`; owner rejects or resolves it (explanation) → `AWAITING_PAYMENT` (invoice partially paid if part was paid) |
+| `raise_dispute` | Customer disputes an issued, unpaid invoice once (decision 47): reason, optional checked file in their folder, idempotency key → `DISPUTED`; refused with a slip waiting or a second time (`ALREADY_DISPUTED`). Audit `DISPUTE_RAISED` |
+| `reject_dispute` | Owner: explanation, optional new due date (today or later) → `AWAITING_PAYMENT` (invoice partially paid if part was paid). Audit `DISPUTE_REJECTED` |
+| `credit_dispute` | Owner: the engine's CREDIT line (`creditOnIssuedInvoice`) for a new credit of kind `DISPUTE`, up to what is left to pay (decision 48); the rest stays a credit; covered bills close (`close_if_settled`). Audit `DISPUTE_CREDIT_GIVEN` |
+| `request_dispute_photo` / `submit_dispute_photo` | The fresh meter photo (decision 55): the owner asks (note), the customer sends a live photo in the ticket's folder with the reading(s); a `meter_photos` row of the dispute, deleted when the dispute ends (trigger on `disputes`) |
+| `correct_issued_invoice` | Decision 49: owner, reason, new due date; refused with a slip waiting (`SLIP_WAITING`), on a closed ticket (`REOPEN_FIRST`) and for a reading that is no longer the latest (`LATER_READING`). Cancels the invoice (number voided, money paid → `CANCELLED_INVOICE` credit), checks the engine's corrected invoice against the original (`verify_corrected_invoice`) and the credits, issues it with a new number (`replaces_invoice_id`, revision + 1), replaces a corrected reading (old submission `SUPERSEDED`, a confirmed owner reading with `corrected_from_value`), resolves an open dispute as CORRECTED, moves the ticket to `AWAITING_PAYMENT` (closes it when credits cover it). Event `CORRECTION`, audit `INVOICE_CORRECTED` |
+| `record_meter_baseline` | Decision 51: owner, live agreement, reason, per counter the new value and optionally the old meter's last reading (not below the last known reading); refused while a reading or estimate waits for review (`REVIEW_PENDING`). Event `BASELINE` on the newest open ticket, audit `METER_BASELINE_RECORDED` |
+| `add_ticket_comment` / `edit_ticket_comment` | Decision 50: the ticket's customer or owner; 1-1,000 characters; idempotent; 30 per author per ticket per hour (`TOO_MANY_COMMENTS`); edits by the author within 5 minutes (`EDIT_WINDOW_OVER`), audited old → new |
+| `resend_invoice_notification` | Spec 11.4: owner sends an issued invoice's notice again; `NOTE` event (`INVOICE_RESENT`), audit; not twice within 10 minutes |
+| `carried_copies`, `verify_carried_copies`, `expected_estimate_credits`, `verify_estimate_credits` | Facts the meter and final invoice checks compare with the engine's calculation: copies carried from replaced meters (0027), estimated invoices to credit (0028) |
+| `notify_admins_once`, `cron_last_success`, `cron_orphan_dispute_files` | Daily job: platform alerts to the admins once per key, the last finished run (missed-run alert after 30 hours), dispute files never sent |
 | `create_estimated_invoice` | Daily job (rule 22): after the meter deadline, when the owner bills estimates, a draft estimated invoice from the engine (`verify_estimated_invoice`, credits checked) → `PENDING_OWNER_REVIEW`; once per ticket |
 | `mark_ticket_overdue`, `record_ticket_reminder`, `escalate_ticket`, `apply_late_fee`, `set_ticket_pause` | Daily job steps (rules 20-24). Compare-and-set under the ticket lock: a step already done returns `{skipped}`. `apply_late_fee` re-checks the amount (ticket snapshot → owner → platform), the grace period, once only, never with a slip waiting or a dispute |
 | `cron_begin_run` / `cron_finish_run`, `cron_context`, `cron_due_agreements`, `cron_ticket_candidates`, `cron_pause_candidates`, `cron_expired_photos`, `mark_photos_deleted`, `cron_orphan_photos`, `cron_overdue_summaries`, `notify_once` | The daily job's run record (10-minute lease), its reads (keyset pages) and the photo / weekly-summary steps |
@@ -377,6 +387,27 @@ app's own per-account and per-IP limits above protect logins instead.
 - **Credits.** `app.available_credits`, `refresh_credit_status` and the TypeScript `loadAvailableCredits` subtract `refunded_cents`.
 - **Grants.** New tables: `select` for authenticated (RLS decides) and service_role; writes only through the functions.
 
+## Disputes, messages and the section 11 pass (migrations 0026–0028)
+
+- **Enum value (0026)**, in its own migration: credit kind `DISPUTE`.
+- **Settings.** `platform_settings.dispute_reminder_days` (`{3,5}`) and `dispute_escalation_days` (7), exposed by
+  `owner_settings_effective` (decision 52). The view was replaced with the two columns appended (grants kept).
+- **Disputes.** One per invoice (`raise_dispute` refuses a second); `resolution_kind` is set by every answer, and a
+  trigger fills it (Cancelled / Rejected) and marks the dispute's fresh photo for deletion whenever a dispute ends,
+  including when the ticket is cancelled. `meter_photos.submission_id` may be null when `dispute_id` is set (exactly one).
+- **Corrections** cancel and reissue (decision 49); `invoices.revision` counts the versions of a bill.
+- **Baselines** are written only by `record_meter_baseline`; owners lost their direct insert. The previous reading
+  rule is unchanged (`last_known_reading`); `carried_copies` adds the old meter's copies to the next calculation.
+- **Estimate reconciliation (0028).** `verify_meter_invoice` and `verify_final_invoice` now also check that the issued
+  estimated invoices since the last confirmed reading are credited (`expected_estimate_credits`, the same query as the
+  TypeScript loader).
+- **Grants.** Every new function is revoked from anon and authenticated; wrappers are service-role only
+  (`rls.db.test.ts` lists them).
+- **Tests.** `scenarios.db.test.ts`: disputes each way (reject, credit, covered bill closed, corrected bill), the fresh
+  photo and its storage rule, correction after confirmation (closed and paid ticket, part payment, adjustment, later
+  reading, estimate, tampering), baselines (carried copies, reset, refusals), estimate reconciliation, comments (RLS,
+  edits, rate limit, audit), dispute files, resend, admin alerts, machine swap.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -384,10 +415,11 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 
 | Bucket | Limit / types | Direct client access |
 | --- | --- | --- |
-| `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/{photo id}.jpg` while their ticket awaits a reading. Only the owner reads (signed URL). Deleted on confirm; rejected after retention; never-submitted after 2 days (rule 30) |
+| `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/{photo id}.jpg` while their ticket awaits a reading, or while their open dispute waits for a fresh photo (0027). Only the owner reads (signed URL). Deleted on confirm; rejected after retention; never-submitted after 2 days (rule 30) |
 | `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads into `{owner}/{customer}/` (their own folder only, 0025). The server checks the stored file before recording it; the owner and admin read only recorded slips, the customer their folder. Files never sent with a payment are purged after 2 days |
 | `receipts` | 10 MB; PDF | Server writes only. `{owner_id}/{receipt_id}/v{n}.pdf`: owner (own tenant), the payment's customer and admin read |
 | `branding` | 5 MB; PNG, JPEG, SVG, PDF | Server writes only (0022). Owner, their customers and admin read. Logos at `{owner_id}/logos/{sha256}.png` (max 512 px, SVG rasterised on the server; older `{owner_id}/logo.png` still valid), letterheads at `{owner_id}/letterheads/{sha256}.{pdf,jpg,png}`. Never overwritten or deleted (rule 35) |
+| `dispute-files` | 5 MB; JPEG, PNG, PDF | Customer uploads into `{owner}/{customer}/` (own folder). The server checks the stored file before recording it with the dispute; the owner and admin read only files sent with a dispute, the customer their folder. Unsent files purged after 2 days (0027) |
 | `invoices` | 10 MB; PDF | Server writes only. `{owner_id}/{invoice_id}/v{n}.pdf`: owner (own tenant), the invoice's customer (issued invoices only) and admin read. `{owner_id}/preview/sample.pdf`: the owner's sample preview |
 
 ## Tests and seed

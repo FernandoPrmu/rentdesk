@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0023`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0025`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -45,10 +45,13 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `invoices` / `invoice_lines` | Draft → issued invoice; number assigned on issue; branding snapshot; PDF state (`pdf_status`, `pdf_revision`, `pdf_path`, attempts, last error) |
 | | `invoice_pdf_versions` | Every PDF made for an invoice (`v1`, `v2`, …): reason, template, content hash, size, the customer and machine printed on v1. Append-only |
 | | `invoice_counters` | Per-owner, gap-free invoice sequence |
-| Payments | `payments` | Customer slips and owner-recorded cash/cheque; duplicate flag |
-| | `payment_slips` | File path, SHA-256, MIME type, size, retention |
+| Payments | `payments` | Money received: a customer slip or an owner-recorded payment (cash, cheque, transfer, advance, security deposit). Status `SUBMITTED` → `ACCEPTED` / `PARTIAL` / `REJECTED`, later `REVERSED`; accepted amount, credit made, duplicate flag and reasons (`FILE`, `REFERENCE`) |
+| | `payment_allocations` | How a payment is split over invoices (decision 39): planned at submission, applied when accepted, the balance left right after; `waiting` while the slip waits (one per ticket); released rows are the history of a reallocation |
+| | `payment_slips` | File path (`{owner}/{customer}/{id}.{jpg,png,pdf}`), SHA-256 of the stored file and of the file as chosen (`original_sha256`), MIME type, size, retention date |
+| | `receipts` / `receipt_counters` / `receipt_pdf_versions` | One receipt per accepted payment, numbered per owner without gaps (`RCT-000001`); content snapshot (payment, bills paid, balance after, credit, customer's outstanding), branding snapshot, PDF state; status `ISSUED` / `REVERSED`. PDF versions are append-only |
+| | `credit_refunds` | Credits paid back to the customer (amount, date, method, reference). Append-only |
 | | `disputes` | Invoice disputes |
-| | `credits` | Overpayments, credits from cancelled invoices, advances (with agreement, date received, method, reference). CREDIT invoice lines point at the credit they use (`invoice_lines.credit_id`) |
+| | `credits` | Overpayments, credits from cancelled invoices, advances (with agreement, date received, method, reference; or the payment that made them, `source_payment_id`). CREDIT invoice lines point at the credit they use (`invoice_lines.credit_id`). `refunded_cents`; status `VOID` when the payment that made it is reversed |
 | | `deposit_transactions` | Security deposit ledger per agreement: received, deducted (paid an invoice), refunded, retained. Append-only, never below zero |
 | Service | `service_requests` / `service_request_history` | Requests and their status trail (trigger-written) |
 | Cross-cutting | `notifications` | In-app centre and email/SMS outbox (delivery status) |
@@ -57,7 +60,7 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `login_attempts` | Rate limiting / lockout input |
 | | `audit_logs` | Append-only audit trail, written by triggers and `app.write_audit()` |
 | | `cron_runs` | One row per run of the daily job: trigger, the "now" used (simulated outside production), status, counts, errors, work remaining |
-| Views | `customer_balances` | Outstanding amount per customer: issued, unpaid invoices minus `amount_paid_cents` (security invoker, so RLS applies). Credits are not netted yet |
+| Views | `customer_balances` | Outstanding amount per customer: issued, unpaid invoices minus `amount_paid_cents` (security invoker, so RLS applies). Credits are not netted: they are shown apart and come off the next invoices (decision 45) |
 | | `agreement_deposit_balances` | Deposit received / deducted / refunded / retained / held per agreement (security invoker) |
 
 ```mermaid
@@ -83,8 +86,13 @@ erDiagram
     billing_cycle_tickets |o--o| invoices : "current invoice"
     invoices ||--|{ invoice_lines : lines
     invoices ||--o{ invoice_pdf_versions : pdfs
-    invoices ||--o{ payments : paid_by
+    customers ||--o{ payments : pays
+    payments ||--o{ payment_allocations : "split over"
+    invoices ||--o{ payment_allocations : "paid by"
     payments ||--o{ payment_slips : proof
+    payments ||--o| receipts : receipt
+    receipts ||--o{ receipt_pdf_versions : pdfs
+    credits ||--o{ credit_refunds : refunded
     invoices ||--o{ disputes : disputed
     customers ||--o{ credits : holds
     customers ||--o{ service_requests : raises
@@ -116,7 +124,8 @@ customers of a suspended owner, therefore match no policy and see nothing.
 | meter photos (rows and files) | rows only | read | — | — |
 | invoices, lines | read all | read | read own, **not DRAFT/REJECTED** | — |
 | invoice PDF versions (rows and files) | read all | read | read own issued invoices | — |
-| payments, slips, disputes, credits | read all | read | read own | — |
+| payments, allocations, slips, disputes, credits, refunds, receipts (+ PDF versions) | read all | read | read own | — |
+| receipt counters | read all | read own | — | — |
 | deposit transactions, deposit balances (view) | read all | read | read own | — |
 | service requests + history | read all | read | read own | — |
 | notifications | read all | read tenant delivery log | read own; set `read_at` | — |
@@ -134,7 +143,7 @@ using the service role:
 - meter submissions, readings and photos
 - invoices, invoice lines, invoice counters and invoice PDF versions (append-only)
 - the company profile (`owner_company_profiles`, since 0022)
-- payments, payment slips, disputes and credits
+- payments, allocations, payment slips, receipts and their counters and PDF versions, disputes, credits and credit refunds
 - deposit transactions (append-only even for the service role)
 - service requests and their history
 - inserts into `notifications`
@@ -168,8 +177,14 @@ A concurrent second request waits for the lock and then fails with `RD409`.
 | `confirm_meter_submission` | Assigns the invoice number, issues the invoice, marks the photo for deletion → `AWAITING_PAYMENT`. `p_submission_id` null = the ticket's estimated draft. Returns `photo_paths` and `photo_ids`: server code deletes the files at once and marks the rows |
 | `correct_meter_reading` | INV-08 (rule 29): owner only, reading waiting for review, note required. The engine's recalculated draft is checked (`verify_meter_invoice`, `verify_invoice_credits`, same removed credits); the customer's value is kept in `corrected_from_value`; lines and totals replaced; `CORRECTION` event, audit `METER_READING_CORRECTED`, customer notified |
 | `reject_meter_submission` | Reason required; draft → `REJECTED`; → `METER_REQUESTED`. `p_submission_id` null = reject the estimated draft (no second estimate for that ticket) |
-| `submit_payment` | Payment + slip, duplicate flag → `PAYMENT_SUBMITTED` (idempotent) |
-| `verify_payment` | Accept → `CLOSED`, or partial → `PARTIALLY_PAID`, or reject (reason). An overpayment becomes a credit |
+| `submit_payment` | The customer's slip for one or more of their bills (decisions 39-41): locks every ticket then invoice in id order, checks each is payable (`assert_payable`), splits the amount oldest due first (`plan_allocation`; bills it does not reach are left out), flags duplicates (`payment_duplicates`), writes payment + slip + allocations, each ticket and invoice → `PAYMENT_SUBMITTED` with its event. Idempotent (key). Audit `PAYMENT_SUBMITTED` |
+| `verify_payment` | Accept (the slip amount, or less if less arrived) → `apply_payment`: split again, each bill through `settle_invoice_payment` (paid → `CLOSED`, part → `PARTIALLY_PAID`, nothing → back to waiting), what is left over becomes an `OVERPAYMENT` credit, payment `ACCEPTED` or `PARTIAL`, receipt issued. Reject (reason) → every bill back to `AWAITING_PAYMENT` / `PARTIALLY_PAID`. Audit `PAYMENT_ACCEPTED` / `PAYMENT_REJECTED` |
+| `record_manual_payment` | PAY-07: owner only, same split, accepted at once (each ticket: `PAYMENT_SUBMITTED` then `CLOSED` / `PARTIALLY_PAID`); no bills = an `ADVANCE` credit. Idempotent. Audit `PAYMENT_RECORDED` |
+| `reverse_payment` | TKT-10 / 11.5 (decision 43): reason required; not for `SECURITY_DEPOSIT` payments; refused while its credit is used (also by a draft) or refunded, or a bill has a slip waiting, is disputed or cancelled. Each bill owes the money again (`CLOSED` → `REOPENED` → `AWAITING_PAYMENT`), credits → `VOID`, receipt `REVERSED` (new PDF). Audit `PAYMENT_REVERSED` |
+| `reallocate_payment` | 11.5: reason required; same blocks; moves an accepted payment to other bills of the customer (split again, credit recalculated), old allocations released, same receipt number with new content (new PDF). Audit `PAYMENT_REALLOCATED` |
+| `refund_credit` | PAY-12: owner only; refunds only what is free (amount − refunded − used, drafts reserve); `credit_refunds` row, `refunded_cents`, status `REFUNDED` when all of it is paid back. Audit `CREDIT_REFUNDED` |
+| `settle_invoice_payment` | Internal (decision 42): sets what is paid on an invoice and walks its ticket through the allowed transitions, one event each; the invoice status follows |
+| `claim_receipt_pdf`, `record_receipt_pdf`, `mark_receipt_pdf_failed`, `cron_pending_receipt_pdfs`, `cron_orphan_slips` | Receipt PDFs (like invoice PDFs) and the daily purge of slip files never sent |
 | `transition_ticket` | Cancel (reason; supersedes a pending reading, ends an open dispute), reopen (reason), back to payment, clear an overdue payment (reason + `p_due_date`); the invoice follows. Disputes use their own functions |
 | `raise_dispute` / `resolve_dispute` | Customer disputes an issued invoice (reason) → `DISPUTED`; owner rejects or resolves it (explanation) → `AWAITING_PAYMENT` (invoice partially paid if part was paid) |
 | `create_estimated_invoice` | Daily job (rule 22): after the meter deadline, when the owner bills estimates, a draft estimated invoice from the engine (`verify_estimated_invoice`, credits checked) → `PENDING_OWNER_REVIEW`; once per ticket |
@@ -346,6 +361,22 @@ app's own per-account and per-IP limits above protect logins instead.
 - **Writes.** Owners lost their direct insert/update grants on `owner_company_profiles` and the branding bucket's
   write policies: the server validates first (English only, rule 33; file checks, rule 36) and writes with the service role.
 
+## Payments (migrations 0024–0025)
+
+- **Enum values (0024)**, in their own migration: payment `REVERSED`, credit `VOID`, ticket event `PAYMENT` (a payment change that keeps the
+  ticket's status).
+- **Allocations.** `payments.invoice_id` / `ticket_id` are gone; every payment's bills are in `payment_allocations` (0025 backfilled one row
+  per earlier payment and a receipt for every accepted one). Deposit settlements (`apply_deposit_settlement`, rewritten) write allocations
+  and receipts too.
+- **State machine.** One new edge, `PARTIALLY_PAID → AWAITING_PAYMENT` (the only payment on a partly paid bill is reversed), in
+  `app.ticket_transition_allowed` and `src/lib/tickets/states.ts`. All payment status changes go through `app.settle_invoice_payment`.
+- **Locks.** Payment functions lock the payment, then the tickets, then the invoices, each in id order (`lock_invoices_and_tickets`), the
+  same order as the daily job, so concurrent payments never deadlock.
+- **Receipts.** `app.issue_receipt` takes the next number from `receipt_counters` (row lock, rolled back with the transaction: gap-free) and
+  stores `app.receipt_content` and `app.branding_snapshot`. A trigger marks the PDF pending on issue, reversal or a changed content.
+- **Credits.** `app.available_credits`, `refresh_credit_status` and the TypeScript `loadAvailableCredits` subtract `refunded_cents`.
+- **Grants.** New tables: `select` for authenticated (RLS decides) and service_role; writes only through the functions.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -354,7 +385,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 | Bucket | Limit / types | Direct client access |
 | --- | --- | --- |
 | `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/{photo id}.jpg` while their ticket awaits a reading. Only the owner reads (signed URL). Deleted on confirm; rejected after retention; never-submitted after 2 days (rule 30) |
-| `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads while their ticket awaits payment. Customer, owner and admin read |
+| `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads into `{owner}/{customer}/` (their own folder only, 0025). The server checks the stored file before recording it; the owner and admin read only recorded slips, the customer their folder. Files never sent with a payment are purged after 2 days |
+| `receipts` | 10 MB; PDF | Server writes only. `{owner_id}/{receipt_id}/v{n}.pdf`: owner (own tenant), the payment's customer and admin read |
 | `branding` | 5 MB; PNG, JPEG, SVG, PDF | Server writes only (0022). Owner, their customers and admin read. Logos at `{owner_id}/logos/{sha256}.png` (max 512 px, SVG rasterised on the server; older `{owner_id}/logo.png` still valid), letterheads at `{owner_id}/letterheads/{sha256}.{pdf,jpg,png}`. Never overwritten or deleted (rule 35) |
 | `invoices` | 10 MB; PDF | Server writes only. `{owner_id}/{invoice_id}/v{n}.pdf`: owner (own tenant), the invoice's customer (issued invoices only) and admin read. `{owner_id}/preview/sample.pdf`: the owner's sample preview |
 
@@ -367,6 +399,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
     test needs two connections, so it commits a fixture and deletes it afterwards.
   - `DB_TEST_APPLY_MIGRATIONS=1` also applies not-yet-pushed migrations inside the test transaction
     first.
+- `payments.db.test.ts`: every payment flow, SQL split = TypeScript split, duplicates, receipts gap-free and under concurrency (committed
+  fixture, skipped with `DB_TEST_APPLY_MIGRATIONS=1`), orphan slips, RLS on slips, allocations, receipts and refunds.
 - `npm run db:seed` (`scripts/seed.ts`) creates demo accounts, machines, agreements and tickets in
   several stages through the same workflow functions. It is safe to re-run, and it prints the demo
   logins. A re-run also restores the demo login state (active, not locked, forced password change

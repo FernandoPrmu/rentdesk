@@ -8,6 +8,7 @@ import { currentActor } from "@/lib/auth/current-user";
 import { setInvoiceCredit } from "@/lib/invoices/credits";
 import type { ReadingErrors } from "@/lib/meter/readings";
 import { confirmReview, correctReview, enterReadingForCustomer, rejectReview } from "@/lib/meter/service";
+import { type OwnerTicketAction, ownerTicketAction } from "@/lib/tickets/owner-actions";
 
 /** Owner review of a meter reading or an estimate (INV-07..12, DEP-02). The rpc functions check everything again. */
 
@@ -53,4 +54,11 @@ export async function manualEntryAction(input: {
 }): Promise<ActionResult & { fieldErrors?: Record<string, string> }> {
   const actor = await currentActor("OWNER");
   return done(await enterReadingForCustomer(actor, input));
+}
+
+/** TKT-10: cancel, reopen, ask for payment again, or a new due date, each with a reason where needed. */
+export async function ticketAction(ticketId: string, input: OwnerTicketAction): Promise<ActionResult> {
+  const actor = await currentActor("OWNER");
+  if (!uuidSchema.safeParse(ticketId).success) return fail("This ticket was not found.");
+  return done(await ownerTicketAction(actor, ticketId, input));
 }

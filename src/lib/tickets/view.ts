@@ -105,6 +105,7 @@ export type CustomerTask =
   | {
       kind: "PAY";
       ticketId: string;
+      invoiceId: string | null;
       machine: string;
       invoiceNo: string | null;
       amountCents: number;
@@ -145,6 +146,7 @@ export function customerHome(rows: CustomerTicketRow[], now: Date): CustomerHome
       tasks.push({
         kind: "PAY",
         ticketId: r.id,
+        invoiceId: r.invoice.id ?? null,
         machine: r.machine,
         invoiceNo: r.invoice.invoice_no,
         amountCents,

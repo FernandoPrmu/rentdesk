@@ -35,11 +35,12 @@ export async function createMachine(ownerId: string, serial: string, model = "MP
 }
 
 /**
- * Opens cycle 1 (as the cron would), submits `used` copies as the customer and
- * confirms the reading as the owner: an issued, unpaid invoice. Credits (an
+ * Opens cycle 1 (as the cron would; a cycle the daily job already opened is
+ * returned as it is) and submits `used` copies as the customer: the ticket waits
+ * for the owner's review (PENDING_OWNER_REVIEW) with a draft invoice. Credits (an
  * advance) are applied by the engine automatically.
  */
-export async function issueFirstInvoice(agreementId: string, used: number): Promise<{ invoiceNo: string; totalCents: number }> {
+export async function submitFirstReading(agreementId: string, used: number): Promise<{ ticketId: string; submissionId: string; totalCents: number }> {
   const db = service();
   const agreement = check(await db.from("rental_agreements").select("owner_id, customer_id").eq("id", agreementId).single(), "agreement")!;
   const opened = check(
@@ -65,20 +66,27 @@ export async function issueFirstInvoice(agreementId: string, used: number): Prom
     }),
     "submit reading",
   ) as { submission_id: string };
+  return { ticketId, submissionId: submitted.submission_id, totalCents: s.invoice.total_cents };
+}
+
+/** submitFirstReading, then the owner confirms it: an issued, unpaid invoice. */
+export async function issueFirstInvoice(agreementId: string, used: number): Promise<{ invoiceNo: string; totalCents: number }> {
+  const db = service();
+  const agreement = check(await db.from("rental_agreements").select("owner_id").eq("id", agreementId).single(), "agreement")!;
+  const { ticketId, submissionId, totalCents } = await submitFirstReading(agreementId, used);
   const confirmed = check(
     await db.rpc("rpc_confirm_meter_submission", {
       p_ticket_id: ticketId,
-      p_submission_id: submitted.submission_id,
+      p_submission_id: submissionId,
       p_actor_id: agreement.owner_id,
       p_due_date: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10),
       p_stage_due_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
     }),
     "confirm reading",
   ) as { invoice_no: string };
-  return { invoiceNo: confirmed.invoice_no, totalCents: s.invoice.total_cents };
+  return { invoiceNo: confirmed.invoice_no, totalCents };
 }
 
-/** Assigns an E2E machine through the same rpc as the assign form; first billing date `firstBilling`. */
 export async function assignMachine(ownerId: string, machineId: string, customerId: string, today: string, firstBilling = today): Promise<string> {
   const row = check(
     await service().rpc("rpc_assign_machine", {
@@ -116,4 +124,16 @@ export async function openFirstCycle(agreementId: string): Promise<string> {
     "open cycle",
   ) as { ticket_id: string };
   return opened.ticket_id;
+}
+
+/** An issued invoice's id from its number (owner's tenant). */
+export async function invoiceIdByNo(ownerId: string, invoiceNo: string): Promise<string> {
+  const row = check(await service().from("invoices").select("id").eq("owner_id", ownerId).eq("invoice_no", invoiceNo).single(), "invoice by number");
+  return row!.id;
+}
+
+/** Status and what was paid of an invoice. */
+export async function invoiceState(invoiceId: string): Promise<{ status: string; paid: number; total: number }> {
+  const row = check(await service().from("invoices").select("status, amount_paid_cents, total_cents").eq("id", invoiceId).single(), "invoice state")!;
+  return { status: row.status, paid: row.amount_paid_cents, total: row.total_cents };
 }

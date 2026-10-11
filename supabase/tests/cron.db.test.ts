@@ -385,8 +385,8 @@ describe.skipIf(!DB_URL)("tickets and the daily job (linked dev database, rolled
         const a = await agreement({ first: "2024-07-01" });
         const { ticketId } = await issued(a, "2024-07-01", "2024-07-08");
         await db.query(
-          `select app.submit_payment($1, $2, gen_random_uuid(), 'CUSTOMER_SLIP', $3::jsonb, $4::jsonb, now())`,
-          [ticketId, f.custA2, JSON.stringify({ amount_cents: 650000, paid_on: "2024-07-07" }), JSON.stringify({ storage_path: `${f.ownerA}/${ticketId}/s.pdf`, sha256: "c".repeat(64), mime_type: "application/pdf", size_bytes: 10 })],
+          `select app.submit_payment($1, $1, gen_random_uuid(), array[(select current_invoice_id from public.billing_cycle_tickets where id = $2)], $3::jsonb, $4::jsonb, now())`,
+          [f.custA2, ticketId, JSON.stringify({ amount_cents: 650000, paid_on: "2024-07-07", method: "BANK_TRANSFER" }), JSON.stringify({ storage_path: `${f.ownerA}/${f.custA2}/${randomUUID()}.pdf`, sha256: "c".repeat(64), mime_type: "application/pdf", size_bytes: 10 })],
         );
         await job("2024-07-20");
         expect((await tickets(a))[0].status).toBe("PAYMENT_SUBMITTED");

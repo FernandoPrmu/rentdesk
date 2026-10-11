@@ -25,6 +25,9 @@ function describe(e: Event): string {
       return `Resumed${m.paused_days ? ` after ${m.paused_days} days; deadlines moved forward` : ""}`;
     case "MANUAL_ENTRY":
       return `Reading entered by the owner: ${status(e.from_status)} → ${status(e.to_status)}`;
+    case "PAYMENT":
+      // A reversal or a move that left the status as it was (decision 42).
+      return `Payment ${m.reversed_cents ? "reversed" : m.moved_from_cents !== undefined ? "moved" : "changed"}: paid ${formatRupees(Number(m.paid_cents ?? 0))} (was ${formatRupees(Number(m.paid_before_cents ?? 0))})`;
     default:
       if (m.estimated && e.to_status === "PENDING_OWNER_REVIEW") return "Estimated invoice created for review";
       if (e.from_status && e.to_status && e.from_status !== e.to_status) return `${status(e.from_status)} → ${status(e.to_status)}`;

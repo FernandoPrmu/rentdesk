@@ -22,6 +22,8 @@ function describe(e: Event): string | null {
       return "Active again; deadlines moved forward";
     case "MANUAL_ENTRY":
       return "Your rental company entered the reading";
+    case "PAYMENT":
+      return m.reversed_cents ? "A payment was taken back" : "A payment was moved to another bill";
     case "CORRECTION": {
       const changes = (m.changes as { counter_type: string; from: number; to: number }[] | undefined) ?? [];
       const text = changes.map((c) => `${c.counter_type === "BW" ? "B&W" : "Colour"} ${formatCount(c.from)} → ${formatCount(c.to)}`).join(", ");
@@ -38,7 +40,7 @@ function describe(e: Event): string | null {
         case "OVERDUE":
           return "Deadline passed";
         case "PAYMENT_SUBMITTED":
-          return "Payment slip sent";
+          return m.source === "OWNER_MANUAL" ? "Payment recorded by your rental company" : "Payment slip sent";
         case "PARTIALLY_PAID":
           return "Part payment accepted";
         case "CLOSED":

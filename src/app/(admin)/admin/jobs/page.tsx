@@ -25,6 +25,8 @@ const COUNT_LABEL: Record<(typeof COUNT_KEYS)[number], string> = {
   photosDeleted: "Photos deleted",
   summaries: "Weekly summaries",
   pdfs: "Invoice PDFs made",
+  receiptPdfs: "Receipt PDFs made",
+  slipsDeleted: "Unsent slips deleted",
   skipped: "Already done",
 };
 

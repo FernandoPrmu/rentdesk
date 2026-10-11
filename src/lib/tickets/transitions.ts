@@ -7,6 +7,7 @@ import {
   type NotificationItem,
   notificationsFor,
   owner,
+  PAYMENT_LINK,
 } from "../notifications/service.ts";
 import { ACTIONS, type ActorKind, refusal, type TicketAction, type TicketStatus } from "./states.ts";
 
@@ -323,90 +324,210 @@ export async function correctReading(rpc: Rpc, actor: Actor, ticket: TicketSnaps
 }
 
 // -----------------------------------------------------------------------------
-// Payment
+// Payments (PAY-02..07, PAY-11, PAY-12, TKT-10; decisions 39-43). One payment may
+// cover the bills of several tickets of one customer: each function checks every
+// ticket, the rpc locks them all, splits the money (oldest due first) and moves
+// each ticket along the payment edges, writing every event.
 // -----------------------------------------------------------------------------
 
-const paymentSchema = z.object({
+/** Methods a customer can name on a slip; the owner also records cash. */
+export const SLIP_METHODS = ["BANK_TRANSFER", "DEPOSIT", "CHEQUE", "OTHER"] as const;
+export const MANUAL_METHODS = ["CASH", "CHEQUE", "BANK_TRANSFER", "DEPOSIT", "OTHER"] as const;
+
+const paymentDetails = (methods: readonly [string, ...string[]]) =>
+  z.object({
+    amountCents: positiveCents,
+    paidOn: isoDate,
+    method: z.enum(methods),
+    reference: z.string().trim().max(100).optional(),
+    note: z.string().trim().max(1000).optional(),
+  });
+
+/** What the notifications mention: the customer and the bills. */
+const paymentContext = z.object({ customerName: z.string().optional(), invoiceNos: z.array(z.string()).default([]) });
+
+function assertPaymentTickets(action: TicketAction, actor: Actor, tickets: TicketSnapshot[], allowNone = false): void {
+  if (tickets.length === 0 && !allowNone) throw new TransitionError("INVALID_INPUT", "Choose at least one bill");
+  if (new Set(tickets.map((t) => t.customer_id)).size > 1) throw new TransitionError("INVALID_INPUT", "A payment is for the bills of one customer");
+  for (const t of tickets) assertTransition(action, actor, t);
+}
+
+function assertOwner(action: TicketAction, actor: Actor): void {
+  if (actor.kind !== "USER" || actor.role !== "OWNER") throw new TransitionError("FORBIDDEN", `${ACTIONS[action].label}: only the owner`);
+}
+
+function detailsArg(d: { amountCents: number; paidOn: string; method: string; reference?: string; note?: string }) {
+  return { amount_cents: d.amountCents, paid_on: d.paidOn, method: d.method, reference: d.reference || null, note: d.note || null };
+}
+
+const slipSchema = z.object({
   idempotencyKey: z.uuid(),
-  amountCents: positiveCents,
-  paidOn: isoDate,
-  method: z.enum(["BANK_TRANSFER", "DEPOSIT", "CASH", "CHEQUE", "ONLINE", "OTHER"]).optional(),
-  reference: z.string().trim().max(100).optional(),
-  note: z.string().trim().max(1000).optional(),
-  slip: z
-    .object({ storagePath: z.string().min(1), sha256: z.string().regex(/^[0-9a-f]{64}$/), mimeType: z.string(), sizeBytes: z.number().int().positive() })
-    .nullable()
-    .default(null),
+  invoiceIds: z.array(z.uuid()).min(1, "Choose at least one bill"),
+  payment: paymentDetails(SLIP_METHODS),
+  slip: z.object({
+    storagePath: z.string().min(1).max(300),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    originalSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
+    mimeType: z.enum(["image/jpeg", "image/png", "application/pdf"]),
+    sizeBytes: z.number().int().positive(),
+  }),
   stageDueAt: z.date(),
+  context: paymentContext.default({ invoiceNos: [] }),
 });
 
-function paymentArgs(ticket: TicketSnapshot, actor: Actor, i: z.output<typeof paymentSchema>, source: "CUSTOMER_SLIP" | "OWNER_MANUAL") {
-  return {
-    p_ticket_id: ticket.id,
+/** Steps 6-7 (PAY-02..04, PAY-11): the customer's slip for one or more bills goes to the owner. */
+export async function submitSlip(rpc: Rpc, actor: Actor, tickets: TicketSnapshot[], input: z.input<typeof slipSchema>) {
+  assertPaymentTickets("submitSlip", actor, tickets);
+  const i = parse(slipSchema, input);
+  const t = tickets[0];
+  return (await rpc("rpc_submit_payment", {
     p_actor_id: actorId(actor),
+    p_customer_id: t.customer_id,
     p_idempotency_key: i.idempotencyKey,
-    p_source: source,
-    p_payment: { amount_cents: i.amountCents, paid_on: i.paidOn, method: i.method, reference: i.reference, note: i.note },
-    p_slip: i.slip ? { storage_path: i.slip.storagePath, sha256: i.slip.sha256, mime_type: i.slip.mimeType, size_bytes: i.slip.sizeBytes } : null,
+    p_invoice_ids: i.invoiceIds,
+    p_payment: detailsArg(i.payment),
+    p_slip: {
+      storage_path: i.slip.storagePath,
+      sha256: i.slip.sha256,
+      original_sha256: i.slip.originalSha256,
+      mime_type: i.slip.mimeType,
+      size_bytes: i.slip.sizeBytes,
+    },
     p_stage_due_at: iso(i.stageDueAt),
-    p_notifications: source === "CUSTOMER_SLIP" ? notificationsFor("payment.submitted", [owner(ticket.owner_id)], context(ticket, { amountCents: i.amountCents })) : [],
-  };
-}
-
-/** Steps 6-7 (PAY-02..04): the customer's slip goes to the owner. */
-export async function submitSlip(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof paymentSchema>) {
-  assertTransition("submitSlip", actor, ticket);
-  const i = parse(paymentSchema, input);
-  if (!i.slip) throw new TransitionError("INVALID_INPUT", "A payment slip is required");
-  return rpc("rpc_submit_payment", paymentArgs(ticket, actor, i, "CUSTOMER_SLIP"));
-}
-
-/** PAY-07: cash or cheque recorded by the owner. */
-export async function recordPayment(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof paymentSchema>) {
-  assertTransition("recordPayment", actor, ticket);
-  return rpc("rpc_submit_payment", paymentArgs(ticket, actor, parse(paymentSchema, input), "OWNER_MANUAL"));
+    p_notifications: notificationsFor(
+      "payment.submitted",
+      [owner(t.owner_id)],
+      { customer: i.context.customerName ?? t.customer_name ?? undefined, amountCents: i.payment.amountCents, invoiceNos: i.context.invoiceNos },
+      { link: PAYMENT_LINK.OWNER },
+    ),
+  })) as { payment_id: string; duplicate_of_payment_id: string | null; duplicate_reasons: string[]; replayed: boolean };
 }
 
 const acceptSchema = z.object({
   paymentId: z.uuid(),
+  /** What the owner received (the slip amount, or less). */
   acceptedAmountCents: positiveCents,
-  /** What was left to pay before this payment. */
-  balanceCents: cents,
-  stageDueAt: z.date(),
+  /** The split's outcome, by the same rule the rpc applies (planAllocation). */
+  outcome: z.object({ balanceCents: cents, creditCents: cents }),
+  context: paymentContext.default({ invoiceNos: [] }),
 });
 
-/** Steps 8-9 (PAY-05, PAY-06): paid in full closes the ticket (receipt); less leaves a balance. */
-export async function acceptPayment(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof acceptSchema>) {
-  assertTransition("acceptPayment", actor, ticket);
+/** Steps 8-9 (PAY-05, PAY-06): accepted; paid bills close, a balance stays open; the receipt is issued. */
+export async function acceptPayment(rpc: Rpc, actor: Actor, tickets: TicketSnapshot[], input: z.input<typeof acceptSchema>) {
+  assertPaymentTickets("acceptPayment", actor, tickets);
   const i = parse(acceptSchema, input);
-  const full = i.acceptedAmountCents >= i.balanceCents;
-  return rpc("rpc_verify_payment", {
-    p_ticket_id: ticket.id,
+  const context = { amountCents: i.acceptedAmountCents, invoiceNos: i.context.invoiceNos, balanceCents: i.outcome.balanceCents, creditCents: i.outcome.creditCents };
+  return (await rpc("rpc_verify_payment", {
     p_payment_id: i.paymentId,
     p_actor_id: actorId(actor),
     p_accept: true,
     p_accepted_amount_cents: i.acceptedAmountCents,
-    p_stage_due_at: iso(i.stageDueAt),
-    p_notifications: full
-      ? notificationsFor("payment.receipt", [customer(ticket.customer_id)], context(ticket, { amountCents: i.acceptedAmountCents }))
-      : notificationsFor("payment.partial", [customer(ticket.customer_id)], context(ticket, { amountCents: i.balanceCents - i.acceptedAmountCents })),
-  });
+    p_notifications: notificationsFor(i.outcome.balanceCents > 0 ? "payment.partial" : "payment.receipt", [customer(tickets[0].customer_id)], context, {
+      link: PAYMENT_LINK.CUSTOMER,
+    }),
+  })) as { status: "ACCEPTED" | "PARTIAL"; receipt_id: string; receipt_no: string; credit_cents: number };
 }
 
-const rejectPaymentSchema = z.object({ paymentId: z.uuid(), reason: reasonText, stageDueAt: z.date() });
+const rejectPaymentSchema = z.object({ paymentId: z.uuid(), reason: reasonText, amountCents: cents.default(0) });
 
-/** PAY-05 / 11.5: slip refused with a reason; back to Awaiting payment (or Partially paid). */
-export async function rejectPayment(rpc: Rpc, actor: Actor, ticket: TicketSnapshot, input: z.input<typeof rejectPaymentSchema>) {
-  assertTransition("rejectPayment", actor, ticket);
+/** PAY-05 / 11.5: slip refused with a reason; its bills wait for payment again. */
+export async function rejectPayment(rpc: Rpc, actor: Actor, tickets: TicketSnapshot[], input: z.input<typeof rejectPaymentSchema>) {
+  assertPaymentTickets("rejectPayment", actor, tickets);
   const i = parse(rejectPaymentSchema, input);
   return rpc("rpc_verify_payment", {
-    p_ticket_id: ticket.id,
     p_payment_id: i.paymentId,
     p_actor_id: actorId(actor),
     p_accept: false,
     p_reason: i.reason,
-    p_stage_due_at: iso(i.stageDueAt),
-    p_notifications: notificationsFor("payment.rejected", [customer(ticket.customer_id)], context(ticket, { reason: i.reason })),
+    p_notifications: notificationsFor("payment.rejected", [customer(tickets[0].customer_id)], { reason: i.reason, amountCents: i.amountCents }, {
+      link: PAYMENT_LINK.CUSTOMER,
+    }),
+  });
+}
+
+const manualSchema = z.object({
+  customerId: z.uuid(),
+  idempotencyKey: z.uuid(),
+  invoiceIds: z.array(z.uuid()).default([]),
+  payment: paymentDetails(MANUAL_METHODS),
+  outcome: z.object({ creditCents: cents }).default({ creditCents: 0 }),
+  context: paymentContext.default({ invoiceNos: [] }),
+});
+
+/** PAY-07 / 11.5: money received without a slip; accepted at once. No bills = an advance (credit). */
+export async function recordPayment(rpc: Rpc, actor: Actor, tickets: TicketSnapshot[], input: z.input<typeof manualSchema>) {
+  assertOwner("recordPayment", actor);
+  assertPaymentTickets("recordPayment", actor, tickets, true);
+  const i = parse(manualSchema, input);
+  if (tickets.some((t) => t.customer_id !== i.customerId)) throw new TransitionError("INVALID_INPUT", "A payment is for the bills of one customer");
+  if (tickets.length !== i.invoiceIds.length) throw new TransitionError("INVALID_INPUT", "Each bill needs its ticket");
+  return (await rpc("rpc_record_manual_payment", {
+    p_actor_id: actorId(actor),
+    p_customer_id: i.customerId,
+    p_idempotency_key: i.idempotencyKey,
+    p_invoice_ids: i.invoiceIds,
+    p_payment: detailsArg(i.payment),
+    p_notifications: notificationsFor(
+      "payment.recorded",
+      [customer(i.customerId)],
+      { amountCents: i.payment.amountCents, invoiceNos: i.context.invoiceNos, creditCents: i.outcome.creditCents },
+      { link: PAYMENT_LINK.CUSTOMER },
+    ),
+  })) as { payment_id: string; status: string; receipt_id: string; receipt_no: string; replayed: boolean };
+}
+
+const reverseSchema = z.object({
+  paymentId: z.uuid(),
+  customerId: z.uuid(),
+  reason: reasonText,
+  amountCents: cents,
+  context: paymentContext.default({ invoiceNos: [] }),
+});
+
+/** TKT-10 / 11.5: take back an accepted payment (e.g. a returned cheque); its bills are owed again. */
+export async function reversePayment(rpc: Rpc, actor: Actor, tickets: TicketSnapshot[], input: z.input<typeof reverseSchema>) {
+  assertOwner("reversePayment", actor);
+  assertPaymentTickets("reversePayment", actor, tickets, true);
+  const i = parse(reverseSchema, input);
+  return rpc("rpc_reverse_payment", {
+    p_payment_id: i.paymentId,
+    p_actor_id: actorId(actor),
+    p_reason: i.reason,
+    p_notifications: notificationsFor(
+      "payment.reversed",
+      [customer(i.customerId)],
+      { amountCents: i.amountCents, invoiceNos: i.context.invoiceNos, reason: i.reason },
+      { link: PAYMENT_LINK.CUSTOMER },
+    ),
+  });
+}
+
+const reallocateSchema = z.object({
+  paymentId: z.uuid(),
+  customerId: z.uuid(),
+  invoiceIds: z.array(z.uuid()),
+  reason: reasonText,
+  amountCents: cents,
+  context: paymentContext.default({ invoiceNos: [] }),
+});
+
+/** 11.5: move an accepted payment to other bills of the customer (same receipt number, new version). */
+export async function reallocatePayment(rpc: Rpc, actor: Actor, tickets: TicketSnapshot[], input: z.input<typeof reallocateSchema>) {
+  assertOwner("reallocatePayment", actor);
+  assertPaymentTickets("reallocatePayment", actor, tickets, true);
+  const i = parse(reallocateSchema, input);
+  if (tickets.some((t) => t.customer_id !== i.customerId)) throw new TransitionError("INVALID_INPUT", "A payment is for the bills of one customer");
+  return rpc("rpc_reallocate_payment", {
+    p_payment_id: i.paymentId,
+    p_actor_id: actorId(actor),
+    p_invoice_ids: i.invoiceIds,
+    p_reason: i.reason,
+    p_notifications: notificationsFor(
+      "payment.reallocated",
+      [customer(i.customerId)],
+      { amountCents: i.amountCents, invoiceNos: i.context.invoiceNos, reason: i.reason },
+      { link: PAYMENT_LINK.CUSTOMER },
+    ),
   });
 }
 

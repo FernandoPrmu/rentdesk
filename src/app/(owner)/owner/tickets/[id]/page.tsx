@@ -5,22 +5,27 @@ import { notFound } from "next/navigation";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { dueText, TicketFlagBadges, TicketStatusBadge } from "@/components/tickets/ticket-display";
+import { OwnerTicketActions } from "@/components/tickets/owner-ticket-actions";
 import { TicketTimeline } from "@/components/tickets/ticket-timeline";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
+import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 import { INVOICE_STATUS_LABEL } from "@/lib/status-labels";
+import { waitingPaymentId } from "@/lib/tickets/owner-actions";
 import { getTicket } from "@/lib/tickets/queries";
 import { isMeterStage } from "@/lib/tickets/states";
 import { currentDue, nextStep } from "@/lib/tickets/view";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+import { ticketAction } from "../actions";
+
 export const metadata: Metadata = { title: "Ticket" };
 
-/** TKT-06: the current stage, who must act, the due date and the full history. */
+/** TKT-06, TKT-10: the current stage, who must act, the due date, the owner's actions and the full history. */
 export default async function OwnerTicketPage({ params }: PageProps<"/owner/tickets/[id]">) {
   await requireUser("OWNER");
   const { id } = await params;
@@ -30,6 +35,7 @@ export default async function OwnerTicketPage({ params }: PageProps<"/owner/tick
   const now = new Date();
   const step = nextStep(ticket);
   const inv = ticket.invoice;
+  const waiting = ticket.status === "PAYMENT_SUBMITTED" ? await waitingPaymentId(ticket.id) : null;
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -72,11 +78,19 @@ export default async function OwnerTicketPage({ params }: PageProps<"/owner/tick
               {ticket.invoice?.type === "ESTIMATED" ? "Review the estimated invoice" : "Review the reading"}
             </Link>
           )}
+          {waiting && (
+            <Link href={`/owner/payments/${waiting}`} className={cn(buttonVariants(), "mt-4 h-12 w-full text-base sm:w-auto sm:px-6")} data-testid="ticket-check-payment">
+              Check the payment slip
+            </Link>
+          )}
           {isMeterStage({ status: ticket.status, statusBeforeOverdue: ticket.status_before_overdue }) && (
             <Link href={`/owner/tickets/${ticket.id}/enter`} className={cn(buttonVariants({ variant: "outline" }), "mt-4 h-12 w-full text-base sm:w-auto sm:px-6")}>
               Enter the reading for the customer
             </Link>
           )}
+          <div className="mt-4">
+            <OwnerTicketActions ticketId={ticket.id} status={ticket.status} before={ticket.status_before_overdue} today={todayInColombo()} action={ticketAction} />
+          </div>
           <p className="mt-4 text-sm text-muted-foreground">
             Period {formatDate(ticket.period_start)} to {formatDate(ticket.period_end)} ({ticket.cycle_length_days} days).{" "}
             <Link href={`/owner/agreements/${ticket.agreement_id}`} className="underline underline-offset-4">

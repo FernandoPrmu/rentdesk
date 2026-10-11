@@ -12,6 +12,8 @@ import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support
 test.describe.configure({ mode: "serial" });
 
 const serial = `${E2E_SERIAL_PREFIX}TKT-${Date.now().toString(36).toUpperCase()}`;
+// A model no other spec uses: the customer's Home is filtered by it (specs run in parallel on the same customer).
+const MODEL = "MP 2702";
 const colombo = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(d);
 const today = colombo(new Date());
 // Meter deadline: 00:00 on day 5, so the last day to send it is day 4 (spec 5.4).
@@ -28,7 +30,7 @@ test.describe("billing cycle tickets and the daily job", () => {
   test("the daily job opens the ticket on the first billing date", async ({ request }) => {
     const owner = await profileId(DEMO.ownerLanka.username);
     const customer = await profileId(DEMO.custPerera.username);
-    const agreementId = await assignMachine(owner, await createMachine(owner, serial), customer, today);
+    const agreementId = await assignMachine(owner, await createMachine(owner, serial, MODEL), customer, today);
     expect(await ticketIds(agreementId)).toEqual([]);
 
     const unauthorised = await request.get("/api/cron/daily");
@@ -63,7 +65,7 @@ test.describe("billing cycle tickets and the daily job", () => {
   test("the customer's Home asks for the meter reading with its deadline", async ({ page }) => {
     await signInCached(page, DEMO.custPerera, "/customer");
     await expect(page.getByRole("heading", { name: "What you need to do now" })).toBeVisible();
-    const task = page.getByTestId("task-meter").filter({ hasText: "Ricoh MP 2501" });
+    const task = page.getByTestId("task-meter").filter({ hasText: `Ricoh ${MODEL}` });
     await expect(task).toHaveCount(1);
     await expect(task).toContainText("Enter meter reading");
     await expect(task.getByTestId("task-deadline")).toHaveText(`Send by ${lastDay}`);

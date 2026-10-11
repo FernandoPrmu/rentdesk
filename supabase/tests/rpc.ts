@@ -2,6 +2,9 @@ import type pg from "pg";
 
 import { type Rpc, RpcError } from "../../src/lib/tickets/transitions.ts";
 
+/** uuid[] parameters: sent as a Postgres array, not as JSON text. */
+const ARRAY_PARAMS = new Set(["p_invoice_ids"]);
+
 /**
  * The rpc port of src/lib/tickets and src/lib/cron over a pg connection: the same
  * public.rpc_* wrappers the server calls through supabase-js, with named
@@ -14,6 +17,7 @@ export function pgRpc(db: pg.Client): Rpc {
     const names = Object.keys(args).filter((k) => args[k] !== undefined);
     const values = names.map((k) => {
       const v = args[k];
+      if (ARRAY_PARAMS.has(k)) return v;
       // Objects and arrays go to jsonb parameters as JSON text.
       return v !== null && typeof v === "object" ? JSON.stringify(v) : v;
     });

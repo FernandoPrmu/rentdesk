@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type ActorKind, canPerform, TICKET_ACTIONS, TICKET_STATUSES, type TicketAction, type TicketStatus } from "./states";
+import { type ActorKind, canPerform, REQUESTED_ACTIONS, TICKET_STATUSES, type TicketAction, type TicketStatus } from "./states";
 import * as T from "./transitions";
 import { type Actor, type Rpc, type TicketSnapshot, TransitionError } from "./transitions";
 
@@ -30,10 +30,12 @@ const reading = {
   note: "Customer phoned the reading in",
   stageDueAt: NOW,
 };
-const payment = { idempotencyKey: ID, amountCents: 500_000, paidOn: "2026-10-09", slip: { storagePath: `${OWNER}/${ID}/s.pdf`, sha256: "a".repeat(64), mimeType: "application/pdf", sizeBytes: 10 }, stageDueAt: NOW };
+const details = { amountCents: 500_000, paidOn: "2026-10-09", method: "BANK_TRANSFER" as const, reference: "TRX-1" };
+const slip = { storagePath: `${OWNER}/${CUSTOMER}/${ID}.pdf`, sha256: "a".repeat(64), mimeType: "application/pdf" as const, sizeBytes: 10 };
+const payment = { idempotencyKey: ID, invoiceIds: [ID], payment: details, slip, stageDueAt: NOW, context: { invoiceNos: ["INV-000007"] } };
 
 /** Each action: its function, a valid input, and the rpc it must call. */
-const CASES: Record<TicketAction, { call: (rpc: Rpc, actor: Actor, t: TicketSnapshot) => Promise<unknown>; rpc: string }> = {
+const CASES: Record<Exclude<TicketAction, "paymentWithdrawn">, { call: (rpc: Rpc, actor: Actor, t: TicketSnapshot) => Promise<unknown>; rpc: string }> = {
   submitReading: { call: (r, a, t) => T.submitReading(r, a, t, reading), rpc: "rpc_submit_meter_reading" },
   enterReadingManually: { call: (r, a, t) => T.enterReadingManually(r, a, t, reading), rpc: "rpc_submit_meter_reading" },
   createEstimate: { call: (r, a, t) => T.createEstimate(r, a, t, { invoice: { ...invoice, type: "ESTIMATED" }, stageDueAt: NOW, now: NOW }), rpc: "rpc_create_estimated_invoice" },
@@ -43,10 +45,24 @@ const CASES: Record<TicketAction, { call: (rpc: Rpc, actor: Actor, t: TicketSnap
     rpc: "rpc_correct_meter_reading",
   },
   rejectReading: { call: (r, a, t) => T.rejectReading(r, a, t, { submissionId: ID, reason: "Photo blurry", stageDueAt: NOW, photoExpiresAt: NOW }), rpc: "rpc_reject_meter_submission" },
-  submitSlip: { call: (r, a, t) => T.submitSlip(r, a, t, payment), rpc: "rpc_submit_payment" },
-  recordPayment: { call: (r, a, t) => T.recordPayment(r, a, t, { ...payment, slip: null, method: "CASH" }), rpc: "rpc_submit_payment" },
-  acceptPayment: { call: (r, a, t) => T.acceptPayment(r, a, t, { paymentId: ID, acceptedAmountCents: 500_000, balanceCents: 500_000, stageDueAt: NOW }), rpc: "rpc_verify_payment" },
-  rejectPayment: { call: (r, a, t) => T.rejectPayment(r, a, t, { paymentId: ID, reason: "Wrong amount", stageDueAt: NOW }), rpc: "rpc_verify_payment" },
+  submitSlip: { call: (r, a, t) => T.submitSlip(r, a, [t], payment), rpc: "rpc_submit_payment" },
+  recordPayment: {
+    call: (r, a, t) => T.recordPayment(r, a, [t], { customerId: CUSTOMER, idempotencyKey: ID, invoiceIds: [ID], payment: { ...details, method: "CASH" } }),
+    rpc: "rpc_record_manual_payment",
+  },
+  acceptPayment: {
+    call: (r, a, t) => T.acceptPayment(r, a, [t], { paymentId: ID, acceptedAmountCents: 500_000, outcome: { balanceCents: 0, creditCents: 0 } }),
+    rpc: "rpc_verify_payment",
+  },
+  rejectPayment: { call: (r, a, t) => T.rejectPayment(r, a, [t], { paymentId: ID, reason: "Wrong amount" }), rpc: "rpc_verify_payment" },
+  reversePayment: {
+    call: (r, a, t) => T.reversePayment(r, a, [t], { paymentId: ID, customerId: CUSTOMER, reason: "Cheque returned", amountCents: 500_000 }),
+    rpc: "rpc_reverse_payment",
+  },
+  reallocatePayment: {
+    call: (r, a, t) => T.reallocatePayment(r, a, [t], { paymentId: ID, customerId: CUSTOMER, invoiceIds: [ID], reason: "Wrong bill", amountCents: 500_000 }),
+    rpc: "rpc_reallocate_payment",
+  },
   markOverdue: { call: (r, a, t) => T.markOverdue(r, a, t, { now: NOW, reminderNo: 0, escalationLevel: 1 }), rpc: "rpc_mark_ticket_overdue" },
   clearOverdue: { call: (r, a, t) => T.clearOverdue(r, a, t, { reason: "Agreed by phone", dueDate: "2026-10-20", stageDueAt: NOW }), rpc: "rpc_transition_ticket" },
   raiseDispute: { call: (r, a, t) => T.raiseDispute(r, a, t, { reason: "Too many copies" }), rpc: "rpc_raise_dispute" },
@@ -63,7 +79,7 @@ const STATES: [TicketStatus, TicketStatus | null][] = [
 const ACTORS: ActorKind[] = ["CUSTOMER", "OWNER", "ADMIN", "SYSTEM"];
 
 describe("every transition function: allowed ones call their rpc, forbidden ones are refused", () => {
-  for (const action of TICKET_ACTIONS) {
+  for (const action of REQUESTED_ACTIONS as Exclude<TicketAction, "paymentWithdrawn">[]) {
     it(action, async () => {
       let allowedSomewhere = false;
       for (const [status, before] of STATES) {
@@ -130,14 +146,47 @@ describe("rpc arguments and hand-over notifications (TKT-04)", () => {
     expect(args.p_notifications).toEqual([expect.objectContaining({ user_id: OWNER, event: "meter.submitted", channel: "IN_APP", link: "/owner/tickets/{entity_id}" })]);
   });
 
-  it("an accepted payment that covers the balance sends a receipt; less sends the balance", async () => {
+  it("an accepted payment that covers its bills sends the receipt; less sends the balance", async () => {
     const rpc = vi.fn<Rpc>(async () => ({}));
-    await T.acceptPayment(rpc, ACTOR.OWNER, ticket("PAYMENT_SUBMITTED"), { paymentId: ID, acceptedAmountCents: 500_000, balanceCents: 500_000, stageDueAt: NOW });
-    await T.acceptPayment(rpc, ACTOR.OWNER, ticket("PAYMENT_SUBMITTED"), { paymentId: ID, acceptedAmountCents: 200_000, balanceCents: 500_000, stageDueAt: NOW });
-    expect((rpc.mock.calls[0][1].p_notifications as { event: string }[])[0].event).toBe("payment.receipt");
+    const context = { invoiceNos: ["INV-000007", "INV-000009"] };
+    await T.acceptPayment(rpc, ACTOR.OWNER, [ticket("PAYMENT_SUBMITTED")], { paymentId: ID, acceptedAmountCents: 500_000, outcome: { balanceCents: 0, creditCents: 25_000 }, context });
+    await T.acceptPayment(rpc, ACTOR.OWNER, [ticket("PAYMENT_SUBMITTED")], { paymentId: ID, acceptedAmountCents: 200_000, outcome: { balanceCents: 300_000, creditCents: 0 }, context });
+    const receipt = (rpc.mock.calls[0][1].p_notifications as { event: string; body: string; link: string; user_id: string }[])[0];
+    expect(receipt).toMatchObject({ event: "payment.receipt", user_id: CUSTOMER, link: "/customer/payments/{entity_id}" });
+    expect(receipt.body).toContain("Bills INV-000007, INV-000009 are paid");
+    expect(receipt.body).toContain("Rs. 250 is kept as credit");
     const partial = (rpc.mock.calls[1][1].p_notifications as { event: string; title: string; body: string }[])[0];
     expect(partial.event).toBe("payment.partial");
-    expect(partial.body).toContain("Rs. 3,000");
+    expect(partial.body).toContain("Rs. 3,000 is still to pay");
+    expect(rpc.mock.calls[1][1]).toMatchObject({ p_payment_id: ID, p_accept: true, p_accepted_amount_cents: 200_000 });
+  });
+
+  it("a slip goes to the owner with every bill; the bills of two customers are refused", async () => {
+    const rpc = vi.fn<Rpc>(async () => ({}));
+    const other = { ...ticket("AWAITING_PAYMENT"), id: OTHER };
+    await T.submitSlip(rpc, ACTOR.CUSTOMER, [ticket("AWAITING_PAYMENT"), other], { ...payment, invoiceIds: [ID, OTHER] });
+    const args = rpc.mock.calls[0][1];
+    expect(args).toMatchObject({ p_customer_id: CUSTOMER, p_invoice_ids: [ID, OTHER], p_payment: { amount_cents: 500_000, method: "BANK_TRANSFER", reference: "TRX-1" } });
+    expect(args.p_notifications).toEqual([expect.objectContaining({ user_id: OWNER, event: "payment.submitted", link: "/owner/payments/{entity_id}" })]);
+    await expect(T.submitSlip(rpc, ACTOR.CUSTOMER, [ticket("AWAITING_PAYMENT"), { ...other, customer_id: OTHER }], payment)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(T.submitSlip(rpc, ACTOR.CUSTOMER, [], payment)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    // The customer names only the slip methods.
+    await expect(T.submitSlip(rpc, ACTOR.CUSTOMER, [ticket("AWAITING_PAYMENT")], { ...payment, payment: { ...details, method: "CASH" as never } })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("an advance needs no bill; reversal and reallocation need a reason", async () => {
+    const rpc = vi.fn<Rpc>(async () => ({}));
+    await T.recordPayment(rpc, ACTOR.OWNER, [], { customerId: CUSTOMER, idempotencyKey: ID, payment: { ...details, method: "CASH" }, outcome: { creditCents: 500_000 } });
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_invoice_ids: [], p_customer_id: CUSTOMER });
+    expect((rpc.mock.calls[0][1].p_notifications as { body: string }[])[0].body).toContain("Rs. 5,000 is kept as credit");
+    await expect(T.recordPayment(rpc, ACTOR.CUSTOMER, [], { customerId: CUSTOMER, idempotencyKey: ID, payment: { ...details, method: "CASH" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(T.reversePayment(rpc, ACTOR.OWNER, [ticket("CLOSED")], { paymentId: ID, customerId: CUSTOMER, reason: " ", amountCents: 1 })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(T.reallocatePayment(rpc, ACTOR.OWNER, [ticket("CLOSED")], { paymentId: ID, customerId: CUSTOMER, invoiceIds: [], reason: "", amountCents: 1 })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    // A ticket with a slip waiting or a dispute cannot have its payment reversed.
+    await expect(T.reversePayment(rpc, ACTOR.OWNER, [ticket("PAYMENT_SUBMITTED")], { paymentId: ID, customerId: CUSTOMER, reason: "x", amountCents: 1 })).rejects.toMatchObject({ code: "INVALID_STATE" });
+    await expect(T.reversePayment(rpc, ACTOR.OWNER, [ticket("DISPUTED")], { paymentId: ID, customerId: CUSTOMER, reason: "x", amountCents: 1 })).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 
   it("clearing an overdue payment goes back where it came from, with the new due date", async () => {

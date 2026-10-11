@@ -45,6 +45,12 @@ export interface NotificationContext {
   months?: number;
   /** "B&W 12,500 → 12,050" (corrections). */
   changes?: string;
+  /** Bills a payment is for. */
+  invoiceNos?: string[];
+  /** Still to pay after a payment (its bills). */
+  balanceCents?: number;
+  /** Kept as a customer credit. */
+  creditCents?: number;
 }
 
 type Template = (c: NotificationContext) => { title: string; body: string };
@@ -54,6 +60,9 @@ const money = (c: NotificationContext) => (c.amountCents === undefined ? "" : fo
 const machine = (c: NotificationContext) => c.machine ?? "your machine";
 const bill = (c: NotificationContext) => (c.invoiceNo ? `Bill ${c.invoiceNo}` : "Your bill");
 const reason = (c: NotificationContext) => (c.reason ? ` Reason: ${c.reason}` : "");
+const bills = (c: NotificationContext) =>
+  c.invoiceNos && c.invoiceNos.length > 0 ? `${c.invoiceNos.length === 1 ? "bill" : "bills"} ${c.invoiceNos.join(", ")}` : "your bill";
+const credit = (c: NotificationContext) => (c.creditCents ? ` ${formatRupees(c.creditCents)} is kept as credit for your next bills.` : "");
 
 const TEMPLATES = {
   // Daily job
@@ -150,13 +159,36 @@ const TEMPLATES = {
     title: `New bill: ${money(c)}`,
     body: `${bill(c)} for ${machine(c)} is due on ${c.dueDate ? formatDate(c.dueDate) : "?"}.`,
   }),
+  // Payments (PAY-04..07, PAY-12, TKT-10): one payment may cover several bills.
   "payment.submitted": (c) => ({
     title: `Payment slip received: ${c.customer ?? "customer"}`,
-    body: `Check the payment of ${money(c)} for ${machine(c)}.`,
+    body: `Check the payment of ${money(c)} for ${bills(c)}.`,
   }),
-  "payment.receipt": (c) => ({ title: `Payment received: ${money(c)}`, body: `${bill(c)} for ${machine(c)} is paid. Thank you.` }),
-  "payment.partial": (c) => ({ title: `Part payment accepted`, body: `${money(c)} is still to pay for ${machine(c)}.` }),
-  "payment.rejected": (c) => ({ title: `Payment not accepted: ${machine(c)}`, body: `Please check and send the slip again.${reason(c)}` }),
+  "payment.receipt": (c) => ({
+    title: `Payment received: ${money(c)}`,
+    body: `Thank you. ${bills(c).replace(/^./, (x) => x.toUpperCase())} ${c.invoiceNos && c.invoiceNos.length > 1 ? "are" : "is"} paid. Your receipt is ready.${credit(c)}`,
+  }),
+  "payment.partial": (c) => ({
+    title: `Part payment accepted: ${money(c)}`,
+    body: `${formatRupees(c.balanceCents ?? 0)} is still to pay on ${bills(c)}. Your receipt is ready.`,
+  }),
+  "payment.rejected": (c) => ({ title: `Payment not accepted: ${money(c)}`, body: `Please check and send the slip again.${reason(c)}` }),
+  "payment.recorded": (c) => ({
+    title: `Payment recorded: ${money(c)}`,
+    body: `Your rental company recorded your payment${c.invoiceNos && c.invoiceNos.length > 0 ? ` for ${bills(c)}` : ""}. Your receipt is ready.${credit(c)}`,
+  }),
+  "payment.reversed": (c) => ({
+    title: `Payment reversed: ${money(c)}`,
+    body: `Your rental company took back this payment, so ${bills(c)} must be paid again.${reason(c)}`,
+  }),
+  "payment.reallocated": (c) => ({
+    title: `Payment moved to other bills: ${money(c)}`,
+    body: `It now pays ${bills(c)}. Your receipt was updated.${reason(c)}`,
+  }),
+  "credit.refunded": (c) => ({
+    title: `Credit refunded: ${money(c)}`,
+    body: `Your rental company paid back ${money(c)} of your credit.${reason(c)}`,
+  }),
   "dispute.raised": (c) => ({ title: `Bill disputed: ${c.customer ?? "customer"}`, body: `${bill(c)} for ${machine(c)}.${reason(c)}` }),
   "dispute.resolved": (c) => ({ title: `Answer to your dispute: ${machine(c)}`, body: `${c.reason ?? ""}`.trim() }),
   "ticket.cancelled": (c) => ({ title: `Billing ticket cancelled: ${machine(c)}`, body: `Cycle ${c.cycleNo ?? "?"} was cancelled.${reason(c)}` }),
@@ -197,6 +229,12 @@ export function notificationsFor(
   }
   return items;
 }
+
+/** Where each role opens a payment. "{entity_id}" is replaced with the payment id by the rpc. */
+export const PAYMENT_LINK: Record<"CUSTOMER" | "OWNER", string> = {
+  CUSTOMER: "/customer/payments/{entity_id}",
+  OWNER: "/owner/payments/{entity_id}",
+};
 
 export const customer = (userId: string): Recipient => ({ userId, role: "CUSTOMER" });
 export const owner = (userId: string): Recipient => ({ userId, role: "OWNER" });

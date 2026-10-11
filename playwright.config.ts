@@ -22,12 +22,18 @@ export function e2eConfig(dev: boolean): PlaywrightTestConfig {
   return defineConfig({
     testDir: "./e2e",
     fullyParallel: true,
+    // Three workers: with six, the free-tier Supabase project queued requests for 6-30 s
+    // (even the one-row session check on every page) and owner actions timed out at random.
+    // Three run as fast with far fewer stalls (task 7).
+    workers: 3,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
     reporter: process.env.CI ? "github" : "list",
-    // The dev server compiles each route on first visit.
-    timeout: dev ? 90_000 : 60_000,
-    expect: { timeout: 20_000 },
+    // The dev server compiles each route on first visit. The free-tier Supabase project
+    // sometimes stalls every request for up to ~45 s (measured in task 7: even the
+    // one-row session check; the Next server itself was idle), so steps may wait that long.
+    timeout: dev ? 150_000 : 120_000,
+    expect: { timeout: 45_000 },
     globalSetup: "./e2e/support/global-setup.ts",
     globalTeardown: "./e2e/support/global-teardown.ts",
     use: {

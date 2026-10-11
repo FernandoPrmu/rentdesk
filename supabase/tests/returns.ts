@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type pg from "pg";
 
 import { addDays, type FinalCycle } from "../../src/lib/agreements/cycle-calendar.ts";
-import type { Terms } from "../../src/lib/billing/invoice.ts";
+import type { ServiceCharge, Terms } from "../../src/lib/billing/invoice.ts";
 import { buildMeterSubmission, type MeterContext } from "../../src/lib/billing/meter-invoice.ts";
 import { buildReturnInvoice, type ReturnContext } from "../../src/lib/billing/return-invoice.ts";
 import type { CounterType, KnownReading } from "../../src/lib/billing/usage.ts";
@@ -87,6 +87,7 @@ export async function returnContextFromDb(db: pg.Client, agreementId: string, to
     counters,
     estimateCredits: await estimateCreditsFromDb(db, agreementId, final.cycleNo),
     credits: credits[0].c.map((c) => ({ id: c.id, amountCents: Number(c.available_cents) })),
+    serviceCharges: await serviceChargesFromDb(db, agreementId),
   };
 }
 
@@ -97,6 +98,20 @@ async function estimateCreditsFromDb(db: pg.Client, agreementId: string, beforeC
     [agreementId, beforeCycle],
   );
   return rows[0].e.map((x) => ({ invoiceNo: x.invoice_no, cycleNo: x.cycle_no, amountCents: Number(x.amount_cents) }));
+}
+
+/**
+ * Decision 59: the agreement's service charges still to bill (app.service_charges_free),
+ * or the ones a draft being recalculated already carries (like loadServiceCharges).
+ */
+export async function serviceChargesFromDb(db: pg.Client, agreementId: string, draftInvoiceId: string | null = null): Promise<ServiceCharge[]> {
+  const { rows } = draftInvoiceId
+    ? await db.query<{ c: { id: string; description: string; amount_cents: number }[] | null }>(
+        "select calculation -> 'service_charges' as c from public.invoices where id = $1",
+        [draftInvoiceId],
+      )
+    : await db.query<{ c: { id: string; description: string; amount_cents: number }[] }>("select app.service_charges_free($1, null) as c", [agreementId]);
+  return (rows[0]?.c ?? []).map((c) => ({ id: c.id, description: c.description, amountCents: Number(c.amount_cents) }));
 }
 
 /** Engine context for a ticket's meter reading, from the database (like loadMeterContext). */
@@ -131,6 +146,7 @@ export async function meterContextFromDb(
     estimateCredits: await estimateCreditsFromDb(db, t.agreement_id, t.cycle_no),
     credits: credits[0].c.filter((c) => !excluded.includes(c.id)).map((c) => ({ id: c.id, amountCents: Number(c.available_cents) })),
     creditsExcluded: excluded,
+    serviceCharges: await serviceChargesFromDb(db, t.agreement_id, options.excludeInvoiceId ?? null),
   };
 }
 

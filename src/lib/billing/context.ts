@@ -4,7 +4,7 @@ import type { Database } from "../../types/db.ts";
 import { finalCycle } from "../agreements/cycle-calendar.ts";
 import { versionForCycle } from "../agreements/terms.ts";
 import { BillingError } from "./errors.ts";
-import type { AvailableCredit, EstimateCredit, MachineType } from "./invoice.ts";
+import type { AvailableCredit, EstimateCredit, MachineType, ServiceCharge } from "./invoice.ts";
 import type { CounterContext, MeterContext } from "./meter-invoice.ts";
 import type { ReturnContext } from "./return-invoice.ts";
 import type { CounterType, KnownReading } from "./usage.ts";
@@ -37,6 +37,7 @@ const CREDIT_LABEL: Record<string, string> = {
   ESTIMATE_RECONCILIATION: "estimate",
   MANUAL: "credit",
   DISPUTE: "dispute credit",
+  SERVICE_DISCOUNT: "service discount",
 };
 
 function fail(what: string, message?: string): never {
@@ -125,6 +126,40 @@ async function loadEstimateCredits(client: Client, agreementId: string, lastConf
 }
 
 /**
+ * Decision 59: the agreement's service charges not yet on a live invoice (drafts
+ * reserve them, a rejected or cancelled invoice frees them), oldest first. A draft
+ * being recalculated (`draftInvoiceId`) keeps exactly the charges it has; newer ones
+ * wait for the next invoice. Same as app.service_charges_free.
+ */
+export async function loadServiceCharges(client: Client, agreementId: string, draftInvoiceId: string | null = null): Promise<ServiceCharge[]> {
+  if (draftInvoiceId) {
+    const { data, error } = await client.from("invoices").select("calculation").eq("id", draftInvoiceId).maybeSingle();
+    if (error) fail("draft invoice", error.message);
+    const listed = ((data?.calculation as { service_charges?: { id: string; description: string; amount_cents: number }[] } | null)?.service_charges ?? []);
+    return listed.map((c) => ({ id: c.id, description: c.description, amountCents: c.amount_cents }));
+  }
+  const [charges, invoices] = await Promise.all([
+    client
+      .from("service_requests")
+      .select("id, charge_cents, charge_description, charged_at")
+      .eq("agreement_id", agreementId)
+      .not("charge_cents", "is", null)
+      .order("charged_at")
+      .order("id"),
+    client.from("invoices").select("calculation").eq("agreement_id", agreementId).not("status", "in", "(REJECTED,CANCELLED)"),
+  ]);
+  if (charges.error) fail("service charges", charges.error.message);
+  if (invoices.error) fail("invoices", invoices.error.message);
+  if (charges.data.length === 0) return [];
+  const billed = new Set(
+    invoices.data.flatMap((i) => ((i.calculation as { service_charges?: { id: string }[] } | null)?.service_charges ?? []).map((c) => c.id)),
+  );
+  return charges.data
+    .filter((c) => !billed.has(c.id))
+    .map((c) => ({ id: c.id, description: c.charge_description ?? "Service", amountCents: c.charge_cents ?? 0 }));
+}
+
+/**
  * Rule 13: the customer's credits with something left, oldest first. What is left
  * = amount minus what was refunded (PAY-12) minus the CREDIT lines that use it on
  * live invoices (drafts included:
@@ -179,9 +214,10 @@ export async function loadMeterContext(
   if (!ticket) throw new BillingError("INVALID_INPUT", "Ticket not found");
 
   const { counters, lastConfirmedCycle } = await loadCounters(client, ticket.agreement_id, ticket.machine_id, ticket.machine_type);
-  const [estimateCredits, credits] = await Promise.all([
+  const [estimateCredits, credits, serviceCharges] = await Promise.all([
     loadEstimateCredits(client, ticket.agreement_id, lastConfirmedCycle, ticket.cycle_no),
     loadAvailableCredits(client, ticket.customer_id, options.excludeInvoiceId ?? null),
+    loadServiceCharges(client, ticket.agreement_id, options.excludeInvoiceId ?? null),
   ]);
 
   return {
@@ -198,6 +234,7 @@ export async function loadMeterContext(
     estimateCredits,
     credits,
     creditsExcluded: options.creditsExcluded ?? [],
+    serviceCharges,
   };
 }
 
@@ -231,9 +268,10 @@ export async function loadReturnContext(client: Client, agreementId: string, tod
   const final = finalCycle({ startDate: agreement.start_date, firstBillingDate: agreement.first_billing_date, today, lastConfirmedCycle });
   const terms = versionForCycle(agreement.history, final.cycleNo);
   if (!terms) fail("terms", "no version in force");
-  const [estimateCredits, credits] = await Promise.all([
+  const [estimateCredits, credits, serviceCharges] = await Promise.all([
     loadEstimateCredits(client, agreement.id, lastConfirmedCycle, final.cycleNo),
     loadAvailableCredits(client, agreement.customer_id),
+    loadServiceCharges(client, agreement.id),
   ]);
 
   return {
@@ -250,6 +288,7 @@ export async function loadReturnContext(client: Client, agreementId: string, tod
     counters,
     estimateCredits,
     credits,
+    serviceCharges,
   };
 }
 

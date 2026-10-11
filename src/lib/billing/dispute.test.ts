@@ -74,6 +74,24 @@ describe("give a credit on a disputed bill (rule 48)", () => {
   });
 });
 
+describe("a corrected invoice carries the service charges of the bill it replaces (decision 59)", () => {
+  it("keeps the charge line; the correction's own adjustments come first", () => {
+    const original = issuedColour();
+    const withCharge: OriginalInvoice = {
+      ...original,
+      totalCents: original.totalCents + RS(1500),
+      calculation: { ...original.calculation!, service_charges: [{ id: "sr-1", description: "Drum unit", amount_cents: RS(1500) }] },
+    };
+    const r = buildCorrectedInvoice(withCharge, { readings: null, adjustments: [{ description: "Goodwill", amountCents: -RS(300) }], credits: [], paidCreditId: null });
+    expect(r.invoice.lines.filter((l) => l.line_type === "ADJUSTMENT").map((l) => [l.description, l.amount_cents])).toEqual([
+      ["Goodwill", -RS(300)],
+      ["Drum unit", RS(1500)],
+    ]);
+    expect(r.invoice.total_cents).toBe(RS(12_800 + 1500 - 300));
+    expect((r.invoice.calculation as { service_charges: unknown[] }).service_charges).toEqual([{ id: "sr-1", description: "Drum unit", amount_cents: RS(1500) }]);
+  });
+});
+
 describe("correct an issued invoice: cancel and reissue (rule 49)", () => {
   it("recalculates from the original's facts with the corrected reading (B&W 4,400 → 4,000)", () => {
     const r = buildCorrectedInvoice(issuedColour(), { readings: { BW: 4000, COLOUR: 900 }, adjustments: [], credits: [], paidCreditId: null });

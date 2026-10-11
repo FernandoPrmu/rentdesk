@@ -28,9 +28,9 @@ const TENANT_RELATIONS = [
   "invoice_pdf_versions", "payment_allocations", "credit_refunds", "receipts", "receipt_counters", "receipt_pdf_versions",
 ];
 
-/** Rows visible to the current role; 0 when the relation is not granted at all. */
+/** Rows visible to the current role; 0 when the relation is not granted at all (column grants count, 0031). */
 async function visible(db: pg.Client, relation: string): Promise<number> {
-  const { rows } = await db.query("select has_table_privilege($1, 'select') as granted", [relation]);
+  const { rows } = await db.query("select has_any_column_privilege($1, 'select') as granted", [relation]);
   return rows[0].granted ? count(db, `select 1 from ${relation}`) : 0;
 }
 
@@ -392,13 +392,16 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_cron_last_success",
         "rpc_cron_orphan_dispute_files",
         "rpc_cron_orphan_photos",
+        "rpc_cron_orphan_service_photos",
         "rpc_cron_orphan_slips",
         "rpc_cron_overdue_summaries",
         "rpc_cron_pause_candidates",
         "rpc_cron_pending_invoice_pdfs",
         "rpc_cron_pending_receipt_pdfs",
+        "rpc_cron_service_candidates",
         "rpc_cron_ticket_candidates",
         "rpc_edit_ticket_comment",
+        "rpc_escalate_service_request",
         "rpc_escalate_ticket",
         "rpc_login_gate_state",
         "rpc_mark_invoice_pdf_failed",
@@ -412,6 +415,8 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_plan_allocation",
         "rpc_provision_account",
         "rpc_raise_dispute",
+        "rpc_raise_service_request",
+        "rpc_rate_service_request",
         "rpc_reallocate_payment",
         "rpc_reassign_machine",
         "rpc_record_invoice_pdf",
@@ -430,6 +435,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_reverse_payment",
         "rpc_save_company_profile",
         "rpc_save_invoice_template",
+        "rpc_service_request_action",
         "rpc_session_state",
         "rpc_set_account_status",
         "rpc_set_invoice_credit",

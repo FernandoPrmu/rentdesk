@@ -6,6 +6,7 @@ import {
   type EstimateCredit,
   type InvoiceResult,
   type MachineType,
+  type ServiceCharge,
   type Terms,
 } from "./invoice.ts";
 import { carriedCopies, type CounterType, type KnownReading, previousReading } from "./usage.ts";
@@ -36,6 +37,8 @@ export interface MeterContext {
   credits: AvailableCredit[];
   /** Credits the owner removed from this draft; they stay available. */
   creditsExcluded?: string[];
+  /** Decision 59: service charges still to bill on this agreement (a recalculated draft keeps its own). */
+  serviceCharges?: ServiceCharge[];
 }
 
 export interface MeterReadingRow {
@@ -133,6 +136,7 @@ export function buildMeterSubmission(context: MeterContext, typed: TypedReadings
     fullCycles: context.cyclesCovered,
     readings: readingInputs(context.terms.machineType, context.counters, typed),
     estimateCredits: context.estimateCredits,
+    serviceCharges: context.serviceCharges,
     credits: applicableCredits(context.credits, context.creditsExcluded),
     creditsExcluded: context.creditsExcluded,
   });

@@ -94,6 +94,8 @@ export interface StoredCalculation {
     carried_copies?: number;
   }[];
   estimate_credits?: { invoice_no: string | null; cycle_no: number; amount_cents: number }[];
+  /** Decision 59: service charges billed on it; a corrected bill carries them. */
+  service_charges?: { id: string; description: string; amount_cents: number }[];
   credits_excluded?: string[];
 }
 
@@ -199,6 +201,7 @@ export function buildCorrectedInvoice(original: OriginalInvoice, input: Correcti
     readings: original.type === "NORMAL" ? readings : undefined,
     estimateCredits,
     adjustments: input.adjustments,
+    serviceCharges: (calc.service_charges ?? []).map((c) => ({ id: c.id, description: c.description, amountCents: c.amount_cents })),
     credits,
     creditsExcluded: excluded,
   });

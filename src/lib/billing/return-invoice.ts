@@ -1,5 +1,5 @@
 import type { FinalCycle } from "../agreements/cycle-calendar.ts";
-import { type AvailableCredit, calculateInvoice, type EstimateCredit, type PartialCycle, type Terms } from "./invoice.ts";
+import { type AvailableCredit, calculateInvoice, type EstimateCredit, type PartialCycle, type ServiceCharge, type Terms } from "./invoice.ts";
 import { applicableCredits, type CounterContext, type MeterSubmission, readingInputs, toSubmission, type TypedReadings } from "./meter-invoice.ts";
 import type { CounterType } from "./usage.ts";
 
@@ -21,6 +21,8 @@ export interface ReturnContext {
   counters: Partial<Record<CounterType, CounterContext>>;
   estimateCredits: EstimateCredit[];
   credits: AvailableCredit[];
+  /** Decision 59: service charges still to bill on this agreement. */
+  serviceCharges?: ServiceCharge[];
 }
 
 export interface ReturnChoices {
@@ -39,6 +41,7 @@ export function buildReturnInvoice(context: ReturnContext, choices: ReturnChoice
     partialCycle: { daysUsed: context.final.daysUsed, daysInCycle: context.final.daysInCycle, rule: choices.rule },
     readings: readingInputs(context.terms.machineType, context.counters, choices.closing),
     estimateCredits: context.estimateCredits,
+    serviceCharges: context.serviceCharges,
     credits: applicableCredits(context.credits, choices.creditsExcluded),
     creditsExcluded: choices.creditsExcluded,
   });

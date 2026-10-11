@@ -76,6 +76,17 @@ export interface Adjustment {
   amountCents: number;
 }
 
+/**
+ * A service request the owner chose to charge (decision 59): an ADJUSTMENT line on the
+ * agreement's next normal invoice, described as the owner typed it.
+ */
+export interface ServiceCharge {
+  /** The service request. */
+  id: string;
+  description: string;
+  amountCents: number;
+}
+
 export interface InvoiceInput {
   terms: Terms;
   /** ESTIMATED: commitment only, no readings (11.6). */
@@ -86,6 +97,8 @@ export interface InvoiceInput {
   readings?: Partial<Record<CounterType, CounterReadingInput>>;
   estimateCredits?: EstimateCredit[];
   adjustments?: Adjustment[];
+  /** Service charges still to bill (normal invoices only; the database checks the list). */
+  serviceCharges?: ServiceCharge[];
   /** Available customer credits, oldest first, without the excluded ones. */
   credits?: AvailableCredit[];
   /** Credits the owner removed from this invoice (they stay available). */
@@ -272,6 +285,18 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
     if (!a.description.trim()) throw new BillingError("INVALID_INPUT", "An adjustment needs a description");
     lines.push({ line_type: "ADJUSTMENT", description: a.description.trim(), quantity: 1, rate_cents: a.amountCents, amount_cents: a.amountCents });
   }
+  const serviceCharges = input.serviceCharges ?? [];
+  if (serviceCharges.length > 0 && input.kind !== "NORMAL") {
+    // An estimate is credited back in full at the next reading, so a charge there would be refunded.
+    throw new BillingError("INVALID_INPUT", "Service charges go on a normal invoice");
+  }
+  if (new Set(serviceCharges.map((c) => c.id)).size !== serviceCharges.length) throw new BillingError("INVALID_INPUT", "A service charge is listed twice");
+  for (const c of serviceCharges) {
+    assertCount(c.amountCents, "Service charge");
+    if (c.amountCents < 1) throw new BillingError("INVALID_INPUT", "A service charge is more than zero");
+    if (!c.description.trim()) throw new BillingError("INVALID_INPUT", "A service charge needs a description");
+    lines.push({ line_type: "ADJUSTMENT", description: c.description, quantity: 1, rate_cents: c.amountCents, amount_cents: c.amountCents });
+  }
 
   const subtotalCents = sum(lines.map((l) => l.amount_cents), "Subtotal");
   if (subtotalCents < 0) throw new BillingError("INVALID_INPUT", "Adjustments cannot make the invoice negative; use a credit");
@@ -367,6 +392,8 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
         anomaly: c.anomaly,
       })),
       estimate_credits: (input.estimateCredits ?? []).map((e) => ({ invoice_no: e.invoiceNo, cycle_no: e.cycleNo, amount_cents: e.amountCents })),
+      // Decision 59: the service charges billed here (the database checks the list and the lines).
+      service_charges: serviceCharges.map((c) => ({ id: c.id, description: c.description, amount_cents: c.amountCents })),
       // Rule 13: the credits that were available (the database checks this list) and
       // the ones the owner removed; what was applied is on the CREDIT lines.
       credits: credits.map((c) => ({ id: c.id, available_cents: c.amountCents })),

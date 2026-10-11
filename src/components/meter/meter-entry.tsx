@@ -39,6 +39,8 @@ export function MeterEntry({ view, action }: { view: MeterEntryView; action: Sub
   const [serverErrors, setServerErrors] = useState<ReadingErrors>({});
   const [message, setMessage] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  // Spec 11.2: an unusually high or low reading is sent only after the customer confirms it.
+  const [confirmedUnusual, setConfirmedUnusual] = useState(false);
   const [sending, startSending] = useTransition();
 
   // The draft lives in this browser only, so it is read after the first render.
@@ -58,9 +60,11 @@ export function MeterEntry({ view, action }: { view: MeterEntryView; action: Sub
   const preview = useMemo(() => previewReading(view.context, typed), [view.context, typed]);
   const typedSomething = typed.bw.trim() !== "" || typed.colour.trim() !== "";
   const errors = { ...(typedSomething && !preview.ok ? preview.errors : {}), ...serverErrors };
+  const unusual = preview.ok && preview.counters.some((c) => c.warning !== null);
 
   function onTyped(values: TypedText) {
     setTyped(values);
+    setConfirmedUnusual(false);
     setServerErrors({});
     setMessage(null);
   }
@@ -73,7 +77,7 @@ export function MeterEntry({ view, action }: { view: MeterEntryView; action: Sub
   }
 
   function send() {
-    if (!photo || !key || !preview.ok) return;
+    if (!photo || !key || !preview.ok || (unusual && !confirmedUnusual)) return;
     setMessage(null);
     startSending(async () => {
       try {
@@ -163,6 +167,12 @@ export function MeterEntry({ view, action }: { view: MeterEntryView; action: Sub
         </section>
       )}
       {!preview.ok && typedSomething && <ReadingPreview preview={preview} audience="customer" />}
+      {unusual && (
+        <label className="flex min-h-12 cursor-pointer items-start gap-3 rounded-lg border border-amber-500/50 px-3 py-3" data-testid="confirm-unusual">
+          <input type="checkbox" checked={confirmedUnusual} onChange={(e) => setConfirmedUnusual(e.target.checked)} className="mt-0.5 size-5 accent-primary" />
+          <span className="text-base">I checked the meter again: the number is right.</span>
+        </label>
+      )}
 
       {message && (
         <p role="alert" className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
@@ -171,7 +181,7 @@ export function MeterEntry({ view, action }: { view: MeterEntryView; action: Sub
         </p>
       )}
 
-      <Button type="button" className="h-14 w-full text-lg" disabled={!photo || !preview.ok || sending || !key} onClick={send}>
+      <Button type="button" className="h-14 w-full text-lg" disabled={!photo || !preview.ok || sending || !key || (unusual && !confirmedUnusual)} onClick={send}>
         {sending ? "Sending…" : "Send reading"}
       </Button>
       {!photo && <p className="text-center text-sm text-muted-foreground">Take the photo first.</p>}

@@ -11,7 +11,7 @@ import * as T from "../../src/lib/tickets/transitions.ts";
 
 import { asPostgres, asService, asUser, begin, connect, count, DB_URL, isolated, sqlError } from "./db";
 import { createFixture, type Fixture } from "./fixtures";
-import { meterContextFromDb } from "./returns";
+import { meterContextFromDb, returnPayload } from "./returns";
 import { pgRpc } from "./rpc";
 
 /**
@@ -541,6 +541,32 @@ describe.skipIf(!DB_URL)("section 11 scenarios (linked dev database, rolled back
       await asUser(db, f.ownerA);
       expect((await sqlError(db, "insert into public.meter_baselines (owner_id, agreement_id, counter_type, value, reason) values ($1, $2, 'BW', 0, 'x')", [f.ownerA, f.agrA1Mono]))?.code).toBe("42501");
       await asPostgres(db);
+    });
+  });
+
+  it("11.8 machine swapped: the old agreement closes with a final reading and bill; the replacement starts from its own reading", async () => {
+    await isolated(db, async () => {
+      // A1's mono machine is swapped for the spare: return with the closing reading (final bill), then assign the spare.
+      const { payload, submission } = await returnPayload(db, f.agrA1Mono, today, { closing: { bw: 5400 }, reason: "Machine swapped: drum unit failed" });
+      await asService(db);
+      expect(await sqlError(db, "select public.rpc_return_machine($1, $2, $3::jsonb, $4::date)", [f.ownerA, f.agrA1Mono, JSON.stringify(payload), today])).toBeNull();
+      const assigned = await one<{ r: { agreement_id: string } }>("select public.rpc_assign_machine($1, $2, $3, $4::jsonb, $5::date) as r", [
+        f.ownerA,
+        f.machineASpare,
+        f.custA1,
+        JSON.stringify({ start_date: today, first_billing_date: later(30), due_days: 7, monthly_commitment_cents: RS(5000), bw_included: 2000, bw_rate_cents: 250, initial_bw_reading: 120 }),
+        today,
+      ]);
+      await asPostgres(db);
+      expect(await one("select status from public.rental_agreements where id = $1", [f.agrA1Mono])).toEqual({ status: "TERMINATED" });
+      expect(await one("select status from public.machines where id = $1", [f.machineAMono1])).toEqual({ status: "AVAILABLE" });
+      expect(await one("select status from public.machines where id = $1", [f.machineASpare])).toEqual({ status: "RENTED" });
+      // The final bill of the old machine is issued from the closing reading; the old meter-request ticket is billed in it.
+      expect(submission).not.toBeNull();
+      expect(await count(db, "select 1 from public.invoices where agreement_id = $1 and invoice_no is not null", [f.agrA1Mono])).toBe(1);
+      // The replacement's next bill measures from its own starting reading.
+      expect((await one<{ v: string }>("select app.last_known_reading($1, 'BW')::text as v", [assigned.r.agreement_id])).v).toBe("120");
+      expect(await audited("MACHINE_RETURNED", f.agrA1Mono)).toBe(1);
     });
   });
 

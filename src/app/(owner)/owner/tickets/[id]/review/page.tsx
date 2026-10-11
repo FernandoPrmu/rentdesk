@@ -12,6 +12,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { requireUser } from "@/lib/auth/current-user";
+import { carriedCopies } from "@/lib/billing/usage";
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 import { ANOMALY_WARNING } from "@/lib/meter/readings";
 import { getReview } from "@/lib/meter/service";
@@ -35,6 +36,8 @@ export default async function ReviewPage({ params }: PageProps<"/owner/tickets/[
   const t = view.ticket;
   const inv = view.invoice;
   const sub = view.submission;
+  const carriedOf = (c: "BW" | "COLOUR") => (view.context?.counters[c] ? carriedCopies(view.context.counters[c].known) : 0);
+  const historyOf = (c: "BW" | "COLOUR") => view.context?.counters[c]?.history ?? [];
   const estimated = inv?.type === "ESTIMATED";
 
   return (
@@ -94,7 +97,14 @@ export default async function ReviewPage({ params }: PageProps<"/owner/tickets/[
                         <p className="text-2xl font-semibold tabular-nums">{formatCount(r.current)}</p>
                         <p className="text-sm text-muted-foreground">
                           Previous {formatCount(r.previous)} · {r.rolledOver ? "counter went past its maximum" : `used ${formatCount(r.current - r.previous)}`}
+                          {carriedOf(r.counter) > 0 ? ` + ${formatCount(carriedOf(r.counter))} on the replaced meter` : ""}
                         </p>
+                        {/* Spec 11.2: compare with earlier months (the photos of earlier months are deleted). */}
+                        {historyOf(r.counter).length > 0 && (
+                          <p className="text-xs text-muted-foreground" data-testid="review-history">
+                            Earlier months: {historyOf(r.counter).map((u) => formatCount(u)).join(" · ")}
+                          </p>
+                        )}
                         {r.correctedFrom !== null && (
                           <p className="text-sm">
                             Corrected from {formatCount(r.correctedFrom)}: {r.correctionNote}

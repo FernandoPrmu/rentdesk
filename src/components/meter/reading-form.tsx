@@ -39,6 +39,7 @@ export function ReadingFields({
 
   return (
     <div className="space-y-4">
+      {machineType === "COLOUR" && <CounterSample />}
       {fields.map((f) => {
         const id = `${idPrefix}-${f.key}`;
         const error = errors[f.key];
@@ -73,6 +74,32 @@ export function ReadingFields({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Spec 11.2 / 6.4: a sample counter screen, so the Total is not typed by mistake
+ * (it adds B&W and colour together).
+ */
+function CounterSample() {
+  const rows = [
+    { label: "Total", value: "15,700", type: false },
+    { label: "Black & White", value: "12,500", type: true },
+    { label: "Full Colour", value: "3,200", type: true },
+  ];
+  return (
+    <details className="rounded-xl border bg-background p-3" data-testid="counter-sample">
+      <summary className="min-h-8 cursor-pointer font-medium">Which numbers do I type?</summary>
+      <div className="mt-3 space-y-1 rounded-lg bg-slate-900 p-3 font-mono text-sm text-slate-100" aria-label="Example of a counter screen">
+        {rows.map((r) => (
+          <p key={r.label} className={r.type ? "flex justify-between" : "flex justify-between text-slate-400 line-through"}>
+            <span>{r.label}</span>
+            <span>{r.value}</span>
+          </p>
+        ))}
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">Type the Black &amp; White and the Colour numbers. Do not type the Total: it adds both together.</p>
+    </details>
   );
 }
 

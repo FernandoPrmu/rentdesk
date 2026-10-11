@@ -85,9 +85,18 @@ export async function returnContextFromDb(db: pg.Client, agreementId: string, to
     dueDays: t.due_days,
     final,
     counters,
-    estimateCredits: [],
+    estimateCredits: await estimateCreditsFromDb(db, agreementId, final.cycleNo),
     credits: credits[0].c.map((c) => ({ id: c.id, amountCents: Number(c.available_cents) })),
   };
+}
+
+/** Issued estimated invoices the next reading credits (app.expected_estimate_credits, like the TypeScript loader). */
+async function estimateCreditsFromDb(db: pg.Client, agreementId: string, beforeCycle: number) {
+  const { rows } = await db.query<{ e: { invoice_no: string | null; cycle_no: number; amount_cents: number }[] }>(
+    "select app.expected_estimate_credits($1, $2) as e",
+    [agreementId, beforeCycle],
+  );
+  return rows[0].e.map((x) => ({ invoiceNo: x.invoice_no, cycleNo: x.cycle_no, amountCents: Number(x.amount_cents) }));
 }
 
 /** Engine context for a ticket's meter reading, from the database (like loadMeterContext). */
@@ -119,7 +128,7 @@ export async function meterContextFromDb(
     terms: { machineType: t.machine_type, commitmentCents: t.c, bwIncluded: t.bi, bwRateCents: t.br, colourIncluded: t.ci, colourRateCents: t.cr },
     cyclesCovered: t.cycle_no - t.last_confirmed,
     counters,
-    estimateCredits: [],
+    estimateCredits: await estimateCreditsFromDb(db, t.agreement_id, t.cycle_no),
     credits: credits[0].c.filter((c) => !excluded.includes(c.id)).map((c) => ({ id: c.id, amountCents: Number(c.available_cents) })),
     creditsExcluded: excluded,
   };

@@ -467,6 +467,45 @@ describe.skipIf(!DB_URL)("section 11 scenarios (linked dev database, rolled back
     });
   });
 
+  it("11.6 estimated billing reconciled: the next real reading bills both months, measured from the last confirmed reading, and credits the estimate; the database refuses a calculation without the credit", async () => {
+    await isolated(db, async () => {
+      const { calculateInvoice } = await import("../../src/lib/billing/invoice.ts");
+      const est = calculateInvoice({
+        terms: { machineType: "MONO", commitmentCents: RS(5000), bwIncluded: 2000, bwRateCents: 250, colourIncluded: null, colourRateCents: null },
+        kind: "ESTIMATED",
+        fullCycles: 1,
+      });
+      await db.query("insert into public.owner_settings (owner_id, estimated_billing_enabled) values ($1, true) on conflict (owner_id) do update set estimated_billing_enabled = true", [f.ownerA]);
+      await db.query("update public.billing_cycle_tickets set status = 'OVERDUE', status_before_overdue = 'METER_REQUESTED' where id = $1", [f.tickets.a1Mono]);
+      await db.query("select app.create_estimated_invoice($1, $2::jsonb, now() + interval '2 days', now())", [
+        f.tickets.a1Mono,
+        JSON.stringify({ type: "ESTIMATED", cycles_covered: 1, subtotal_cents: est.subtotalCents, credit_applied_cents: 0, total_cents: est.totalCents, lines: est.lines, calculation: est.calculation }),
+      ]);
+      await db.query("select app.confirm_meter_submission($1, null, $2, current_date + 7, now() + interval '8 days')", [f.tickets.a1Mono, f.ownerA]);
+      const estimateNo = (await one<{ n: string }>("select invoice_no as n from public.invoices where ticket_id = $1 and type = 'ESTIMATED'", [f.tickets.a1Mono])).n;
+
+      // Cycle 2: the real reading 9,500 (from the initial 5,000): 4,500 copies over 2 months, 4,000 included.
+      const opened = await one<{ r: { ticket_id: string } }>("select app.open_billing_cycle($1, 2, now() + interval '5 days') as r", [f.agrA1Mono]);
+      const ctx = await meterContextFromDb(db, opened.r.ticket_id);
+      expect(ctx.cyclesCovered).toBe(2);
+      expect(ctx.estimateCredits).toEqual([{ invoiceNo: estimateNo, cycleNo: 1, amountCents: RS(5000) }]);
+      const s = buildMeterSubmission(ctx, { BW: 9500 });
+      // Rs. 10,000 commitment + 500 × Rs. 2.50 - Rs. 5,000 estimate = Rs. 6,250.
+      expect(s.invoice.total_cents).toBe(RS(6250));
+      const send = (invoice: unknown) =>
+        sqlError(db, "select app.submit_meter_reading($1, $2, gen_random_uuid(), 'CUSTOMER', $3::jsonb, $4::jsonb, $5::jsonb, now() + interval '2 days', null, $6)", [
+          opened.r.ticket_id, f.custA1, JSON.stringify(s.readings), JSON.stringify({ storage_path: `${f.ownerA}/${opened.r.ticket_id}/p.jpg` }), JSON.stringify(invoice), s.anomalyFlag,
+        ]);
+      const withoutCredit = buildMeterSubmission({ ...ctx, estimateCredits: [] }, { BW: 9500 });
+      expect((await send(withoutCredit.invoice))?.message).toMatch(/estimated invoices to credit/);
+      expect(await send(s.invoice)).toBeNull();
+      expect(await one("select total_cents::int as total, cycles_covered from public.invoices where ticket_id = $1 and type = 'NORMAL'", [opened.r.ticket_id])).toEqual({
+        total: RS(6250),
+        cycles_covered: 2,
+      });
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Meter baselines (11.2, 11.8; rule 51)
   // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 import { type CatalogEvent, emailEvents, EVENTS } from "./events";
@@ -9,8 +10,9 @@ import { defaultTemplate, type EmailTemplate } from "./template";
 
 /**
  * Reads for the notification centre (NOT-01), the delivery log (NOT-05), templates
- * (NOT-04) and preferences. All with the signed-in user's own client: RLS decides
- * (own in-app rows; the owner's tenant or, for admins, everything in the log).
+ * (NOT-04) and preferences. With the signed-in user's own client, so RLS decides (own
+ * in-app rows; the owner's tenant or, for admins, everything in the log); only the
+ * bell's first count is a service-role read scoped to the user.
  */
 
 export const PAGE_SIZE = 20;
@@ -26,9 +28,13 @@ export interface CentreItem {
   urgent: boolean;
 }
 
+/**
+ * The bell's first count (the browser keeps it live with RLS). Service role, scoped to
+ * the verified user id: the header can still be streaming while a Server Action's
+ * `after()` work starts, where reading cookies again is not allowed.
+ */
 export async function unreadCount(userId: string): Promise<number> {
-  const supabase = await createClient();
-  const { count, error } = await supabase
+  const { count, error } = await createAdminClient()
     .from("notifications")
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
@@ -139,7 +145,8 @@ export async function deliveryLog(filter: LogFilter): Promise<{ rows: LogRow[]; 
       createdAt: r.created_at ?? "",
       sentAt: r.sent_at,
       readAt: r.read_at,
-      userName: (r.user_id && names.get(r.user_id)) || "Unknown",
+      // Owners cannot read admin profiles: escalations about their tenant went to the RentDesk admins.
+      userName: (r.user_id && names.get(r.user_id)) || "RentDesk admin",
       ownerId: r.owner_id,
     })),
   };

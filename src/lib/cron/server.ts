@@ -24,9 +24,10 @@ export function supabaseRpc(client: SupabaseClient<Database>): Rpc {
     // Generic port: each caller names an rpc_* wrapper and its arguments.
     const { data, error } = await client.rpc(fn as never, args as never);
     if (error) throw new RpcError(error.code, error.message);
-    // A workflow change may have queued emails in its transaction: send them after the
-    // response (decision 67). Nothing to send costs one quick query.
-    if (!fn.startsWith("rpc_cron_")) kickOutbox();
+    // A workflow change that carries notifications may have queued emails in its transaction:
+    // send them after the response (decision 67). Reads (also those made while a page renders)
+    // never schedule anything.
+    if ("p_notifications" in args) kickOutbox();
     return data;
   };
 }

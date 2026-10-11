@@ -9,8 +9,8 @@ import { buildMeterSubmission } from "../../src/lib/billing/meter-invoice.ts";
 import type { TicketStatus } from "../../src/lib/tickets/states.ts";
 import * as T from "../../src/lib/tickets/transitions.ts";
 
-import { asPostgres, asService, asUser, begin, connect, count, DB_URL, isolated, sqlError } from "./db";
-import { createFixture, type Fixture } from "./fixtures";
+import { APPLY_MIGRATIONS, asPostgres, asService, asUser, begin, connect, count, DB_URL, isolated, sqlError } from "./db";
+import { createFixture, deleteFixture, type Fixture } from "./fixtures";
 import { meterContextFromDb, returnPayload } from "./returns";
 import { pgRpc } from "./rpc";
 
@@ -768,5 +768,76 @@ describe.skipIf(!DB_URL)("section 11 scenarios (linked dev database, rolled back
       });
       await asPostgres(db);
     });
+  });
+});
+
+describe.skipIf(!DB_URL || APPLY_MIGRATIONS)("a retry that overlaps the first request (committed fixture, cleaned up)", () => {
+  let setup: pg.Client;
+  let f: Fixture | undefined;
+
+  beforeAll(async () => {
+    setup = await connect();
+    await setup.query("begin");
+    f = await createFixture(setup, { storage: false });
+    await setup.query("commit");
+  });
+
+  afterAll(async () => {
+    if (f) await deleteFixture(setup, f);
+    await setup?.end();
+  });
+
+  /** Runs `sql` on a second connection while the first holds the ticket lock; returns its result after the first commits. */
+  async function overlap(first: string, firstParams: unknown[], second: string, secondParams: unknown[]) {
+    const a = await connect();
+    const b = await connect();
+    try {
+      await a.query("begin");
+      await asService(a);
+      const firstResult = (await a.query(first, firstParams)).rows[0].r;
+      let settled = false;
+      const racing = (async () => {
+        await b.query("begin");
+        await asService(b);
+        try {
+          const { rows } = await b.query(second, secondParams);
+          await b.query("commit");
+          return rows[0].r;
+        } catch (error) {
+          await b.query("rollback");
+          throw error;
+        } finally {
+          settled = true;
+        }
+      })();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      expect(settled).toBe(false); // waits for the ticket lock
+      await a.query("commit");
+      return { firstResult, secondResult: await racing };
+    } finally {
+      await a.end();
+      await b.end();
+    }
+  }
+
+  it("a dispute sent twice at the same time (same key) creates one dispute and both get it", async () => {
+    const fixture = f!;
+    const key = randomUUID();
+    const call = "select public.rpc_raise_dispute($1, $2, $3, 'The meter shows less', null) as r";
+    const params = [fixture.tickets.b1Mono, fixture.custB1, key];
+    const { firstResult, secondResult } = await overlap(call, params, call, params);
+    expect(firstResult).toMatchObject({ replayed: false });
+    expect(secondResult).toMatchObject({ dispute_id: firstResult.dispute_id, replayed: true });
+    expect(await count(setup, "select 1 from public.disputes where ticket_id = $1", [fixture.tickets.b1Mono])).toBe(1);
+  });
+
+  it("a message sent twice at the same time (same key) is stored once", async () => {
+    const fixture = f!;
+    const key = randomUUID();
+    const call = "select public.rpc_add_ticket_comment($1, $2, $3, 'Please call me') as r";
+    const params = [fixture.tickets.a1Mono, fixture.custA1, key];
+    const { firstResult, secondResult } = await overlap(call, params, call, params);
+    expect(secondResult).toMatchObject({ comment_id: firstResult.comment_id, replayed: true });
+    expect(await count(setup, "select 1 from public.ticket_comments where idempotency_key = $1", [key])).toBe(1);
   });
 });

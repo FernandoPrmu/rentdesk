@@ -201,6 +201,19 @@ export async function loadMeterContext(
   };
 }
 
+/** The counters of an agreement as the next bill will see them (previous reading, carried copies): the baseline screen. */
+export async function loadAgreementCounters(client: Client, agreementId: string) {
+  const { data: agreement, error } = await client
+    .from("rental_agreements")
+    .select("id, machine_id, machine:machines!rental_agreements_machine_fkey(type)")
+    .eq("id", agreementId)
+    .maybeSingle();
+  if (error) fail("agreement", error.message);
+  if (!agreement) throw new BillingError("INVALID_INPUT", "Agreement not found");
+  const { counters } = await loadCounters(client, agreement.id, agreement.machine_id, agreement.machine.type);
+  return { machineType: agreement.machine.type, counters };
+}
+
 /** The final invoice of a return on `today` (Asia/Colombo). */
 export async function loadReturnContext(client: Client, agreementId: string, today: string): Promise<ReturnContext> {
   const { data: agreement, error } = await client

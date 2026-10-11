@@ -156,6 +156,20 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
       : await db.query<{ id: string }>("select id from public.machines where serial_no like $1", [`${E2E_SERIAL_PREFIX}%`]);
     const machines = rows.map((r) => r.id);
     if (machines.length > 0) {
+      // Service requests on these machines: photos, notifications, trail, discount credits.
+      const { rows: requestRows } = await db.query<{ id: string; photo_path: string | null }>(
+        "select id, photo_path from public.service_requests where machine_id = any($1)",
+        [machines],
+      );
+      const requests = requestRows.map((r) => r.id);
+      const servicePhotos = requestRows.map((r) => r.photo_path).filter((p): p is string => p !== null);
+      if (servicePhotos.length > 0) await serviceClient().storage.from("service-photos").remove(servicePhotos);
+      await db.query("delete from public.notifications where entity_id = any($1)", [requests]);
+      await db.query("delete from public.service_request_history where request_id = any($1)", [requests]);
+      await db.query("update public.invoice_lines set credit_id = null where credit_id in (select id from public.credits where service_request_id = any($1))", [requests]);
+      await db.query("delete from public.credits where service_request_id = any($1)", [requests]);
+      await db.query("delete from public.service_requests where id = any($1)", [requests]);
+
       // Meter photos the tests uploaded (also ones never submitted) live in Storage, not only in rows.
       const { rows: folders } = await db.query<{ folder: string }>(
         `select t.owner_id || '/' || t.id as folder from public.billing_cycle_tickets t

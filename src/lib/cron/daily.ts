@@ -55,6 +55,11 @@ export interface InvoicePdfPort {
   generate(invoiceId: string, now: Date): Promise<{ status: "SKIPPED" | "UNCHANGED" | "CREATED" }>;
   /** Makes one pending receipt PDF (src/lib/payments/receipt-pdf/job.ts, decision 44). */
   generateReceipt?(receiptId: string, now: Date): Promise<{ status: "SKIPPED" | "UNCHANGED" | "CREATED" }>;
+  /**
+   * Sends due emails from the outbox, including retries (src/lib/notifications/outbox.ts,
+   * decision 67). Last step, so the PDFs made above can be attached.
+   */
+  deliverEmails?(now: Date, budgetMs: number): Promise<{ sent: number; failed: number; retry: number }>;
 }
 
 export interface DailyJobOptions {
@@ -86,6 +91,8 @@ export const COUNT_KEYS = [
   "receiptPdfs",
   "slipsDeleted",
   "serviceEscalated",
+  "emailsSent",
+  "emailsFailed",
   "skipped",
 ] as const;
 export type CronCounts = Record<(typeof COUNT_KEYS)[number], number>;
@@ -430,6 +437,20 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
             record(errorEntry("receipt pdf", id, error));
           }
         }
+      }
+    }
+
+    // Emails (NOT-02, decision 67): what is due, including retries with backoff. A failed
+    // send is recorded on its delivery (not a job error); the next run tries again.
+    if (pdfs?.deliverEmails) {
+      checkTime();
+      try {
+        const left = Math.max(5_000, budget - (clock() - started));
+        const sent = await pdfs.deliverEmails(now, left);
+        counts.emailsSent += sent.sent;
+        counts.emailsFailed += sent.failed;
+      } catch (error) {
+        record(errorEntry("emails", undefined, error));
       }
     }
   } catch (error) {

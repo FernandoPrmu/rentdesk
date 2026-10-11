@@ -47,7 +47,8 @@ export default async function OwnerDetailPage({ params }: PageProps<"/admin/owne
             status={owner.profile.status}
             statusAction={setOwnerStatusAction.bind(null, owner.id)}
             resetAction={resetOwnerPasswordAction.bind(null, owner.id)}
-            suspendWarning="All of this owner's customers are blocked too."
+            suspendWarning="All of this owner's customers are blocked too, and they are told by email."
+            email={owner.email}
           />
         </CardContent>
       </Card>

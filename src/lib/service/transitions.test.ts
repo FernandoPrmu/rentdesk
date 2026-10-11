@@ -60,7 +60,12 @@ describe("raiseRequest (SRV-01, decision 62)", () => {
         title: "URGENT: New service request: Perera Traders",
         body: "Toner (cyan) for Canon iR C3226 (A-1). Cyan is empty",
         link: "/owner/service/{entity_id}",
-        data: { urgency: "URGENT", priority: true },
+        // The facts as email template variables (NOT-04); "URGENT: " leads the owner's email subject.
+        data: {
+          urgency: "URGENT",
+          priority: true,
+          vars: { customer_name: "Perera Traders", machine: "Canon iR C3226 (A-1)", preview: "Cyan is empty", priority: "URGENT: ", request: "Toner (cyan)", urgency: "Urgent" },
+        },
       },
     ]);
   });

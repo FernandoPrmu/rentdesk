@@ -19,7 +19,7 @@ export async function createCustomerAction(_prev: CreateAccountResult | null, fo
   const actor = await currentActor("OWNER");
   const parsed = customerSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail("Please check the highlighted fields.", fieldErrorsFrom(parsed.error.issues));
-  return createCustomer(actor, parsed.data);
+  return createCustomer(actor, parsed.data, { sendEmail: formData.get("send_email") === "on" });
 }
 
 export async function updateCustomerAction(customerId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
@@ -42,11 +42,11 @@ export async function setCustomerStatusAction(customerId: string, _prev: ActionR
   return result;
 }
 
-export async function resetCustomerPasswordAction(customerId: string): Promise<ActionResult<ShownCredentials>> {
+export async function resetCustomerPasswordAction(customerId: string, sendEmail = false): Promise<ActionResult<ShownCredentials>> {
   const actor = await currentActor("OWNER");
   if (!uuidSchema.safeParse(customerId).success) return fail("Customer not found.");
-  const result = await resetAccountPassword(actor, customerId);
+  const result = await resetAccountPassword(actor, customerId, { sendEmail: sendEmail === true });
   if (!result.ok) return result;
   refresh();
-  return ok({ username: result.data.username, temporaryPassword: result.data.temporaryPassword });
+  return ok({ username: result.data.username, temporaryPassword: result.data.temporaryPassword, email: result.data.email });
 }

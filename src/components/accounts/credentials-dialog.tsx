@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Mail, MailWarning } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,27 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 export interface ShownCredentials {
   username: string;
   temporaryPassword: string;
+  /** "Also send by email": the outcome, or null when not asked (decision 70). */
+  email?: { status: "SENT"; to: string } | { status: "FAILED" | "SKIPPED"; to: string | null; message: string } | null;
+}
+
+function EmailOutcome({ email }: { email: NonNullable<ShownCredentials["email"]> }) {
+  if (email.status === "SENT") {
+    return (
+      <p data-testid="credential-email" className="flex items-start gap-2 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
+        <Mail className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <span>
+          Also emailed to <strong className="break-all">{email.to}</strong>.
+        </span>
+      </p>
+    );
+  }
+  return (
+    <p data-testid="credential-email" role="status" className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+      <MailWarning className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <span>Not emailed: {email.message}</span>
+    </p>
+  );
 }
 
 function CopyField({ label, value, testId }: { label: string; value: string; testId: string }) {
@@ -70,6 +91,7 @@ export function CredentialsDialog({
         </DialogHeader>
         {credentials && (
           <div className="space-y-3">
+            {credentials.email && <EmailOutcome email={credentials.email} />}
             <CopyField label="Username" value={credentials.username} testId="credential-username" />
             <CopyField label="Temporary password" value={credentials.temporaryPassword} testId="credential-password" />
             <Button

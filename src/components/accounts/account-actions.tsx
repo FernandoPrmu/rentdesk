@@ -22,7 +22,7 @@ import type { ActionResult } from "@/lib/action-result";
 import type { AccountStatusValue } from "@/lib/accounts/schemas";
 
 type StatusAction = (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
-type ResetAction = () => Promise<ActionResult<ShownCredentials>>;
+type ResetAction = (sendEmail: boolean) => Promise<ActionResult<ShownCredentials>>;
 
 const STATUS_COPY: Record<AccountStatusValue, { verb: string; title: string; warning: string }> = {
   SUSPENDED: {
@@ -108,17 +108,21 @@ export function AccountActions({
   statusAction,
   resetAction,
   suspendWarning,
+  email,
 }: {
   name: string;
   status: AccountStatusValue;
   statusAction: StatusAction;
   resetAction: ResetAction;
   suspendWarning?: string;
+  /** The account's email: offers "Also send by email" on reset (ADM-03, CUS-02). */
+  email?: string | null;
 }) {
   const [target, setTarget] = useState<AccountStatusValue | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [credentials, setCredentials] = useState<ShownCredentials | null>(null);
   const [resetting, startReset] = useTransition();
+  const [emailReset, setEmailReset] = useState(true);
 
   const options: AccountStatusValue[] =
     status === "ACTIVE" ? ["SUSPENDED", "DEACTIVATED"] : status === "SUSPENDED" ? ["ACTIVE", "DEACTIVATED"] : ["ACTIVE"];
@@ -161,6 +165,14 @@ export function AccountActions({
               password stops working now.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {email && (
+            <label className="flex min-h-11 items-center gap-3 text-sm">
+              <input type="checkbox" className="size-5 shrink-0" checked={emailReset} onChange={(e) => setEmailReset(e.target.checked)} />
+              <span>
+                Also send it by email to <strong className="break-all">{email}</strong>
+              </span>
+            </label>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel className="h-11" disabled={resetting}>
               Cancel
@@ -172,7 +184,7 @@ export function AccountActions({
               onClick={() =>
                 startReset(async () => {
                   try {
-                    const result = await resetAction();
+                    const result = await resetAction(Boolean(email) && emailReset);
                     if (result.ok) setCredentials(result.data);
                     else toast.error(result.error);
                   } catch {

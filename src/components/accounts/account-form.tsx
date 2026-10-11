@@ -63,13 +63,25 @@ export function AccountForm(
   }, null);
   const defaults = props.mode === "edit" ? props.defaults : {};
   const onSubmit = useSubmitWithoutReset(formAction);
+  // "Also send by email" (ADM-03, CUS-02): on by default once an email is typed.
+  const [hasEmail, setHasEmail] = useState(false);
+  const [sendEmail, setSendEmail] = useState(true);
 
   const errors = state && !state.ok ? (state.fieldErrors ?? {}) : {};
 
   return (
     <>
       {/* Saved values come back as new defaults: remount so the inputs pick them up. */}
-      <form key={JSON.stringify(defaults)} onSubmit={onSubmit} className="space-y-4" noValidate>
+      <form
+        key={JSON.stringify(defaults)}
+        onSubmit={onSubmit}
+        onChange={(e) => {
+          const target = e.target as unknown as HTMLInputElement;
+          if (target.name === "email") setHasEmail(target.value.trim() !== "");
+        }}
+        className="space-y-4"
+        noValidate
+      >
         {FIELDS[props.kind].map((field) => (
           <FormField
             key={field.name}
@@ -83,6 +95,24 @@ export function AccountForm(
             error={errors[field.name]}
           />
         ))}
+        {props.mode === "create" && (
+          <label className="flex min-h-11 items-start gap-3 rounded-lg border bg-background px-3 py-2.5 text-sm has-disabled:opacity-60">
+            <input
+              type="checkbox"
+              name="send_email"
+              className="mt-0.5 size-5 shrink-0"
+              checked={hasEmail && sendEmail}
+              disabled={!hasEmail}
+              onChange={(e) => setSendEmail(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium">Also send the login details by email</span>
+              <span className="block text-muted-foreground">
+                {hasEmail ? "They are still shown once on the screen." : "Add an email address above to send them."}
+              </span>
+            </span>
+          </label>
+        )}
         {state && !state.ok && (
           <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {state.error}

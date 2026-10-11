@@ -424,6 +424,7 @@ export type Database = {
           reference: string | null
           refunded_at: string | null
           refunded_cents: number
+          service_request_id: string | null
           source_invoice_id: string | null
           source_payment_id: string | null
           status: Database["public"]["Enums"]["credit_status"]
@@ -446,6 +447,7 @@ export type Database = {
           reference?: string | null
           refunded_at?: string | null
           refunded_cents?: number
+          service_request_id?: string | null
           source_invoice_id?: string | null
           source_payment_id?: string | null
           status?: Database["public"]["Enums"]["credit_status"]
@@ -468,6 +470,7 @@ export type Database = {
           reference?: string | null
           refunded_at?: string | null
           refunded_cents?: number
+          service_request_id?: string | null
           source_invoice_id?: string | null
           source_payment_id?: string | null
           status?: Database["public"]["Enums"]["credit_status"]
@@ -515,6 +518,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "owners"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credits_service_request_fkey"
+            columns: ["service_request_id", "owner_id"]
+            isOneToOne: false
+            referencedRelation: "service_requests"
+            referencedColumns: ["id", "owner_id"]
           },
           {
             foreignKeyName: "credits_source_invoice_fkey"
@@ -2974,6 +2984,8 @@ export type Database = {
             | Database["public"]["Enums"]["service_request_status"]
             | null
           id: string
+          kind: string
+          metadata: Json
           note: string | null
           owner_id: string
           request_id: string
@@ -2986,6 +2998,8 @@ export type Database = {
             | Database["public"]["Enums"]["service_request_status"]
             | null
           id?: string
+          kind?: string
+          metadata?: Json
           note?: string | null
           owner_id: string
           request_id: string
@@ -2998,6 +3012,8 @@ export type Database = {
             | Database["public"]["Enums"]["service_request_status"]
             | null
           id?: string
+          kind?: string
+          metadata?: Json
           note?: string | null
           owner_id?: string
           request_id?: string
@@ -3039,13 +3055,21 @@ export type Database = {
           acknowledged_at: string | null
           agreement_id: string | null
           assigned_to_name: string | null
+          cancel_reason: string | null
           cancelled_at: string | null
+          cancelled_by: string | null
+          charge_cents: number | null
+          charge_description: string | null
+          charged_at: string | null
+          charged_by: string | null
           closed_at: string | null
+          closed_by: string | null
           cost_cents: number | null
           created_at: string
           created_by: string
           customer_id: string
           description: string
+          escalated_at: string | null
           escalation_level: number
           id: string
           idempotency_key: string | null
@@ -3053,10 +3077,16 @@ export type Database = {
           owner_id: string
           part_name: string | null
           parts_used: string | null
+          photo_mime: string | null
+          photo_path: string | null
+          photo_sha256: string | null
+          photo_size: number | null
           planned_date: string | null
           preferred_date: string | null
+          rated_at: string | null
           rating: number | null
           rating_comment: string | null
+          reopen_count: number
           resolved_at: string | null
           status: Database["public"]["Enums"]["service_request_status"]
           toner_colours: Database["public"]["Enums"]["toner_colour"][]
@@ -3069,13 +3099,21 @@ export type Database = {
           acknowledged_at?: string | null
           agreement_id?: string | null
           assigned_to_name?: string | null
+          cancel_reason?: string | null
           cancelled_at?: string | null
+          cancelled_by?: string | null
+          charge_cents?: number | null
+          charge_description?: string | null
+          charged_at?: string | null
+          charged_by?: string | null
           closed_at?: string | null
+          closed_by?: string | null
           cost_cents?: number | null
           created_at?: string
           created_by: string
           customer_id: string
           description: string
+          escalated_at?: string | null
           escalation_level?: number
           id?: string
           idempotency_key?: string | null
@@ -3083,10 +3121,16 @@ export type Database = {
           owner_id: string
           part_name?: string | null
           parts_used?: string | null
+          photo_mime?: string | null
+          photo_path?: string | null
+          photo_sha256?: string | null
+          photo_size?: number | null
           planned_date?: string | null
           preferred_date?: string | null
+          rated_at?: string | null
           rating?: number | null
           rating_comment?: string | null
+          reopen_count?: number
           resolved_at?: string | null
           status?: Database["public"]["Enums"]["service_request_status"]
           toner_colours?: Database["public"]["Enums"]["toner_colour"][]
@@ -3099,13 +3143,21 @@ export type Database = {
           acknowledged_at?: string | null
           agreement_id?: string | null
           assigned_to_name?: string | null
+          cancel_reason?: string | null
           cancelled_at?: string | null
+          cancelled_by?: string | null
+          charge_cents?: number | null
+          charge_description?: string | null
+          charged_at?: string | null
+          charged_by?: string | null
           closed_at?: string | null
+          closed_by?: string | null
           cost_cents?: number | null
           created_at?: string
           created_by?: string
           customer_id?: string
           description?: string
+          escalated_at?: string | null
           escalation_level?: number
           id?: string
           idempotency_key?: string | null
@@ -3113,10 +3165,16 @@ export type Database = {
           owner_id?: string
           part_name?: string | null
           parts_used?: string | null
+          photo_mime?: string | null
+          photo_path?: string | null
+          photo_sha256?: string | null
+          photo_size?: number | null
           planned_date?: string | null
           preferred_date?: string | null
+          rated_at?: string | null
           rating?: number | null
           rating_comment?: string | null
+          reopen_count?: number
           resolved_at?: string | null
           status?: Database["public"]["Enums"]["service_request_status"]
           toner_colours?: Database["public"]["Enums"]["toner_colour"][]
@@ -3132,6 +3190,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "rental_agreements"
             referencedColumns: ["id", "owner_id"]
+          },
+          {
+            foreignKeyName: "service_requests_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_requests_charged_by_fkey"
+            columns: ["charged_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_requests_closed_by_fkey"
+            columns: ["closed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "service_requests_created_by_fkey"
@@ -3614,6 +3693,10 @@ export type Database = {
         Args: { p_limit: number; p_now: string }
         Returns: Json
       }
+      rpc_cron_orphan_service_photos: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
+      }
       rpc_cron_orphan_slips: {
         Args: { p_limit: number; p_now: string }
         Returns: Json
@@ -3631,12 +3714,26 @@ export type Database = {
         Args: { p_limit: number; p_now: string }
         Returns: Json
       }
+      rpc_cron_service_candidates: {
+        Args: { p_after: string; p_limit: number }
+        Returns: Json
+      }
       rpc_cron_ticket_candidates: {
         Args: { p_after: string; p_limit: number }
         Returns: Json
       }
       rpc_edit_ticket_comment: {
         Args: { p_actor_id: string; p_body: string; p_comment_id: string }
+        Returns: Json
+      }
+      rpc_escalate_service_request: {
+        Args: {
+          p_level: number
+          p_notifications?: Json
+          p_now: string
+          p_reason: string
+          p_request_id: string
+        }
         Returns: Json
       }
       rpc_escalate_ticket: {
@@ -3736,6 +3833,27 @@ export type Database = {
           p_notifications?: Json
           p_reason: string
           p_ticket_id: string
+        }
+        Returns: Json
+      }
+      rpc_raise_service_request: {
+        Args: {
+          p_actor_id: string
+          p_idempotency_key: string
+          p_input: Json
+          p_machine_id: string
+          p_notifications?: Json
+          p_photo?: Json
+        }
+        Returns: Json
+      }
+      rpc_rate_service_request: {
+        Args: {
+          p_actor_id: string
+          p_comment?: string
+          p_notifications?: Json
+          p_rating: number
+          p_request_id: string
         }
         Returns: Json
       }
@@ -3906,6 +4024,16 @@ export type Database = {
         Args: { p_owner_id: string; p_template: Json }
         Returns: Json
       }
+      rpc_service_request_action: {
+        Args: {
+          p_action: string
+          p_actor_id: string
+          p_input?: Json
+          p_notifications?: Json
+          p_request_id: string
+        }
+        Returns: Json
+      }
       rpc_session_state: { Args: { p_user_id: string }; Returns: Json }
       rpc_set_account_status: {
         Args: {
@@ -4062,6 +4190,7 @@ export type Database = {
         | "ADVANCE"
         | "MANUAL"
         | "DISPUTE"
+        | "SERVICE_DISCOUNT"
       credit_status: "AVAILABLE" | "APPLIED" | "REFUNDED" | "VOID"
       deposit_transaction_kind:
         | "RECEIVED"
@@ -4300,6 +4429,7 @@ export const Constants = {
         "ADVANCE",
         "MANUAL",
         "DISPUTE",
+        "SERVICE_DISCOUNT",
       ],
       credit_status: ["AVAILABLE", "APPLIED", "REFUNDED", "VOID"],
       deposit_transaction_kind: [

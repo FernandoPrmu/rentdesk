@@ -18,8 +18,9 @@ import { CreditsPanel } from "@/components/payments/credits-panel";
 import { PaymentList } from "@/components/payments/payment-views";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
+import { RequestList } from "@/components/service/request-list";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCustomer } from "@/lib/accounts/queries";
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
@@ -30,6 +31,8 @@ import { getDepositsHeld, listDepositsToSettle } from "@/lib/deposits/queries";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
 import { listCustomerCredits, listPayments } from "@/lib/payments/service";
+import { listCustomerServiceHistory } from "@/lib/service/queries";
+import { ACTIVE_STATUSES } from "@/lib/service/states";
 import { createClient } from "@/lib/supabase/server";
 
 import { refundCreditAction } from "../../payments/actions";
@@ -47,15 +50,17 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
   const customer = await getCustomer(id);
   if (!customer) notFound();
 
-  const [agreements, balances, billing, toSettle, payments, credits] = await Promise.all([
+  const [agreements, balances, billing, toSettle, payments, credits, service] = await Promise.all([
     listCustomerAgreements(id),
     getCustomerBalances(id),
     getCustomerBilling(id),
     listDepositsToSettle(id),
     listPayments(await createClient(), { customerId: id, limit: 20 }),
     listCustomerCredits(owner, id),
+    listCustomerServiceHistory(id),
   ]);
   const deposits = await getDepositsHeld(agreements.map((a) => a.id));
+  const inService = new Set(service.rows.filter((r) => ACTIVE_STATUSES.includes(r.status)).map((r) => r.machine.id));
   const depositHeld = [...deposits.values()].reduce((s, v) => s + v, 0);
   const balance = balances.get(id);
   const today = todayInColombo();
@@ -110,7 +115,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          <AgreementCards agreements={live} today={today} linkBase="/owner/agreements" deposits={deposits} empty="No machines rented at the moment." />
+          <AgreementCards agreements={live} today={today} linkBase="/owner/agreements" deposits={deposits} inService={inService} empty="No machines rented at the moment." />
           {past.length > 0 && (
             <details className="text-sm">
               <summary className="cursor-pointer py-2 font-medium">Earlier rentals ({past.length})</summary>
@@ -209,8 +214,20 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
       <Card>
         <CardHeader>
           <CardTitle>Service requests</CardTitle>
+          <CardDescription data-testid="customer-rating">
+            {service.rating
+              ? `Average rating ${service.rating.average.toFixed(1)} / 5 from ${service.rating.count} rated ${service.rating.count === 1 ? "request" : "requests"}`
+              : "No ratings yet"}
+          </CardDescription>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">Service requests will be listed here once they are built.</CardContent>
+        <CardContent className="space-y-3">
+          <RequestList rows={service.rows.slice(0, 10)} hrefBase="/owner/service" showCustomer={false} empty="No service requests yet." label="Customer service requests" />
+          {service.rows.length > 0 && (
+            <Link href={`/owner/service?status=ALL&customer=${id}`} className="text-sm font-medium text-primary hover:underline">
+              All {service.rows.length} requests of this customer
+            </Link>
+          )}
+        </CardContent>
       </Card>
 
       <Card>

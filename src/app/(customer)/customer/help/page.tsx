@@ -1,11 +1,13 @@
-import { ChevronRight, KeyRound, Mail, Phone } from "lucide-react";
+import { ChevronRight, KeyRound, Mail, Phone, Wrench } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
 import { SignOutButton } from "@/components/auth/account-menu";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { getCompanyProfile } from "@/lib/branding/company";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Help" };
 
@@ -16,6 +18,20 @@ export default async function CustomerHelpPage() {
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold tracking-tight">Help</h1>
+      <Card>
+        <CardHeader>
+          <CardTitle>Machine problem, toner or a part?</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          <Link href="/customer/service/new" className={cn(buttonVariants(), "h-12 gap-2 text-base")}>
+            <Wrench className="size-5" aria-hidden /> Request service
+          </Link>
+          <Link href="/customer/service" className="flex h-12 items-center gap-3 rounded-lg border px-4 font-medium">
+            <span className="flex-1">My requests</span>
+            <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+          </Link>
+        </CardContent>
+      </Card>
       {provider && (
         <Card>
           <CardHeader>

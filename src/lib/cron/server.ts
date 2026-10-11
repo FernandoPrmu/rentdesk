@@ -44,6 +44,11 @@ export function meterPhotoStorage(client: SupabaseClient<Database>): PhotoStorag
       const { error } = await client.storage.from("dispute-files").remove(paths);
       if (error) throw new Error(`dispute files: ${error.message}`);
     },
+    async removeServicePhotos(paths) {
+      if (paths.length === 0) return;
+      const { error } = await client.storage.from("service-photos").remove(paths);
+      if (error) throw new Error(`service photos: ${error.message}`);
+    },
   };
 }
 

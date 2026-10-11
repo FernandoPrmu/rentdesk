@@ -1,11 +1,15 @@
+import { Wrench } from "lucide-react";
 import Link from "next/link";
 
 import { MachineTypeBadge } from "@/components/machines/machine-badges";
+import { InServiceBadge } from "@/components/service/service-display";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import type { CustomerAgreement } from "@/lib/agreements/queries";
 import { billingDayText, isEndingSoon } from "@/lib/agreements/cycle-calendar";
 import { formatCount, formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
+import { cn } from "@/lib/utils";
 
 /** One line of terms: commitment, included copies and rates. */
 export function termsLine(a: CustomerAgreement) {
@@ -29,6 +33,8 @@ export function AgreementCards({
   linkBase,
   empty,
   deposits,
+  inService,
+  requestService = false,
 }: {
   agreements: CustomerAgreement[];
   today: string;
@@ -36,6 +42,10 @@ export function AgreementCards({
   empty: string;
   /** DEP-01: deposit held per agreement. */
   deposits?: Map<string, number>;
+  /** Machines with an open service request: "Service in progress" (they stay Rented). */
+  inService?: Set<string>;
+  /** Customer portal: a "Request service" button on each rented machine (CP-07). */
+  requestService?: boolean;
 }) {
   if (agreements.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>;
   return (
@@ -56,6 +66,7 @@ export function AgreementCards({
               <MachineTypeBadge type={a.machine.type} />
               {!live && <Badge variant="outline">Returned</Badge>}
               {live && isEndingSoon(a.end_date, today) && <Badge variant="destructive">Ending soon</Badge>}
+              {live && inService?.has(a.machine.id) && <InServiceBadge />}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
               Serial <span className="font-mono">{a.machine.serial_no}</span>
@@ -82,6 +93,11 @@ export function AgreementCards({
               <p className="mt-1 text-sm font-medium" data-testid="deposit-held">
                 Deposit held: {formatRupees(deposits!.get(a.id)!)}
               </p>
+            )}
+            {live && requestService && (
+              <Link href={`/customer/service/new?machine=${a.machine.id}`} className={cn(buttonVariants({ variant: "outline" }), "mt-3 h-12 w-full gap-2 text-base")}>
+                <Wrench className="size-5" aria-hidden /> Request service
+              </Link>
             )}
           </li>
         );

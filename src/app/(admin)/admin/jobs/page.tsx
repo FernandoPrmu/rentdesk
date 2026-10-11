@@ -27,6 +27,7 @@ const COUNT_LABEL: Record<(typeof COUNT_KEYS)[number], string> = {
   pdfs: "Invoice PDFs made",
   receiptPdfs: "Receipt PDFs made",
   slipsDeleted: "Unsent slips deleted",
+  serviceEscalated: "Service requests escalated",
   skipped: "Already done",
 };
 

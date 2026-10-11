@@ -58,6 +58,13 @@ export interface NotificationContext {
   totals?: string;
   /** When a daily job last succeeded (ISO timestamp). */
   lastRunAt?: string;
+  /** Service requests (spec 9 "New service request / status change"). */
+  urgency?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  /** "Toner (cyan, magenta)", "Breakdown / repair". */
+  request?: string;
+  technician?: string;
+  plannedDate?: string | null;
+  rating?: number;
 }
 
 type Template = (c: NotificationContext) => { title: string; body: string };
@@ -70,6 +77,11 @@ const reason = (c: NotificationContext) => (c.reason ? ` Reason: ${c.reason}` : 
 const bills = (c: NotificationContext) =>
   c.invoiceNos && c.invoiceNos.length > 0 ? `${c.invoiceNos.length === 1 ? "bill" : "bills"} ${c.invoiceNos.join(", ")}` : "your bill";
 const credit = (c: NotificationContext) => (c.creditCents ? ` ${formatRupees(c.creditCents)} is kept as credit for your next bills.` : "");
+/** URGENT and HIGH requests say so first, so the owner sees them at a glance. */
+const priority = (c: NotificationContext) => (c.urgency === "URGENT" ? "URGENT: " : c.urgency === "HIGH" ? "High priority: " : "");
+const request = (c: NotificationContext) => c.request ?? "Service request";
+const visit = (c: NotificationContext) => (c.plannedDate ? ` Planned visit: ${formatDate(c.plannedDate)}.` : "");
+const note = (c: NotificationContext) => (c.preview ? ` ${c.preview}` : "");
 
 const TEMPLATES = {
   // Daily job
@@ -242,6 +254,40 @@ const TEMPLATES = {
     title: "Daily job did not run",
     body: `No daily job finished for ${c.hours ?? "?"} hours (last: ${c.lastRunAt ? formatDate(c.lastRunAt.slice(0, 10)) : "?"}). This run caught up; check the scheduler.`,
   }),
+  // Service requests (SRV-05, spec 9): the other side hears of every change.
+  "service.raised": (c) => ({
+    title: `${priority(c)}New service request: ${c.customer ?? "customer"}`,
+    body: `${request(c)} for ${machine(c)}.${note(c)}`,
+  }),
+  "service.acknowledged": (c) => ({ title: `Request received: ${request(c)}`, body: `Your rental company has seen your request for ${machine(c)}.${note(c)}` }),
+  "service.assigned": (c) => ({
+    title: `Technician assigned: ${request(c)}`,
+    body: `${c.technician ?? "A technician"} will handle your request for ${machine(c)}.${visit(c)}${note(c)}`,
+  }),
+  "service.started": (c) => ({ title: `Work started: ${request(c)}`, body: `Work on ${machine(c)} has started.${note(c)}` }),
+  "service.resolved": (c) => ({
+    title: `Please check: ${request(c)} done`,
+    body: `Your rental company says ${machine(c)} is fixed. Please confirm, or tell them if it is still not working.${note(c)}`,
+  }),
+  "service.closed": (c) => ({ title: `Request closed: ${request(c)}`, body: `Your request for ${machine(c)} is closed. You can rate the service.${note(c)}` }),
+  "service.confirmed": (c) => ({ title: `Repair confirmed: ${c.customer ?? "customer"}`, body: `${request(c)} for ${machine(c)} is closed by the customer.` }),
+  "service.reopened": (c) => ({
+    title: `${priority(c)}Still not fixed: ${c.customer ?? "customer"}`,
+    body: `${request(c)} for ${machine(c)} is back In progress.${reason(c)}`,
+  }),
+  "service.cancelled": (c) => ({ title: `Request cancelled: ${request(c)}`, body: `The request for ${machine(c)} was cancelled.${reason(c)}` }),
+  "service.cancelled_by_customer": (c) => ({ title: `Request cancelled: ${c.customer ?? "customer"}`, body: `${request(c)} for ${machine(c)}.${reason(c)}` }),
+  "service.updated": (c) => ({ title: `Request updated: ${request(c)}`, body: `${machine(c)}: ${c.technician ? `${c.technician} will handle it.` : "details changed."}${visit(c)}${note(c)}` }),
+  "service.note": (c) => ({ title: `Note on your request: ${request(c)}`, body: `${machine(c)}:${note(c)}` }),
+  "service.rated": (c) => ({ title: `Service rated ${c.rating ?? "?"}/5: ${c.customer ?? "customer"}`, body: `${request(c)} for ${machine(c)}.${note(c)}` }),
+  "service.escalated_owner": (c) => ({
+    title: `${priority(c)}Service request waiting ${c.hours ?? "?"} hours: ${c.customer ?? "customer"}`,
+    body: `${request(c)} for ${machine(c)} has not been acknowledged yet. Please acknowledge it.`,
+  }),
+  "service.escalated_admin": (c) => ({
+    title: `${priority(c)}Service request not acknowledged for ${c.hours ?? "?"} hours`,
+    body: `${c.customer ?? "A customer"}, ${machine(c)}: ${request(c).toLowerCase()} still waits for the owner.`,
+  }),
   "ticket.cancelled": (c) => ({ title: `Billing ticket cancelled: ${machine(c)}`, body: `Cycle ${c.cycleNo ?? "?"} was cancelled.${reason(c)}` }),
   "ticket.reopened": (c) => ({ title: `Billing ticket reopened: ${machine(c)}`, body: `Cycle ${c.cycleNo ?? "?"} was reopened.${reason(c)}` }),
   "ticket.due_date_changed": (c) => ({
@@ -289,6 +335,27 @@ export const PAYMENT_LINK: Record<"CUSTOMER" | "OWNER", string> = {
   CUSTOMER: "/customer/payments/{entity_id}",
   OWNER: "/owner/payments/{entity_id}",
 };
+
+/** Where each role opens a service request. "{entity_id}" is replaced with the request id by the rpc. */
+export const SERVICE_LINK: Record<RecipientRole, string> = {
+  CUSTOMER: "/customer/service/{entity_id}",
+  OWNER: "/owner/service/{entity_id}",
+  ADMIN: "/admin/escalations",
+};
+
+/** Service request notifications: their own links, and the urgency in `data` for the centre (NOT-01). */
+export function serviceNotifications(
+  event: NotificationEvent,
+  recipients: Recipient[],
+  context: NotificationContext,
+): NotificationItem[] {
+  return recipients.flatMap((r) =>
+    notificationsFor(event, [r], context, {
+      link: SERVICE_LINK[r.role],
+      data: { urgency: context.urgency ?? "NORMAL", priority: context.urgency === "URGENT" || context.urgency === "HIGH" },
+    }),
+  );
+}
 
 export const customer = (userId: string): Recipient => ({ userId, role: "CUSTOMER" });
 export const owner = (userId: string): Recipient => ({ userId, role: "OWNER" });

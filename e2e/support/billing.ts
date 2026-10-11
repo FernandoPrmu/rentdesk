@@ -25,10 +25,10 @@ function check<T>(result: { data: T; error: { message: string } | null }, what: 
   return result.data;
 }
 
-/** Registers a mono machine for an owner (serial must start with E2E- so it is cleaned up). */
-export async function createMachine(ownerId: string, serial: string, model = "MP 2501"): Promise<string> {
+/** Registers a machine (mono unless asked) for an owner (serial must start with E2E- so it is cleaned up). */
+export async function createMachine(ownerId: string, serial: string, model = "MP 2501", type: "MONO" | "COLOUR" = "MONO"): Promise<string> {
   const row = check(
-    await service().from("machines").insert({ owner_id: ownerId, brand: "Ricoh", model, serial_no: serial, type: "MONO" }).select("id").single(),
+    await service().from("machines").insert({ owner_id: ownerId, brand: "Ricoh", model, serial_no: serial, type }).select("id").single(),
     "machine",
   );
   return row!.id;
@@ -87,7 +87,14 @@ export async function issueFirstInvoice(agreementId: string, used: number): Prom
   return { invoiceNo: confirmed.invoice_no, totalCents };
 }
 
-export async function assignMachine(ownerId: string, machineId: string, customerId: string, today: string, firstBilling = today): Promise<string> {
+export async function assignMachine(
+  ownerId: string,
+  machineId: string,
+  customerId: string,
+  today: string,
+  firstBilling = today,
+  colour = false,
+): Promise<string> {
   const row = check(
     await service().rpc("rpc_assign_machine", {
       p_actor_id: ownerId,
@@ -103,6 +110,7 @@ export async function assignMachine(ownerId: string, machineId: string, customer
         bw_rate_cents: 250,
         installation_location: "Front desk",
         initial_bw_reading: 1000,
+        ...(colour ? { colour_included: 500, colour_rate_cents: 1000, initial_colour_reading: 200 } : {}),
       },
       p_today: today,
     }),

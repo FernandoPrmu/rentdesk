@@ -25,12 +25,14 @@ import { ACTIONS, type ActorKind, refusal, type TicketAction, type TicketStatus 
 /** Calls a public.rpc_* wrapper with named arguments; throws RpcError. */
 export type Rpc = (fn: string, args: Record<string, unknown>) => Promise<unknown>;
 
+// Plain fields, no parameter properties: scripts/seed.ts loads this file under Node's
+// type stripping, which does not support them.
 export class RpcError extends Error {
-  constructor(
-    readonly code: string | undefined,
-    message: string,
-  ) {
+  readonly code: string | undefined;
+
+  constructor(code: string | undefined, message: string) {
     super(message);
+    this.code = code;
     this.name = "RpcError";
   }
 }
@@ -38,11 +40,11 @@ export class RpcError extends Error {
 export type TransitionErrorCode = "FORBIDDEN" | "INVALID_STATE" | "INVALID_INPUT";
 
 export class TransitionError extends Error {
-  constructor(
-    readonly code: TransitionErrorCode,
-    message: string,
-  ) {
+  readonly code: TransitionErrorCode;
+
+  constructor(code: TransitionErrorCode, message: string) {
     super(message);
+    this.code = code;
     this.name = "TransitionError";
   }
 }

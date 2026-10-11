@@ -292,3 +292,30 @@ describe("credits and adjustments (PAY-12, spec 11.4)", () => {
     expect(errorOf(() => mono(0, { adjustments: [{ description: "Too much", amountCents: -RS(6000) }] })).code).toBe("INVALID_INPUT");
   });
 });
+
+describe("service charges on the next bill (decision 59)", () => {
+  const drum = { id: "sr-1", description: "Drum unit (damaged by staples)", amountCents: RS(1500) };
+
+  it("each charge is an ADJUSTMENT line as the owner described it, recorded for the database, before credits", () => {
+    const r = mono(0, { serviceCharges: [drum, { id: "sr-2", description: "Fuser", amountCents: RS(800) }], credits: [{ id: "c1", amountCents: RS(1000) }] });
+    expectConsistent(r);
+    expect(r.lines.filter((l) => l.line_type === "ADJUSTMENT")).toEqual([
+      { line_type: "ADJUSTMENT", description: "Drum unit (damaged by staples)", quantity: 1, rate_cents: RS(1500), amount_cents: RS(1500) },
+      { line_type: "ADJUSTMENT", description: "Fuser", quantity: 1, rate_cents: RS(800), amount_cents: RS(800) },
+    ]);
+    expect(r.subtotalCents).toBe(RS(5000 + 1500 + 800));
+    expect(r.totalCents).toBe(RS(5000 + 1500 + 800 - 1000));
+    expect(r.calculation.service_charges).toEqual([
+      { id: "sr-1", description: "Drum unit (damaged by staples)", amount_cents: RS(1500) },
+      { id: "sr-2", description: "Fuser", amount_cents: RS(800) },
+    ]);
+    expect(mono(0).calculation.service_charges).toEqual([]);
+  });
+
+  it("never on an estimate (it is credited back in full), never twice, never zero", () => {
+    expect(errorOf(() => calculateInvoice({ terms: MONO, kind: "ESTIMATED", fullCycles: 1, serviceCharges: [drum] })).message).toMatch(/normal invoice/);
+    expect(errorOf(() => mono(0, { serviceCharges: [drum, drum] })).message).toMatch(/listed twice/);
+    expect(errorOf(() => mono(0, { serviceCharges: [{ ...drum, amountCents: 0 }] })).code).toBe("INVALID_INPUT");
+    expect(errorOf(() => mono(0, { serviceCharges: [{ ...drum, description: " " }] })).code).toBe("INVALID_INPUT");
+  });
+});

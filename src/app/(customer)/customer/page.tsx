@@ -1,12 +1,14 @@
-import { Camera, CircleCheck, Clock, Gauge, Receipt, TriangleAlert } from "lucide-react";
+import { Camera, CircleCheck, Clock, Gauge, Receipt, Star, TriangleAlert, Wrench } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { requestTitle } from "@/components/service/service-display";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
+import { customerServiceTasks } from "@/lib/service/queries";
 import { listCustomerTicketRows } from "@/lib/tickets/queries";
 import { type CustomerTask, customerHome } from "@/lib/tickets/view";
 import { cn } from "@/lib/utils";
@@ -17,11 +19,14 @@ export const metadata: Metadata = { title: "Home" };
  * CP-01 / CP-02: what the customer must do now, from their open billing tickets.
  * One "Enter meter reading" task per machine (the newest ticket, covering every
  * month since the last confirmed reading), one "Pay" task per unpaid bill, and
- * what is waiting for the rental company.
+ * what is waiting for the rental company. Service requests (CP-07): a repair to
+ * confirm, a service to rate, and a button to ask for service.
  */
 export default async function CustomerHomePage() {
   const user = await requireUser("CUSTOMER");
-  const { tasks, waiting } = customerHome(await listCustomerTicketRows(user.id), new Date());
+  const [rows, service] = await Promise.all([listCustomerTicketRows(user.id), customerServiceTasks(user.id)]);
+  const { tasks, waiting } = customerHome(rows, new Date());
+  const serviceTasks = service.toConfirm.length + service.toRate.length;
 
   return (
     <div className="space-y-5">
@@ -30,7 +35,37 @@ export default async function CustomerHomePage() {
         <h1 className="text-2xl font-bold tracking-tight">What you need to do now</h1>
       </div>
 
-      {tasks.length === 0 ? (
+      {service.toConfirm.map((r) => (
+        <Card key={r.id} className="border-primary/50" data-testid="task-confirm-fix">
+          <CardContent className="space-y-3">
+            <div className="flex items-start gap-3">
+              <Wrench className="mt-0.5 size-8 shrink-0 text-primary" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-semibold">Is it fixed?</p>
+                <p className="text-sm text-muted-foreground">
+                  {requestTitle(r)} · {r.machine.name}
+                </p>
+              </div>
+            </div>
+            <Link href={`/customer/service/${r.id}`} className={cn(buttonVariants(), "h-12 w-full text-base")}>
+              Check and confirm
+            </Link>
+          </CardContent>
+        </Card>
+      ))}
+      {service.toRate.map((r) => (
+        <Link key={r.id} href={`/customer/service/${r.id}`} className="flex min-h-14 items-center gap-3 rounded-xl border bg-background px-4 py-3" data-testid="task-rate">
+          <Star className="size-6 shrink-0 text-amber-500" aria-hidden />
+          <span className="min-w-0">
+            <span className="block font-medium">Rate the service</span>
+            <span className="block truncate text-sm text-muted-foreground">
+              {requestTitle(r)} · {r.machine.name}
+            </span>
+          </span>
+        </Link>
+      ))}
+
+      {tasks.length === 0 && serviceTasks > 0 ? null : tasks.length === 0 ? (
         <Card>
           <CardContent className="flex items-center gap-4 py-2">
             <CircleCheck className="size-10 shrink-0 text-primary" aria-hidden />
@@ -49,6 +84,10 @@ export default async function CustomerHomePage() {
           ))}
         </ul>
       )}
+
+      <Link href="/customer/service/new" className={cn(buttonVariants({ variant: "outline" }), "h-14 w-full gap-2 text-base")} data-testid="home-request-service">
+        <Wrench className="size-5" aria-hidden /> Machine problem or toner? Request service
+      </Link>
 
       {waiting.length > 0 && (
         <section className="space-y-2">

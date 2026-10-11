@@ -27,6 +27,8 @@ import { BRANDING_SNAPSHOT_COLUMNS, brandingSnapshot } from "../src/lib/invoices
 import { generateInvoicePdf, INVOICE_BUCKET, type InvoiceFiles } from "../src/lib/invoices/pdf-job.ts";
 import { loadInvoiceFonts } from "../src/lib/invoices/pdf/fonts.ts";
 import { generateReceiptPdf, RECEIPT_BUCKET, type ReceiptFiles } from "../src/lib/payments/receipt-pdf/job.ts";
+import type { ServiceStatus, ServiceType, TonerColour, Urgency } from "../src/lib/service/states.ts";
+import { raiseRequest, rateRequest, type RequestSnapshot, serviceStep, type StepInput } from "../src/lib/service/transitions.ts";
 import type { Rpc } from "../src/lib/tickets/transitions.ts";
 import type { Database, Json } from "../src/types/db";
 
@@ -722,6 +724,71 @@ async function seedServiceRequests(ids: Record<string, string>) {
     ),
     "service requests",
   );
+
+  // Requests in later stages, through the same transition functions as the app (decision 57).
+  // The idempotency key makes a re-run find the same request; steps only move it forward.
+  const rpc: Rpc = async (fn, args) => {
+    const { data, error } = await admin.rpc(fn as never, args as never);
+    if (error) throw new Error(`${fn}: ${error.message}`);
+    return data;
+  };
+  const demos: {
+    key: string;
+    customer: string;
+    owner: string;
+    machine: string;
+    type: ServiceType;
+    urgency: Urgency;
+    colours: TonerColour[];
+    description: string;
+    target: ServiceStatus;
+    rating?: number;
+  }[] = [
+    { key: "A3-breakdown", customer: "custA2", owner: "ownerA", machine: "mA3", type: "BREAKDOWN", urgency: "HIGH", colours: [], description: "Paper jams in tray 2 and error J-102", target: "IN_PROGRESS" },
+    { key: "A5-toner", customer: "custA3", owner: "ownerA", machine: "mA5", type: "TONER", urgency: "NORMAL", colours: ["BLACK"], description: "Toner is almost empty", target: "RESOLVED" },
+    { key: "A4-maintenance", customer: "custA3", owner: "ownerA", machine: "mA4", type: "MAINTENANCE", urgency: "LOW", colours: [], description: "Yearly cleaning, please", target: "CLOSED", rating: 5 },
+  ];
+  for (const d of demos) {
+    const customerId = ids[d.customer];
+    const ownerId = ids[d.owner];
+    const machine = MACHINES.find((m) => m.key === d.machine)!;
+    const customerName = ACCOUNTS.find((a) => a.key === d.customer)!.fullName;
+    const raised = await raiseRequest(rpc, { kind: "USER", id: customerId, role: "CUSTOMER" }, {
+      idempotencyKey: stableId(`service:${d.key}`),
+      machineId: stableId(`machine:${d.machine}`),
+      ownerId,
+      type: d.type,
+      urgency: d.urgency,
+      description: d.description,
+      tonerColours: d.colours,
+      context: { machine: `${machine.brand} ${machine.model} (${machine.serial})`, customer: customerName },
+    });
+    for (let step = 0; step < 6; step++) {
+      const r = checkMaybe(
+        await admin.from("service_requests").select("id, owner_id, customer_id, status, type, urgency, toner_colours, rating").eq("id", raised.request_id).maybeSingle(),
+        "service request",
+      );
+      if (!r) break;
+      const snapshot = { ...r, machine_name: `${machine.brand} ${machine.model}`, customer_name: customerName } as RequestSnapshot;
+      const owner = { kind: "USER" as const, id: ownerId, role: "OWNER" as const };
+      if (r.status === d.target) {
+        if (d.rating && r.status === "CLOSED" && r.rating === null) {
+          await rateRequest(rpc, { kind: "USER", id: customerId, role: "CUSTOMER" }, snapshot, { rating: d.rating, comment: "Quick and friendly service" });
+        }
+        break;
+      }
+      const next: Record<string, StepInput | undefined> = {
+        NEW: { action: "ACKNOWLEDGE" },
+        ACKNOWLEDGED: { action: "ASSIGN", technician: "Nimal Perera" },
+        ASSIGNED: { action: "START" },
+        IN_PROGRESS: { action: "RESOLVE", workDone: d.type === "TONER" ? "Delivered and fitted a new toner cartridge" : "Cleaned and serviced the machine", costCents: 450_000 },
+        RESOLVED: { action: "CONFIRM" },
+      };
+      const input = next[r.status];
+      if (!input) break;
+      await serviceStep(rpc, input.action === "CONFIRM" ? { kind: "USER", id: customerId, role: "CUSTOMER" } : owner, snapshot, input);
+    }
+  }
 }
 
 async function main() {

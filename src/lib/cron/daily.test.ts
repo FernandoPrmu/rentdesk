@@ -93,6 +93,44 @@ describe("runDailyJob", () => {
   });
 });
 
+describe("service request escalation (SRV-08, decision 61)", () => {
+  const request = (id: string, urgency: string, level: number, hoursAgo: number) => ({
+    id,
+    owner_id: "owner-1",
+    customer_id: "cust-1",
+    created_at: new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString(),
+    type: "BREAKDOWN",
+    urgency,
+    escalation_level: level,
+    customer_name: "Perera Traders",
+    machine_name: "Ricoh MP 2014",
+    serial_no: "LCS-M-001",
+    settings: { service_ack_hours_urgent: 4, service_ack_hours_normal: 24, service_admin_escalation_hours_urgent: 8, service_admin_escalation_hours_normal: 48 },
+  });
+
+  it("re-notifies the owner, then the admins too; requests not yet due are left alone", async () => {
+    const { rpc, calls } = fakeRpc({
+      rpc_cron_service_candidates: (args) =>
+        args.p_after ? [] : [request("r-urgent", "URGENT", 0, 5), request("r-high", "HIGH", 1, 9), request("r-normal", "NORMAL", 0, 5)],
+      rpc_escalate_service_request: () => ({ escalation_level: 1 }),
+    });
+    const result = await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });
+    const escalations = calls.filter(([fn]) => fn === "rpc_escalate_service_request").map(([, a]) => a);
+    expect(escalations.map((a) => [a.p_request_id, a.p_level])).toEqual([
+      ["r-urgent", 1],
+      ["r-high", 2],
+    ]);
+    const notices = (i: number) => (escalations[i].p_notifications as { user_id: string; event: string; title: string }[]).map((n) => [n.user_id, n.event]);
+    expect(notices(0)).toEqual([["owner-1", "service.escalated_owner"]]);
+    expect(notices(1)).toEqual([
+      ["owner-1", "service.escalated_owner"],
+      ["admin-1", "service.escalated_admin"],
+    ]);
+    expect((escalations[1].p_notifications as { title: string }[])[1].title).toBe("High priority: Service request not acknowledged for 9 hours");
+    expect(result.counts.serviceEscalated).toBe(2);
+  });
+});
+
 describe("orphan meter photos (rule 30)", () => {
   it("deletes uploaded photos no submission recorded, one batch per run", async () => {
     const removed: string[][] = [];

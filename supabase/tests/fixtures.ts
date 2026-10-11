@@ -239,6 +239,8 @@ export async function deleteFixture(db: pg.Client, f: Fixture) {
   await db.query("begin");
   try {
     for (const table of [
+      "notification_deliveries",
+      "notification_preferences",
       "notifications",
       "notification_templates",
       "ticket_comments",

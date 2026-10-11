@@ -117,7 +117,7 @@ test.describe("admin manages owners (ADM-01..03)", () => {
     await page.getByLabel("Business name").fill(business);
     await page.getByLabel("Contact person").fill("Test Contact");
     await page.getByLabel("Phone").fill("0112223344");
-    await page.getByLabel("Email").fill("e2e-owner@example.com");
+    await page.getByRole("textbox", { name: /^Email/ }).fill("e2e-owner@example.com");
     await page.getByRole("button", { name: "Create owner account" }).click();
 
     owner = await readCredentials(page, "Owner account created");

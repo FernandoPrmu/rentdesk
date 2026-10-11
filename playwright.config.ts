@@ -16,6 +16,8 @@ try {
  */
 export function e2eConfig(dev: boolean): PlaywrightTestConfig {
   const port = Number(process.env.PORT ?? (dev ? 3000 : 3100));
+  // The app under test never sends real email: the fake transport records it (decision 73).
+  const env = { ...(process.env as Record<string, string>), EMAIL_TRANSPORT: "fake", EMAIL_DEV_REDIRECT: "e2e-inbox@rentdesk.invalid" };
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${port}`;
 
   // Key flows are tested on a mobile viewport first (CLAUDE.md: mobile-first, 360 px).
@@ -49,6 +51,7 @@ export function e2eConfig(dev: boolean): PlaywrightTestConfig {
         ? {
             command: `npm run dev -- --port ${port}`,
             url: baseURL,
+            env,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           }
@@ -56,6 +59,7 @@ export function e2eConfig(dev: boolean): PlaywrightTestConfig {
             // Always a fresh build: reusing a running server could test stale code.
             command: `npm run build && npm run start -- --port ${port}`,
             url: baseURL,
+            env,
             reuseExistingServer: false,
             timeout: 600_000,
           },

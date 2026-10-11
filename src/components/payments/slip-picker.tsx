@@ -62,17 +62,20 @@ export function SlipPicker({
   label = "Payment slip",
   hint = "A photo of the bank slip, a screenshot of the transfer, or the PDF from your bank (up to 5 MB).",
   onUploadingChange,
+  imagesOnly = false,
 }: {
   ownerId: string;
   customerId: string;
   value: UploadedSlip | null;
   onChange: (slip: UploadedSlip | null) => void;
   error?: string;
-  bucket?: "payment-slips" | "dispute-files";
+  bucket?: "payment-slips" | "dispute-files" | "service-photos";
   label?: string;
   hint?: string;
   /** Told while a file is being prepared or uploaded, so the form can wait for it. */
   onUploadingChange?: (uploading: boolean) => void;
+  /** Pictures only (a service request's photo, decision 58): no PDF. */
+  imagesOnly?: boolean;
 }) {
   const camera = useRef<HTMLInputElement>(null);
   const files = useRef<HTMLInputElement>(null);
@@ -94,7 +97,8 @@ export function SlipPicker({
     if (!file) return;
     setProblem(null);
     const plan = slipPlan(file);
-    if (plan.action === "REFUSE") return setProblem(plan.error);
+    if (plan.action === "REFUSE") return setProblem(imagesOnly ? "Please choose a photo (JPG or PNG)." : plan.error);
+    if (imagesOnly && plan.action === "UPLOAD" && plan.mimeType === "application/pdf") return setProblem("Please choose a photo (JPG or PNG), not a PDF.");
     setUploading(true);
     try {
       const originalSha256 = await sha256Hex(await file.arrayBuffer());
@@ -133,7 +137,7 @@ export function SlipPicker({
         <div className="flex items-center gap-3 rounded-xl border bg-background p-3">
           {value.previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- a local preview of the chosen file
-            <img src={value.previewUrl} alt="The payment slip you added" className="size-16 rounded-md border object-cover" />
+            <img src={value.previewUrl} alt={imagesOnly ? "The photo you added" : "The payment slip you added"} className="size-16 rounded-md border object-cover" />
           ) : (
             <FileText className="size-10 shrink-0 text-muted-foreground" aria-hidden />
           )}
@@ -162,16 +166,16 @@ export function SlipPicker({
         capture="environment"
         className="sr-only"
         tabIndex={-1}
-        aria-label="Take a photo of the slip"
+        aria-label={imagesOnly ? "Take a photo" : "Take a photo of the slip"}
         onChange={(e) => pick(e.target.files?.[0])}
       />
       <input
         ref={files}
         type="file"
-        accept="image/jpeg,image/png,image/heic,image/heif,application/pdf"
+        accept={imagesOnly ? "image/jpeg,image/png,image/heic,image/heif" : "image/jpeg,image/png,image/heic,image/heif,application/pdf"}
         className="sr-only"
         tabIndex={-1}
-        aria-label="Choose the slip file"
+        aria-label={imagesOnly ? "Choose a photo" : "Choose the slip file"}
         data-testid="slip-file-input"
         onChange={(e) => pick(e.target.files?.[0])}
       />

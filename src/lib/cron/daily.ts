@@ -1,6 +1,8 @@
 import { calculateInvoice } from "../billing/invoice.ts";
 import { addLateFee } from "../billing/late-fee.ts";
-import { admins, customer, JOBS_LINK, type NotificationContext, notificationsFor, owner } from "../notifications/service.ts";
+import { admins, customer, JOBS_LINK, type NotificationContext, notificationsFor, owner, serviceNotifications } from "../notifications/service.ts";
+import { decideServiceEscalation, ESCALATION_ADMIN as SERVICE_ESCALATION_ADMIN, type ServiceSettings } from "../service/rules.ts";
+import { type ServiceType, TYPE_LABEL, type Urgency } from "../service/states.ts";
 import { colomboDate, lastDayBefore, meterDeadline, reviewDeadline } from "../tickets/deadlines.ts";
 import {
   createEstimate,
@@ -44,6 +46,8 @@ export interface PhotoStorage {
   removePaymentSlips?(paths: string[]): Promise<void>;
   /** Deletes dispute files never sent with a dispute (rule 47); optional in unit tests. */
   removeDisputeFiles?(paths: string[]): Promise<void>;
+  /** Deletes service request photos never sent with a request (decision 58); optional in unit tests. */
+  removeServicePhotos?(paths: string[]): Promise<void>;
 }
 
 /** Makes one pending invoice PDF (src/lib/invoices/pdf-job.ts); optional so unit tests can leave it out. */
@@ -81,6 +85,7 @@ export const COUNT_KEYS = [
   "pdfs",
   "receiptPdfs",
   "slipsDeleted",
+  "serviceEscalated",
   "skipped",
 ] as const;
 export type CronCounts = Record<(typeof COUNT_KEYS)[number], number>;
@@ -150,6 +155,7 @@ export function buildEstimate(t: CronTicket): EstimatePayload {
     ESTIMATE_RECONCILIATION: "estimate",
     MANUAL: "credit",
     DISPUTE: "dispute credit",
+    SERVICE_DISCOUNT: "service discount",
   };
   const result = calculateInvoice({
     terms: {
@@ -286,6 +292,9 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
       after = tickets[tickets.length - 1].id;
     }
 
+    // Service requests not acknowledged in time (SRV-08, spec 7.3; decision 61).
+    await escalateServiceRequests(rpc, now, adminIds, batch, counts, record, checkTime);
+
     // g. Meter photos: confirmed (deleted on confirm, INV-09) and expired rejected attempts (6.5).
     for (;;) {
       checkTime();
@@ -338,6 +347,20 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
           counts.slipsDeleted += files.length;
         } catch (error) {
           record(errorEntry("orphan dispute files", undefined, error));
+        }
+      }
+    }
+
+    // Service request photos uploaded but never sent with a request, older than 2 days. One batch per run.
+    if (storage.removeServicePhotos) {
+      checkTime();
+      const photos = (await rpc("rpc_cron_orphan_service_photos", { p_now: now.toISOString(), p_limit: batch })) as string[];
+      if (photos.length > 0) {
+        try {
+          await storage.removeServicePhotos(photos);
+          counts.photosDeleted += photos.length;
+        } catch (error) {
+          record(errorEntry("orphan service photos", undefined, error));
         }
       }
     }
@@ -584,6 +607,74 @@ export async function syncPauses(
         record(errorEntry("pause", r.id, error));
       }
     }
+  }
+}
+
+interface CronServiceRequest {
+  id: string;
+  owner_id: string;
+  customer_id: string;
+  created_at: string;
+  type: ServiceType;
+  urgency: Urgency;
+  escalation_level: number;
+  customer_name: string;
+  machine_name: string;
+  serial_no: string;
+  settings: ServiceSettings;
+}
+
+/**
+ * SRV-08 (spec 7.3; decision 61): a request still New after the acknowledgement
+ * time re-notifies the owner (level 1); after the admin time the admins are alerted
+ * too (level 2, Admin › Escalations). Compare-and-set rpc: a request acknowledged
+ * meanwhile is skipped, a second run the same day finds nothing to do.
+ */
+export async function escalateServiceRequests(
+  rpc: Rpc,
+  now: Date,
+  adminIds: string[],
+  batch: number,
+  counts: Pick<CronCounts, "serviceEscalated" | "skipped">,
+  record: (e: CronErrorEntry) => void = () => {},
+  checkTime: () => void = () => {},
+) {
+  let after: string | null = null;
+  for (;;) {
+    checkTime();
+    const rows = (await rpc("rpc_cron_service_candidates", { p_after: after, p_limit: batch })) as CronServiceRequest[];
+    for (const r of rows) {
+      checkTime();
+      const decision = decideServiceEscalation(r, now, r.settings);
+      if (!decision) continue;
+      const context: NotificationContext = {
+        machine: `${r.machine_name} (${r.serial_no})`,
+        customer: r.customer_name,
+        urgency: r.urgency,
+        request: TYPE_LABEL[r.type],
+        hours: decision.hours,
+      };
+      const recipients = decision.level === SERVICE_ESCALATION_ADMIN ? admins(adminIds) : [];
+      try {
+        const result = await rpc("rpc_escalate_service_request", {
+          p_request_id: r.id,
+          p_level: decision.level,
+          p_now: now.toISOString(),
+          p_reason: `Not acknowledged for ${decision.hours} hours`,
+          p_notifications: [
+            ...serviceNotifications("service.escalated_owner", [owner(r.owner_id)], context),
+            ...serviceNotifications("service.escalated_admin", recipients, context),
+          ],
+        });
+        const skipped = typeof result === "object" && result !== null && "skipped" in result;
+        if (skipped) counts.skipped += 1;
+        else counts.serviceEscalated += 1;
+      } catch (error) {
+        record(errorEntry("service escalation", r.id, error));
+      }
+    }
+    if (rows.length < batch) return;
+    after = rows[rows.length - 1].id;
   }
 }
 

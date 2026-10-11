@@ -5,6 +5,7 @@ import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import { listCustomerAgreements } from "@/lib/agreements/queries";
 import { requireUser } from "@/lib/auth/current-user";
 import { getDepositsHeld } from "@/lib/deposits/queries";
+import { machinesInService } from "@/lib/service/queries";
 
 export const metadata: Metadata = { title: "Machines" };
 
@@ -12,11 +13,13 @@ export const metadata: Metadata = { title: "Machines" };
  * Customer portal: the machines this customer rents now, read-only, with the
  * deposit held for each (DEP-01). A returned machine whose deposit is still held
  * stays listed until it is settled. RLS returns only the customer's own rows.
+ * Each rented machine has "Request service" and shows "Service in progress" while
+ * a request is open (CP-07).
  */
 export default async function CustomerMachinesPage() {
   const user = await requireUser("CUSTOMER");
   const all = await listCustomerAgreements(user.id);
-  const deposits = await getDepositsHeld(all.map((a) => a.id));
+  const [deposits, inService] = await Promise.all([getDepositsHeld(all.map((a) => a.id)), machinesInService(all.map((a) => a.machine.id))]);
   const agreements = all.filter((a) => a.status !== "TERMINATED");
   const returnedWithDeposit = all.filter((a) => a.status === "TERMINATED" && (deposits.get(a.id) ?? 0) > 0);
   const today = todayInColombo();
@@ -28,6 +31,8 @@ export default async function CustomerMachinesPage() {
         agreements={agreements}
         today={today}
         deposits={deposits}
+        inService={inService}
+        requestService
         empty="You have no machines on rent at the moment. Your machine owner adds them here."
       />
       {agreements.length > 0 && (

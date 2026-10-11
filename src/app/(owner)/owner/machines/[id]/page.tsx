@@ -9,13 +9,18 @@ import { MachineStatusBadge, MachineTypeBadge } from "@/components/machines/mach
 import { MachineStatusButton } from "@/components/machines/machine-status-dialog";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
+import { RequestList } from "@/components/service/request-list";
+import { InServiceBadge } from "@/components/service/service-display";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatCount, formatDate } from "@/lib/format";
 import { getMachine } from "@/lib/machines/queries";
+import { formatRupees } from "@/lib/money";
+import { listMachineRequests, machineServiceCost } from "@/lib/service/queries";
+import { ACTIVE_STATUSES } from "@/lib/service/states";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Machine" };
@@ -29,9 +34,11 @@ export default async function MachineDetailPage({ params, searchParams }: PagePr
   // RLS: another owner's machine is simply "not found".
   const machine = await getMachine(id);
   if (!machine) notFound();
-  const { returned } = await searchParams;
+  const [{ returned }, service] = await Promise.all([searchParams, listMachineRequests(id)]);
+  const serviceCost = await machineServiceCost(id);
   const current = machine.current;
   const past = machine.agreements.filter((a) => a.status === "TERMINATED");
+  const inService = current !== null && service.some((r) => ACTIVE_STATUSES.includes(r.status));
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -41,6 +48,7 @@ export default async function MachineDetailPage({ params, searchParams }: PagePr
         <div className="-mt-3 flex flex-wrap gap-2">
           <MachineTypeBadge type={machine.type} />
           <MachineStatusBadge status={machine.status} />
+          {inService && <InServiceBadge />}
         </div>
       </div>
 
@@ -139,6 +147,24 @@ export default async function MachineDetailPage({ params, searchParams }: PagePr
                 </li>
               ))}
             </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Service history</CardTitle>
+          <CardDescription>
+            Repairs, toner, spare parts and maintenance (MAC-05)
+            {serviceCost > 0 ? ` · your cost so far ${formatRupees(serviceCost)}` : ""}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <RequestList rows={service} hrefBase="/owner/service" showCustomer table={false} showMachine={false} empty="No service requests for this machine yet." label="Service history" />
+          {service.length > 0 && (
+            <Link href={`/owner/service?status=ALL&machine=${id}`} className="text-sm font-medium text-primary hover:underline">
+              Open in the service list
+            </Link>
           )}
         </CardContent>
       </Card>

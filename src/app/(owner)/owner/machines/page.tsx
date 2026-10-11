@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/current-user";
 import { listMachines } from "@/lib/machines/queries";
 import { machineListFilterSchema } from "@/lib/machines/schemas";
+import { machinesInService } from "@/lib/service/queries";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Machines" };
@@ -16,6 +17,7 @@ export default async function MachinesPage({ searchParams }: PageProps<"/owner/m
   await requireUser("OWNER");
   const filter = machineListFilterSchema.parse(await searchParams);
   const machines = await listMachines(filter);
+  const inService = await machinesInService(machines.filter((m) => m.status === "RENTED").map((m) => m.id));
   const filtered = Boolean(filter.q || filter.type || filter.status);
 
   return (
@@ -29,7 +31,7 @@ export default async function MachinesPage({ searchParams }: PageProps<"/owner/m
         }
       />
       <MachineFilters filter={filter} />
-      <MachineList machines={machines} empty={filtered ? "No machines match this search." : "No machines yet. Register the first one."} />
+      <MachineList machines={machines} inService={inService} empty={filtered ? "No machines match this search." : "No machines yet. Register the first one."} />
     </>
   );
 }

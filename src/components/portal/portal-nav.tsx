@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, CalendarClock, FileText, House, LayoutDashboard, LifeBuoy, type LucideIcon, Printer, Receipt, Settings, Ticket, TriangleAlert, Users } from "lucide-react";
+import { Building2, CalendarClock, FileText, House, LayoutDashboard, LifeBuoy, type LucideIcon, Printer, Receipt, Settings, Ticket, TriangleAlert, Users, Wrench } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
@@ -15,6 +15,8 @@ interface NavItem {
   icon: LucideIcon;
   /** Active only on this exact path (portal home). */
   exact?: boolean;
+  /** Left out of the bottom bar (seven items do not fit 360 px); still in the sidebar. */
+  sidebarOnly?: boolean;
 }
 
 const NAV: Record<Portal, NavItem[]> = {
@@ -28,7 +30,9 @@ const NAV: Record<Portal, NavItem[]> = {
   owner: [
     { href: "/owner", label: "Home", icon: House, exact: true },
     { href: "/owner/tickets", label: "Tickets", icon: Ticket },
-    { href: "/owner/invoices", label: "Invoices", icon: FileText },
+    { href: "/owner/service", label: "Service", icon: Wrench },
+    // On a phone, invoices are reached from Home (Outstanding) and from each ticket.
+    { href: "/owner/invoices", label: "Invoices", icon: FileText, sidebarOnly: true },
     { href: "/owner/customers", label: "Customers", icon: Users },
     { href: "/owner/machines", label: "Machines", icon: Printer },
     { href: "/owner/settings", label: "Settings", icon: Settings },
@@ -36,6 +40,7 @@ const NAV: Record<Portal, NavItem[]> = {
   customer: [
     { href: "/customer", label: "Home", icon: House, exact: true },
     { href: "/customer/machines", label: "Machines", icon: Printer },
+    { href: "/customer/service", label: "Service", icon: Wrench },
     { href: "/customer/bills", label: "Bills", icon: Receipt },
     { href: "/customer/help", label: "Help", icon: LifeBuoy },
   ],
@@ -93,7 +98,7 @@ export function BottomNav({ portal, className }: { portal: Portal; className?: s
 }
 
 function BottomLinks({ portal, pathname, className }: { portal: Portal; pathname: string | null; className?: string }) {
-  const items = NAV[portal];
+  const items = NAV[portal].filter((item) => !item.sidebarOnly);
   return (
     <nav
       aria-label="Main"

@@ -14,7 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * sees exactly what a missing id shows.
  */
 
-export type GuardedEntity = "billing_cycle_tickets" | "invoices" | "payments" | "receipts";
+export type GuardedEntity = "billing_cycle_tickets" | "invoices" | "payments" | "receipts" | "service_requests";
 
 /**
  * Records the attempt when the id belongs to another tenant or another customer

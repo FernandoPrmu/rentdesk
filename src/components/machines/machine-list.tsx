@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { ChoiceSelect } from "@/components/forms/choice-select";
 import { MachineStatusBadge, MachineTypeBadge } from "@/components/machines/machine-badges";
+import { InServiceBadge } from "@/components/service/service-display";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { MachineListRow } from "@/lib/machines/queries";
@@ -51,7 +52,7 @@ function rentedTo(m: MachineListRow) {
 }
 
 /** Cards on a phone, a table from md up (MAC-01). */
-export function MachineList({ machines, empty }: { machines: MachineListRow[]; empty: string }) {
+export function MachineList({ machines, empty, inService }: { machines: MachineListRow[]; empty: string; inService?: Set<string> }) {
   if (machines.length === 0) {
     return <p className="rounded-xl border border-dashed bg-background p-6 text-center text-muted-foreground">{empty}</p>;
   }
@@ -67,9 +68,10 @@ export function MachineList({ machines, empty }: { machines: MachineListRow[]; e
                     {m.brand} {m.model}
                   </span>
                   <MachineStatusBadge status={m.status} />
+                  {m.status === "RENTED" && inService?.has(m.id) && <InServiceBadge />}
                 </div>
                 <p className="truncate text-sm text-muted-foreground">
-                  {[m.serial_no, MACHINE_TYPE_LABEL[m.type], rentedTo(m)].filter(Boolean).join(" · ")}
+                  {[m.serial_no, MACHINE_TYPE_LABEL[m.type], rentedTo(m)].filter(Boolean).join(" Â· ")}
                 </p>
               </div>
               <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />
@@ -103,6 +105,7 @@ export function MachineList({ machines, empty }: { machines: MachineListRow[]; e
                 </td>
                 <td className="px-4 py-3">
                   <MachineStatusBadge status={m.status} />
+                  {m.status === "RENTED" && inService?.has(m.id) && <InServiceBadge />}
                 </td>
                 <td className="px-4 py-3">
                   {m.current ? (
@@ -110,7 +113,7 @@ export function MachineList({ machines, empty }: { machines: MachineListRow[]; e
                       {m.current.customer.name}
                     </Link>
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                    <span className="text-muted-foreground">â€”</span>
                   )}
                 </td>
               </tr>

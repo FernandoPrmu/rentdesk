@@ -41,9 +41,17 @@ export function outboxConfig(env: NodeJS.ProcessEnv = process.env): OutboxConfig
   };
 }
 
+/** OUTBOX_STATS=1: count what the outbox does, to measure its database load. */
+const STATS = { kicks: 0, drains: 0, rpcCalls: 0, claimed: 0, ms: 0 };
+const statsOn = () => process.env.OUTBOX_STATS === "1";
+function logStats(label: string) {
+  if (statsOn()) console.info(`[outbox-stats] ${label} kicks=${STATS.kicks} drains=${STATS.drains} rpc=${STATS.rpcCalls} claimed=${STATS.claimed} ms=${STATS.ms}`);
+}
+
 /** The rpc port over supabase-js (no kick: the sender must not wake itself). */
 function clientRpc(client: SupabaseClient<Database>): Rpc {
   return async (fn, args) => {
+    STATS.rpcCalls += 1;
     const { data, error } = await client.rpc(fn as never, args as never);
     if (error) throw new RpcError(error.code, error.message);
     return data;
@@ -84,7 +92,12 @@ function drain(): Promise<void> {
     try {
       do {
         again = false;
+        STATS.drains += 1;
+        const t0 = Date.now();
         const s = await deliverNow();
+        STATS.ms += Date.now() - t0;
+        STATS.claimed += s.claimed;
+        logStats("drain");
         if (s.claimed > 0) console.info(`[notifications] sent ${s.sent}, retry ${s.retry}, failed ${s.failed}, skipped ${s.skipped}, waiting ${s.postponed}`);
       } while (again);
     } catch (error) {
@@ -102,6 +115,9 @@ function drain(): Promise<void> {
  * outside a request (scripts, tests) it does nothing and the daily job sends them.
  */
 export function kickOutbox(): void {
+  // OUTBOX_KICK=off: send only from the daily job (measurement and an emergency switch).
+  if (process.env.OUTBOX_KICK === "off") return;
+  STATS.kicks += 1;
   try {
     after(drain);
   } catch {

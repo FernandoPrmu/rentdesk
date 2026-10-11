@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateInvoicePdf } from "@/lib/invoices/pdf-job";
 import { supabaseInvoiceFiles } from "@/lib/invoices/pdf-server";
 import { loadInvoiceFonts } from "@/lib/invoices/pdf/fonts";
+import { queuesDelivery } from "@/lib/notifications/events";
 import { deliverNow, kickOutbox } from "@/lib/notifications/server";
 import { generateReceiptPdf } from "@/lib/payments/receipt-pdf/job";
 import { supabaseReceiptFiles } from "@/lib/payments/receipt-pdf/server";
@@ -24,10 +25,9 @@ export function supabaseRpc(client: SupabaseClient<Database>): Rpc {
     // Generic port: each caller names an rpc_* wrapper and its arguments.
     const { data, error } = await client.rpc(fn as never, args as never);
     if (error) throw new RpcError(error.code, error.message);
-    // A workflow change that carries notifications may have queued emails in its transaction:
-    // send them after the response (decision 67). Reads (also those made while a page renders)
-    // never schedule anything.
-    if ("p_notifications" in args) kickOutbox();
+    // Only a change that queued an email (or SMS) in its transaction wakes the sender, after
+    // the response (decision 67). In-app-only changes and reads never schedule anything.
+    if (queuesDelivery(args.p_notifications)) kickOutbox();
     return data;
   };
 }

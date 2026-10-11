@@ -60,6 +60,9 @@ export function e2eConfig(dev: boolean): PlaywrightTestConfig {
             command: `npm run build && npm run start -- --port ${port}`,
             url: baseURL,
             env,
+            // E2E_SERVER_LOG=1: the server's own output (console.info too) in the test log.
+            stdout: process.env.E2E_SERVER_LOG ? "pipe" : "ignore",
+            stderr: "pipe",
             reuseExistingServer: false,
             timeout: 600_000,
           },

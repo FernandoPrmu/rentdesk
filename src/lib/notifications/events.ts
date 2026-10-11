@@ -187,6 +187,20 @@ export function emailEvents(): CatalogEvent[] {
   return (Object.keys(EVENTS) as CatalogEvent[]).filter((k) => EVENTS[k].email !== null);
 }
 
+/**
+ * Whether a list of notification items (an rpc's `p_notifications`) queues any email
+ * or SMS delivery, i.e. whether the sender has anything new to do after the request.
+ */
+export function queuesDelivery(items: unknown): boolean {
+  if (!Array.isArray(items)) return false;
+  return items.some((item) => {
+    const event = (item as { event?: unknown } | null)?.event;
+    if (typeof event !== "string" || (item as { email?: unknown }).email === false) return false;
+    const info = eventInfo(event);
+    return info !== null && (info.email !== null || info.sms === true);
+  });
+}
+
 /** Variables a template of this event may use. */
 export function allowedVariables(event: string): VariableName[] {
   const info = eventInfo(event);

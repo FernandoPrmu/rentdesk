@@ -15,7 +15,7 @@ const ALL_RELATIONS = [
   "idempotency_keys", "audit_logs", "agreement_terms_history", "customer_balances",
   "deposit_transactions", "agreement_deposit_balances", "invoice_pdf_versions",
   "payment_allocations", "credit_refunds", "receipts", "receipt_counters", "receipt_pdf_versions",
-  "notification_events", "notification_deliveries", "notification_preferences", "notification_log",
+  "notification_events", "notification_deliveries", "notification_preferences", "notification_log", "outbox_lease",
 ];
 
 /** Relations with an owner_id column that authenticated users may read. */
@@ -417,6 +417,8 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_notify_admins_once",
         "rpc_notify_once",
         "rpc_open_billing_cycle",
+        "rpc_outbox_begin",
+        "rpc_outbox_end",
         "rpc_payment_duplicates",
         "rpc_plan_allocation",
         "rpc_provision_account",

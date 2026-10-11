@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { allowedVariables, COMMON_VARIABLES, emailEvents, EVENTS, VARIABLES } from "./events";
+import { allowedVariables, COMMON_VARIABLES, emailEvents, EVENTS, queuesDelivery, VARIABLES } from "./events";
 import { contextVars, NOTIFICATION_EVENTS } from "./service";
 import { defaultTemplate, GENERIC_TEMPLATE, renderEmail, renderTemplate, sampleVariables, usedVariables, validateTemplate } from "./template";
 
@@ -32,6 +32,15 @@ describe("event catalogue", () => {
       lastRunAt: "2026-01-01T00:00:00Z", urgency: "HIGH", request: "r", technician: "t", plannedDate: "2026-01-01", rating: 5,
     });
     for (const key of Object.keys(all)) expect(VARIABLES, key).toHaveProperty(key);
+  });
+
+  it("wakes the sender only when an action queued an email or SMS", () => {
+    expect(queuesDelivery([{ event: "invoice.issued" }])).toBe(true);
+    expect(queuesDelivery([{ event: "comment.added" }, { event: "service.acknowledged" }])).toBe(false);
+    expect(queuesDelivery([{ event: "invoice.issued", email: false }])).toBe(false);
+    expect(queuesDelivery([{ event: "ticket.created" }])).toBe(false);
+    expect(queuesDelivery(undefined)).toBe(false);
+    expect(queuesDelivery("[]")).toBe(false);
   });
 
   it("keeps an empty {priority} for normal requests, so their subject still renders", () => {

@@ -37,7 +37,7 @@ function row(over: Partial<DeliveryRow> = {}): DeliveryRow {
   };
 }
 
-function setup(rows: DeliveryRow[], options: { quota?: Partial<Quota>; production?: boolean; redirect?: string | null } = {}) {
+function setup(rows: DeliveryRow[], options: { quota?: Partial<Quota>; production?: boolean; redirect?: string | null; due?: boolean } = {}) {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   const recorded: Record<string, unknown>[] = [];
   let batch = [...rows];
@@ -45,6 +45,8 @@ function setup(rows: DeliveryRow[], options: { quota?: Partial<Quota>; productio
   const ports: OutboxPorts = {
     rpc: async (fn, args) => {
       calls.push({ fn, args });
+      if (fn === "rpc_outbox_begin") return options.due === false ? null : "lease-1";
+      if (fn === "rpc_outbox_end") return null;
       if (fn === "rpc_email_quota") return { sent_today: 0, sent_month: 0, daily_limit: 100, monthly_limit: 3000, reserve: 20, max_attempts: 5, ...options.quota };
       if (fn === "rpc_claim_deliveries") {
         const out = batch;
@@ -66,6 +68,22 @@ function setup(rows: DeliveryRow[], options: { quota?: Partial<Quota>; productio
 }
 
 describe("deliverDue (NOT-02)", () => {
+  it("nothing due (or another sender busy): one call, nothing claimed, no lease to give back", async () => {
+    const { ports, calls } = setup([row()], { due: false });
+    expect(await deliverDue(ports, { now: () => NOW })).toMatchObject({ claimed: 0, idle: true });
+    expect(calls.map((c) => c.fn)).toEqual(["rpc_outbox_begin"]);
+  });
+
+  it("takes the sender lease first and always gives it back", async () => {
+    const { ports, calls } = setup([row()]);
+    ports.email = fakeTransport({ fail: () => { throw new Error("transport crashed"); } });
+    await deliverDue(ports, { now: () => NOW });
+    const fns = calls.map((c) => c.fn);
+    expect(fns[0]).toBe("rpc_outbox_begin");
+    expect(fns.at(-1)).toBe("rpc_outbox_end");
+    expect(calls.at(-1)?.args).toEqual({ p_token: "lease-1" });
+  });
+
   it("sends the bill with its PDF and the company's logo, from the company, replying to the company", async () => {
     const { ports, recorded, transport } = setup([row()]);
     const s = await deliverDue(ports, { now: () => NOW });

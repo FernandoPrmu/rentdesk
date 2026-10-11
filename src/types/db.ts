@@ -2100,6 +2100,24 @@ export type Database = {
           },
         ]
       }
+      outbox_lease: {
+        Row: {
+          holder: string | null
+          id: boolean
+          locked_until: string
+        }
+        Insert: {
+          holder?: string | null
+          id?: boolean
+          locked_until?: string
+        }
+        Update: {
+          holder?: string | null
+          id?: boolean
+          locked_until?: string
+        }
+        Relationships: []
+      }
       owner_company_profiles: {
         Row: {
           address: string | null
@@ -4043,6 +4061,11 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_outbox_begin: {
+        Args: { p_lease_seconds?: number; p_now: string }
+        Returns: string
+      }
+      rpc_outbox_end: { Args: { p_token: string }; Returns: undefined }
       rpc_payment_duplicates: {
         Args: {
           p_amount_cents: number

@@ -86,7 +86,12 @@ export interface OutboxSummary {
   postponed: number;
   /** The daily or monthly limit stopped this run (decision 69). */
   limited: boolean;
+  /** Nothing was due (one indexed read, no write), or another sender holds the lease. */
+  idle?: boolean;
 }
+
+/** The sender lease outlives the time budget, so a live sender never loses it. */
+const LEASE_SECONDS = 60;
 
 /** How long an email waits for its PDF before going without it. */
 export const PDF_WAIT_MS = 24 * 3600_000;
@@ -107,36 +112,48 @@ export async function deliverDue(ports: OutboxPorts, options: OutboxOptions = {}
   const summary: OutboxSummary = { claimed: 0, sent: 0, retry: 0, failed: 0, skipped: 0, postponed: 0, limited: false };
   const logos = new Map<string, Promise<Uint8Array | null>>();
 
-  while (Date.now() - started < budget) {
-    const at = now();
-    const quota = (await ports.rpc("rpc_email_quota", { p_now: at.toISOString() })) as Quota;
-    const allowance = emailAllowance(quota, batch);
-    if (allowance.limit === 0 || allowance.essentialOnly) summary.limited = true;
-    const rows = ((await ports.rpc("rpc_claim_deliveries", {
-      p_now: at.toISOString(),
-      p_email_limit: allowance.limit,
-      p_essential_only: allowance.essentialOnly,
-      p_other_limit: batch,
-    })) ?? []) as DeliveryRow[];
-    if (rows.length === 0) break;
-    summary.claimed += rows.length;
-
-    for (const row of rows) {
-      let result: Outcome;
-      try {
-        result = await deliverOne(ports, row, now(), logos);
-      } catch (error) {
-        result = { outcome: "RETRY", error: `Sender error: ${error instanceof Error ? error.message : String(error)}`, next: new Date(now().getTime() + retryDelayMs(row.attempts + 1)) };
-      }
-      await record(ports.rpc, row, result, now());
-      if (result.outcome === "SENT") summary.sent += 1;
-      else if (result.outcome === "RETRY") summary.retry += 1;
-      else if (result.outcome === "FAILED") summary.failed += 1;
-      else if (result.outcome === "SKIPPED") summary.skipped += 1;
-      else summary.postponed += 1;
-    }
+  // One indexed check first: when nothing is due the sender stops here (no write).
+  // Otherwise it takes the single sender lease: never two drains at once, anywhere.
+  const token = (await ports.rpc("rpc_outbox_begin", { p_now: now().toISOString(), p_lease_seconds: LEASE_SECONDS })) as string | null;
+  if (!token) return { ...summary, idle: true };
+  try {
+    await drainBatches();
+  } finally {
+    await ports.rpc("rpc_outbox_end", { p_token: token });
   }
   return summary;
+
+  async function drainBatches() {
+    while (Date.now() - started < budget) {
+      const at = now();
+      const quota = (await ports.rpc("rpc_email_quota", { p_now: at.toISOString() })) as Quota;
+      const allowance = emailAllowance(quota, batch);
+      if (allowance.limit === 0 || allowance.essentialOnly) summary.limited = true;
+      const rows = ((await ports.rpc("rpc_claim_deliveries", {
+        p_now: at.toISOString(),
+        p_email_limit: allowance.limit,
+        p_essential_only: allowance.essentialOnly,
+        p_other_limit: batch,
+      })) ?? []) as DeliveryRow[];
+      if (rows.length === 0) break;
+      summary.claimed += rows.length;
+
+      for (const row of rows) {
+        let result: Outcome;
+        try {
+          result = await deliverOne(ports, row, now(), logos);
+        } catch (error) {
+          result = { outcome: "RETRY", error: `Sender error: ${error instanceof Error ? error.message : String(error)}`, next: new Date(now().getTime() + retryDelayMs(row.attempts + 1)) };
+        }
+        await record(ports.rpc, row, result, now());
+        if (result.outcome === "SENT") summary.sent += 1;
+        else if (result.outcome === "RETRY") summary.retry += 1;
+        else if (result.outcome === "FAILED") summary.failed += 1;
+        else if (result.outcome === "SKIPPED") summary.skipped += 1;
+        else summary.postponed += 1;
+      }
+    }
+  }
 }
 
 async function record(rpc: Rpc, row: DeliveryRow, r: Outcome, at: Date) {

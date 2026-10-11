@@ -50,6 +50,8 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       [[f.ownerA, f.ownerB]],
     );
     await db.query("update public.platform_settings set email_daily_limit = 100000, email_monthly_limit = 1000000, email_essential_reserve = 20 where id");
+    // A real sender of the dev app may hold the lease right now: free it inside this transaction.
+    await db.query("update public.outbox_lease set holder = null, locked_until = '-infinity' where id");
   });
 
   afterAll(async () => {
@@ -197,6 +199,60 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       const later = new Date(Date.now() + 3 * 60_000).toISOString();
       const again = (await rpc("rpc_claim_deliveries", { p_now: later, p_email_limit: 10, p_essential_only: false })) as { id: string }[];
       expect(again.map((r) => r.id)).toEqual([first[0].id]);
+    });
+  });
+
+  it("the sender checks cheaply first and holds one lease: nothing due = no write; never two senders at once", async () => {
+    await isolated(db, async () => {
+      const rpc = pgRpc(db);
+      const now = new Date().toISOString();
+      // Nothing due (only this test's rows count, and there are none yet).
+      expect(await rpc("rpc_outbox_begin", { p_now: now })).toBeNull();
+      expect((await one<{ holder: string | null }>("select holder from public.outbox_lease")).holder).toBeNull();
+
+      await db.query("update public.customers set email = 'a1@example.lk' where id = $1", [f.custA1]);
+      const first = (await rpc("rpc_outbox_begin", { p_now: now })) as string;
+      expect(first).toMatch(/^[0-9a-f-]{36}$/);
+      // A second sender (another server instance) gets nothing while the lease is held.
+      expect(await rpc("rpc_outbox_begin", { p_now: now })).toBeNull();
+      expect((await deliverDue(ports())).idle).toBe(true);
+      // Only the holder can give it back; then the next sender may take it.
+      await rpc("rpc_outbox_end", { p_token: crypto.randomUUID() });
+      expect(await rpc("rpc_outbox_begin", { p_now: now })).toBeNull();
+      await rpc("rpc_outbox_end", { p_token: first });
+      expect(await rpc("rpc_outbox_begin", { p_now: now })).not.toBeNull();
+      // A lease that was never given back (a crashed sender) runs out.
+      await db.query("update public.outbox_lease set locked_until = clock_timestamp() - interval '1 second' where id");
+      expect(await rpc("rpc_outbox_begin", { p_now: now })).not.toBeNull();
+    });
+  });
+
+  it("the bell gets one private Broadcast signal per user and statement (no notification content)", async () => {
+    await isolated(db, async () => {
+      const signals = () => count(db, "select 1 from realtime.messages where topic = $1", [`notifications:${f.custA1}`]);
+      const before = await signals();
+      const rpc = pgRpc(db);
+      await rpc("rpc_notify_once", {
+        p_owner_id: f.ownerA,
+        p_dedupe_key: "t-bell",
+        p_notifications: [
+          { user_id: f.custA1, event: "comment.added", title: "One", body: "x" },
+          { user_id: f.custA1, event: "comment.added", title: "Two", body: "x" },
+        ],
+      });
+      const afterInsert = await signals();
+      expect(afterInsert - before).toBeGreaterThanOrEqual(1);
+      const { rows } = await db.query("select event, private, payload from realtime.messages where topic = $1 order by inserted_at desc limit 1", [`notifications:${f.custA1}`]);
+      expect(rows[0]).toMatchObject({ event: "changed", private: true });
+      expect(JSON.stringify(rows[0].payload)).not.toContain("One");
+
+      // Marking all read in one statement: one signal; nothing changed: none.
+      await db.query("update public.notifications set read_at = now() where user_id = $1 and read_at is null", [f.custA1]);
+      expect((await signals()) - afterInsert).toBe(1);
+      await db.query("update public.notifications set title = title where user_id = $1", [f.custA1]);
+      expect((await signals()) - afterInsert).toBe(1);
+      // Only the user may receive their topic (policy on realtime.messages).
+      expect(await count(db, "select 1 from pg_policies where schemaname = 'realtime' and tablename = 'messages' and policyname = 'rentdesk: own bell signals'")).toBe(1);
     });
   });
 

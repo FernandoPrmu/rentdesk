@@ -34,6 +34,8 @@ export function DisputeForm({
 }) {
   const [reason, setReason] = useState("");
   const [file, setFile] = useState<UploadedSlip | null>(null);
+  // Sending while the file still uploads would send the dispute without it.
+  const [uploading, setUploading] = useState(false);
   const [key] = useState(() => crypto.randomUUID());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export function DisputeForm({
         e.preventDefault();
         setMessage(null);
         if (reason.trim().length < 3) return setErrors({ reason: "Tell your rental company what is wrong with the bill." });
+        if (uploading) return setMessage("Wait for the file to finish uploading, then tap Send.");
         start(async () => {
           try {
             const result = await action({ invoiceId, idempotencyKey: key, reason, filePath: file?.path ?? null });
@@ -68,7 +71,8 @@ export function DisputeForm({
             setErrors(result.fieldErrors ?? {});
             setMessage(result.error);
           } catch {
-            setMessage("Not sent: the connection was lost. Tap Send again.");
+            // The same key goes with the retry, so the server returns this dispute if it did arrive.
+            setMessage("We could not confirm that your dispute was sent (the connection was lost). Tap Send again: it is never sent twice.");
           }
         });
       }}
@@ -97,6 +101,7 @@ export function DisputeForm({
         customerId={customerId}
         value={file}
         onChange={setFile}
+        onUploadingChange={setUploading}
         error={errors.file}
         bucket="dispute-files"
         label="Photo or PDF (optional)"
@@ -107,8 +112,8 @@ export function DisputeForm({
           {message}
         </p>
       )}
-      <Button type="submit" className="h-14 w-full text-lg" disabled={pending || !hydrated}>
-        {pending ? "Sending…" : "Send dispute"}
+      <Button type="submit" className="h-14 w-full text-lg" disabled={pending || !hydrated || uploading}>
+        {pending ? "Sending…" : uploading ? "Uploading the file…" : "Send dispute"}
       </Button>
       <p className="text-center text-sm text-muted-foreground">A bill can be disputed once. You can always write to your rental company in the ticket&apos;s messages.</p>
     </form>

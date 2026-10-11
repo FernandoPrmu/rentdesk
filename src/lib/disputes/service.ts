@@ -7,9 +7,8 @@ import { type ActionResult, fail, ok } from "@/lib/action-result";
 import { isIsoDate, todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { creditOnIssuedInvoice } from "@/lib/billing/dispute";
-import { BillingError } from "@/lib/billing/errors";
 import { supabaseRpc } from "@/lib/cron/server";
-import { dbErrorMessage } from "@/lib/db-errors";
+import { classifyDisputeError, DISPUTE_RETRY_MESSAGE, OWNER_RETRY_MESSAGE, PHOTO_RETRY_MESSAGE, TransientError } from "@/lib/disputes/errors";
 import { onInvoiceChanged } from "@/lib/invoices/issued";
 import { parseTyped } from "@/lib/meter/readings";
 import { checkMeterPhotoFile, PHOTO_BUCKET } from "@/lib/meter/service";
@@ -25,10 +24,8 @@ import {
   raiseDispute,
   rejectDispute,
   requestDisputePhoto,
-  RpcError,
   sendDisputePhoto,
   type TicketSnapshot,
-  TransitionError,
 } from "@/lib/tickets/transitions";
 import type { Database } from "@/types/db";
 
@@ -47,12 +44,16 @@ type Admin = SupabaseClient<Database>;
 export const DISPUTE_BUCKET = "dispute-files";
 const SIGNED_URL_SECONDS = 5 * 60;
 
-function failure(error: unknown, context: string): { ok: false; error: string } {
-  if (error instanceof TransitionError) return fail(error.message.replace(/^[^:]+: /, ""));
-  if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, context));
-  if (error instanceof BillingError) return fail(error.message);
-  console.error(`[${context}]`, error);
-  return fail("Something went wrong. Please try again.");
+function check<T>(result: { data: T; error: { message: string } | null }, what: string): T {
+  if (result.error) throw new TransientError(`${what}: ${result.error.message}`);
+  return result.data;
+}
+
+/** Refusals in plain words; transient failures (timeouts, dropped connections) logged and answered with a retry message. */
+function failure(error: unknown, context: string, retryMessage = OWNER_RETRY_MESSAGE): { ok: false; error: string } {
+  const f = classifyDisputeError(error, retryMessage);
+  if (f.kind === "TRANSIENT") console.error(`[${context}] transient:`, error instanceof Error ? `${error.name}: ${error.message}` : error);
+  return fail(f.message);
 }
 
 const actorOf = (user: CurrentUser): Actor => ({ kind: "USER", id: user.id, role: user.role });
@@ -186,11 +187,15 @@ export type DisputeInput = z.input<typeof disputeInputSchema>;
 /** The bill the customer may dispute, or why not (the page shows the form or the reason). */
 export async function getDisputeForm(user: CurrentUser, invoiceId: string) {
   const admin = createAdminClient();
-  const { data: inv } = await admin.from("invoices").select("id, ticket_id, customer_id, owner_id, invoice_no, status, total_cents, amount_paid_cents").eq("id", invoiceId).maybeSingle();
+  const inv = check(
+    await admin.from("invoices").select("id, ticket_id, customer_id, owner_id, invoice_no, status, total_cents, amount_paid_cents").eq("id", invoiceId).maybeSingle(),
+    "dispute invoice",
+  );
   if (!inv || inv.customer_id !== user.id || !inv.invoice_no) return null;
   const t = await loadTicket(admin, inv.ticket_id);
   if (!t) return null;
-  const { count } = await admin.from("disputes").select("id", { count: "exact", head: true }).eq("invoice_id", inv.id);
+  const existing = check(await admin.from("disputes").select("idempotency_key").eq("invoice_id", inv.id), "disputes of the invoice") ?? [];
+  const count = existing.length;
   const current = t.invoice?.id === inv.id;
   const blocked =
     (count ?? 0) > 0
@@ -200,7 +205,7 @@ export async function getDisputeForm(user: CurrentUser, invoiceId: string) {
           ? "A payment slip for this bill is being checked. Write to your rental company in the ticket's messages."
           : "This bill cannot be disputed now."
         : null;
-  return { invoice: inv, ticketId: t.id, ownerId: t.owner_id, machine: t.machine_name ?? "", blocked };
+  return { invoice: inv, ticketId: t.id, ownerId: t.owner_id, machine: t.machine_name ?? "", blocked, disputeKeys: existing.map((d) => d.idempotency_key) };
 }
 
 export async function raiseCustomerDispute(user: CurrentUser, input: DisputeInput): Promise<ActionResult<{ ticketId: string; replayed: boolean }>> {
@@ -209,11 +214,14 @@ export async function raiseCustomerDispute(user: CurrentUser, input: DisputeInpu
   const i = parsed.data;
   const admin = createAdminClient();
   try {
-    const { data: earlier } = await admin.from("disputes").select("ticket_id, customer_id").eq("idempotency_key", i.idempotencyKey).maybeSingle();
+    // A retry of a dispute that went through (its response was lost) returns it.
+    const earlier = check(await admin.from("disputes").select("ticket_id, customer_id").eq("idempotency_key", i.idempotencyKey).maybeSingle(), "dispute replay");
     if (earlier) return earlier.customer_id === user.id ? ok({ ticketId: earlier.ticket_id, replayed: true }) : fail("Please reload the page and try again.");
 
     const form = await getDisputeForm(user, i.invoiceId);
     if (!form) return fail("This bill was not found.");
+    // "Already disputed" by this very request (committed meanwhile): it is a success.
+    if (form.disputeKeys.includes(i.idempotencyKey)) return ok({ ticketId: form.ticketId, replayed: true });
     if (form.blocked) return fail(form.blocked);
     const t = await loadTicket(admin, form.ticketId);
     if (!t) return fail("This bill was not found.");
@@ -224,7 +232,12 @@ export async function raiseCustomerDispute(user: CurrentUser, input: DisputeInpu
       const folder = new RegExp(`^${t.owner_id}/${user.id}/[0-9a-f-]{36}\\.(jpg|png|pdf)$`);
       if (!folder.test(i.filePath)) return fail("The file upload did not work. Please add it again.", { file: "Please add the file again." });
       const { data: file, error: downloadError } = await admin.storage.from(DISPUTE_BUCKET).download(i.filePath);
-      if (downloadError || !file) return fail("The file did not arrive. Please add it again.", { file: "Please add the file again." });
+      if (downloadError || !file) {
+        // Not there (Storage answers 400/404): add it again. Anything else is a slow or failed read: retry as it is.
+        const status = (downloadError as { status?: number; statusCode?: string | number } | null)?.status ?? Number((downloadError as { statusCode?: string } | null)?.statusCode);
+        if (status === 400 || status === 404 || !downloadError) return fail("The file did not arrive. Please add it again.", { file: "Please add the file again." });
+        throw new TransientError(`dispute file download: ${downloadError.message}`);
+      }
       const checked = await checkSlipFile(new Uint8Array(await file.arrayBuffer()));
       if (!checked.ok || !i.filePath.endsWith(`.${SLIP_EXTENSION[checked.mimeType]}`)) {
         await admin.storage.from(DISPUTE_BUCKET).remove([i.filePath]);
@@ -242,7 +255,7 @@ export async function raiseCustomerDispute(user: CurrentUser, input: DisputeInpu
     });
     return ok({ ticketId: t.id, replayed: r.replayed });
   } catch (error) {
-    return failure(error, "dispute raise");
+    return failure(error, "dispute raise", DISPUTE_RETRY_MESSAGE);
   }
 }
 
@@ -277,7 +290,7 @@ export async function sendCustomerDisputePhoto(user: CurrentUser, input: z.input
     });
     return ok(undefined);
   } catch (error) {
-    return failure(error, "dispute photo");
+    return failure(error, "dispute photo", PHOTO_RETRY_MESSAGE);
   }
 }
 

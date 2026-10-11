@@ -13,16 +13,19 @@ test.describe.configure({ mode: "serial" });
 
 const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
 const run = Date.now().toString(36).toUpperCase();
-const serial = `${E2E_SERIAL_PREFIX}DSP-${run}`;
+// One machine per test run (so --repeat-each works); all of them are deleted afterwards.
+const serials: string[] = [];
 
 test.afterAll(async () => {
-  await deleteE2eMachines(serial);
+  for (const serial of serials) await deleteE2eMachines(serial);
 });
 
 const asCustomer = (page: Page) => signInCached(page, DEMO.custPerera, "/customer");
 const asOwner = (page: Page) => signInCached(page, DEMO.ownerLanka, "/owner");
 
-test("the customer disputes a bill with a photo; the owner gives a credit; the customer sees the lower bill", async ({ page }) => {
+test("the customer disputes a bill with a photo; the owner gives a credit; the customer sees the lower bill", async ({ page }, info) => {
+  const serial = `${E2E_SERIAL_PREFIX}DSP-${run}-${info.repeatEachIndex}`;
+  serials.push(serial);
   const owner = await profileId(DEMO.ownerLanka.username);
   const customer = await profileId(DEMO.custPerera.username);
   // Its own model: other specs filter cust.perera's Home by theirs.

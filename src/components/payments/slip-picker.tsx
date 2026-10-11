@@ -61,6 +61,7 @@ export function SlipPicker({
   bucket = "payment-slips",
   label = "Payment slip",
   hint = "A photo of the bank slip, a screenshot of the transfer, or the PDF from your bank (up to 5 MB).",
+  onUploadingChange,
 }: {
   ownerId: string;
   customerId: string;
@@ -70,10 +71,16 @@ export function SlipPicker({
   bucket?: "payment-slips" | "dispute-files";
   label?: string;
   hint?: string;
+  /** Told while a file is being prepared or uploaded, so the form can wait for it. */
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const camera = useRef<HTMLInputElement>(null);
   const files = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploadingState] = useState(false);
+  const setUploading = (busy: boolean) => {
+    setUploadingState(busy);
+    onUploadingChange?.(busy);
+  };
   const hydrated = useHydrated();
   // Also busy until the page is interactive (the hidden file inputs need the script).
   const busy = uploading || !hydrated;

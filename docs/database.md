@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0028`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0029`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -387,7 +387,7 @@ app's own per-account and per-IP limits above protect logins instead.
 - **Credits.** `app.available_credits`, `refresh_credit_status` and the TypeScript `loadAvailableCredits` subtract `refunded_cents`.
 - **Grants.** New tables: `select` for authenticated (RLS decides) and service_role; writes only through the functions.
 
-## Disputes, messages and the section 11 pass (migrations 0026–0028)
+## Disputes, messages and the section 11 pass (migrations 0026–0029)
 
 - **Enum value (0026)**, in its own migration: credit kind `DISPUTE`.
 - **Settings.** `platform_settings.dispute_reminder_days` (`{3,5}`) and `dispute_escalation_days` (7), exposed by
@@ -401,6 +401,9 @@ app's own per-account and per-IP limits above protect logins instead.
 - **Estimate reconciliation (0028).** `verify_meter_invoice` and `verify_final_invoice` now also check that the issued
   estimated invoices since the last confirmed reading are credited (`expected_estimate_credits`, the same query as the
   TypeScript loader).
+- **Overlapping retries (0029).** `raise_dispute` and `add_ticket_comment` check the idempotency key under the ticket
+  lock (as `submit_meter_reading` does): a retry sent while the first request is still running waits and returns the
+  first result instead of failing. Tested with two connections on a committed fixture.
 - **Grants.** Every new function is revoked from anon and authenticated; wrappers are service-role only
   (`rls.db.test.ts` lists them).
 - **Tests.** `scenarios.db.test.ts`: disputes each way (reject, credit, covered bill closed, corrected bill), the fresh

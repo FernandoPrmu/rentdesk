@@ -79,7 +79,7 @@ export function nextUtcDay(now: Date): Date {
 const SETTINGS_PATH: Record<Audience, string> = {
   CUSTOMER: "/customer/help/notifications",
   OWNER: "/owner/settings/notifications",
-  ADMIN: "/admin/notifications/settings",
+  ADMIN: "/admin/emails",
 };
 
 export function preferencesPath(role: Audience): string {

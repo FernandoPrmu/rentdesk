@@ -300,6 +300,9 @@ const TEMPLATES = {
 
 export type NotificationEvent = keyof typeof TEMPLATES;
 
+/** Every event this builder makes (each must be in the catalogue, events.ts). */
+export const NOTIFICATION_EVENTS = Object.keys(TEMPLATES) as NotificationEvent[];
+
 /**
  * Template variables (NOT-04) from the facts of a message, formatted as the
  * in-app text formats them. Only the facts given are included.

@@ -13,6 +13,8 @@ export interface EmailContent {
   companyName: string;
   /** Content id of the inline logo attachment, when there is one. */
   logoCid?: string | null;
+  /** A plain image URL instead (the live preview in the template editor). */
+  logoSrc?: string | null;
   /** Absolute link for the button. */
   actionUrl?: string | null;
   actionLabel?: string;
@@ -40,8 +42,9 @@ export function buildEmail(c: EmailContent): { html: string; text: string } {
   const dev = c.devNote
     ? `<tr><td style="padding:12px 24px;background:#fef3c7;color:#92400e;font-size:14px;line-height:1.4">${escapeHtml(c.devNote)}</td></tr>`
     : "";
-  const logo = c.logoCid
-    ? `<img src="cid:${escapeHtml(c.logoCid)}" alt="" width="48" height="48" style="display:block;width:48px;height:48px;border-radius:8px;object-fit:contain;margin-right:12px">`
+  const logoUrl = c.logoCid ? `cid:${c.logoCid}` : (c.logoSrc ?? null);
+  const logo = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" alt="" width="48" height="48" style="display:block;width:48px;height:48px;border-radius:8px;object-fit:contain;margin-right:12px">`
     : "";
   const button = c.actionUrl
     ? `<tr><td style="padding:8px 24px 24px"><a href="${escapeHtml(c.actionUrl)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:14px 22px;border-radius:8px">${escapeHtml(label)}</a></td></tr>`

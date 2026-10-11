@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { BrandBadge } from "@/components/branding/brand-badge";
+import { HeaderBell } from "@/components/notifications/header-bell";
 import { PortalShell } from "@/components/portal/portal-shell";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getBranding } from "@/lib/branding/company";
@@ -11,7 +12,7 @@ import { getBranding } from "@/lib/branding/company";
  */
 export default function CustomerLayout({ children }: { children: ReactNode }) {
   return (
-    <PortalShell portal="customer" brand={<ProviderBrand />} account={null}>
+    <PortalShell portal="customer" brand={<ProviderBrand />} account={<HeaderBell />}>
       {children}
     </PortalShell>
   );

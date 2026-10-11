@@ -27,7 +27,8 @@ export function e2eConfig(dev: boolean): PlaywrightTestConfig {
     // Three workers: with six, the free-tier Supabase project queued requests for 6-30 s
     // (even the one-row session check on every page) and owner actions timed out at random.
     // Three run as fast with far fewer stalls (task 7).
-    workers: 3,
+    // E2E_WORKERS overrides it for experiments (task 10 verification: 2 workers did not reduce the stalls).
+    workers: Number(process.env.E2E_WORKERS ?? 3),
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
     reporter: process.env.CI ? "github" : "list",

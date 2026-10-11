@@ -29,6 +29,7 @@ export function ReasonDialog({
   confirmLabel,
   placeholder,
   destructive,
+  fieldLabel,
   children,
   onConfirm,
 }: {
@@ -39,6 +40,8 @@ export function ReasonDialog({
   confirmLabel: string;
   placeholder?: string;
   destructive?: boolean;
+  /** The text field's label (default "Reason"). */
+  fieldLabel?: string;
   children?: ReactNode;
   onConfirm: (reason: string) => Promise<ActionResult<unknown>>;
 }) {
@@ -52,6 +55,7 @@ export function ReasonDialog({
             confirmLabel={confirmLabel}
             placeholder={placeholder}
             destructive={destructive}
+            fieldLabel={fieldLabel}
             onCancel={() => onOpenChange(false)}
             onConfirm={onConfirm}
           >
@@ -69,6 +73,7 @@ function ReasonForm({
   confirmLabel,
   placeholder,
   destructive,
+  fieldLabel = "Reason",
   children,
   onCancel,
   onConfirm,
@@ -78,6 +83,7 @@ function ReasonForm({
   confirmLabel: string;
   placeholder?: string;
   destructive?: boolean;
+  fieldLabel?: string;
   children?: ReactNode;
   onCancel: () => void;
   onConfirm: (reason: string) => Promise<ActionResult<unknown>>;
@@ -90,7 +96,7 @@ function ReasonForm({
       className="grid gap-4"
       onSubmit={(e) => {
         e.preventDefault();
-        if (reason.trim().length < 3) return setError("Write a reason the customer will understand.");
+        if (reason.trim().length < 3) return setError(fieldLabel === "Reason" ? "Write a reason the customer will understand." : "Write a few words the customer will understand.");
         start(async () => {
           try {
             const result = await onConfirm(reason.trim());
@@ -107,7 +113,7 @@ function ReasonForm({
       </AlertDialogHeader>
       {children}
       <div className="space-y-1.5">
-        <Label htmlFor="reason-text">Reason</Label>
+        <Label htmlFor="reason-text">{fieldLabel}</Label>
         <Textarea id="reason-text" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="text-base" placeholder={placeholder} />
         {error && (
           <p role="alert" className="text-sm text-destructive">

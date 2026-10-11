@@ -116,6 +116,7 @@ export function OwnerRequestActions({
         title="Add a note"
         description="The customer sees the note and gets a message."
         confirmLabel="Add note"
+        fieldLabel="Note"
         placeholder="For example: the part arrives on Monday"
         onConfirm={async (note) => {
           const r = await action(requestId, { action: "NOTE", note });

@@ -29,7 +29,9 @@ export default async function OwnerInvoicePage({ params }: PageProps<"/owner/inv
     <div className="max-w-3xl space-y-4">
       <BackLink href="/owner/invoices" label="Invoices" />
       <InvoiceDetailView invoice={invoice} showCustomer hrefBase="/owner/invoices" />
-      {invoice.status !== "CANCELLED" && <ResendInvoiceButton invoiceId={invoice.id} action={resendInvoiceAction} />}
+      {["AWAITING_PAYMENT", "PAYMENT_SUBMITTED", "PARTIALLY_PAID", "OVERDUE", "DISPUTED"].includes(invoice.status) && (
+        <ResendInvoiceButton invoiceId={invoice.id} action={resendInvoiceAction} />
+      )}
       <section className="space-y-2" aria-labelledby="invoice-payments">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 id="invoice-payments" className="text-lg font-semibold">Payments</h2>

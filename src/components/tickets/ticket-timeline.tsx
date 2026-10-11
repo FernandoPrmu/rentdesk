@@ -69,8 +69,9 @@ function describe(e: Event): string {
       return `Payment ${m.reversed_cents ? "reversed" : m.moved_from_cents !== undefined ? "moved" : "changed"}: paid ${formatRupees(Number(m.paid_cents ?? 0))} (was ${formatRupees(Number(m.paid_before_cents ?? 0))})`;
     default:
       if (m.estimated && e.to_status === "PENDING_OWNER_REVIEW") return "Estimated invoice created for review";
-      if (m.dispute_outcome === "REJECTED") return `Dispute rejected${m.due_date_to && m.due_date_to !== m.due_date_from ? `; new due date ${formatDate(String(m.due_date_to))}` : ""}`;
-      if (m.dispute_outcome === "CREDIT") return `Credit of ${formatRupees(Number(m.credit_cents ?? 0))} given for the dispute`;
+      if (e.from_status === "DISPUTED" && m.dispute_outcome === "REJECTED")
+        return `Dispute rejected${m.due_date_to && m.due_date_to !== m.due_date_from ? `; new due date ${formatDate(String(m.due_date_to))}` : ""}`;
+      if (e.from_status === "DISPUTED" && m.dispute_outcome === "CREDIT") return `Credit of ${formatRupees(Number(m.credit_cents ?? 0))} given for the dispute`;
       if (e.to_status === "DISPUTED") return "Bill disputed by the customer";
       if (e.from_status && e.to_status && e.from_status !== e.to_status) return `${status(e.from_status)} → ${status(e.to_status)}`;
       return status(e.to_status) || e.event_type;

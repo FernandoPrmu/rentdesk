@@ -37,8 +37,11 @@ function describe(e: Event): string | null {
       return `Reading corrected${text ? `: ${text}` : ""}`;
     }
     default:
-      if (m.dispute_outcome === "REJECTED") return "Your dispute was not accepted";
-      if (m.dispute_outcome === "CREDIT") return `Credit of ${formatRupees(Number(m.credit_cents ?? 0))} given`;
+      if (e.from_status === "DISPUTED" && m.dispute_outcome === "REJECTED") return "Your dispute was not accepted";
+      if (e.from_status === "DISPUTED" && m.dispute_outcome === "CREDIT") return `Credit of ${formatRupees(Number(m.credit_cents ?? 0))} given`;
+      // A bill covered by a credit or a corrected bill closes in two steps (decision 48); only the second is news.
+      if ((m.dispute_outcome || m.replaces_invoice_id) && e.to_status === "PAYMENT_SUBMITTED") return null;
+      if ((m.dispute_outcome || m.replaces_invoice_id) && e.to_status === "CLOSED") return "Paid in full by credit";
       switch (e.to_status) {
         case "PENDING_OWNER_REVIEW":
           return m.estimated ? "Estimated bill prepared (no reading received)" : "Reading sent";

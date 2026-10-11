@@ -36,7 +36,6 @@ export async function sendDisputePhotoAction(input: {
   colour: string;
 }): Promise<ActionResult & { fieldErrors?: Record<string, string> }> {
   const actor = await currentActor("CUSTOMER");
-  const result = await sendCustomerDisputePhoto(actor, input);
-  if (result.ok) refresh();
-  return result;
+  // No refresh: the photo page would swap the success screen for "no photo needed"; the ticket page loads fresh.
+  return sendCustomerDisputePhoto(actor, input);
 }

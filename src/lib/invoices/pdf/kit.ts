@@ -260,23 +260,32 @@ export function companyHeader(company: Company, f: Fonts, logo: PDFImage | null)
   };
 }
 
-function stamp(page: PDFPage, text: string, font: PDFFont, color: Color) {
-  const size = 84;
-  const width = font.widthOfTextAtSize(text, size);
+function stamp(page: PDFPage, text: string, font: PDFFont, color: Color, size: PageSize) {
+  const fontSize = 84;
+  const width = font.widthOfTextAtSize(text, fontSize);
   const angle = (35 * Math.PI) / 180;
-  const cx = A4.width / 2;
-  const cy = A4.height / 2;
+  const cx = size.width / 2;
+  const cy = size.height / 2;
   // Rotate about the start of the baseline: move back half the width along the angle.
   page.drawText(text, {
-    x: cx - (width / 2) * Math.cos(angle) + (size / 3) * Math.sin(angle),
-    y: cy - (width / 2) * Math.sin(angle) - (size / 3) * Math.cos(angle),
-    size,
+    x: cx - (width / 2) * Math.cos(angle) + (fontSize / 3) * Math.sin(angle),
+    y: cy - (width / 2) * Math.sin(angle) - (fontSize / 3) * Math.cos(angle),
+    size: fontSize,
     font,
     color,
     opacity: 0.16,
     rotate: degrees(35),
   });
 }
+
+/** Page size in points. */
+export interface PageSize {
+  width: number;
+  height: number;
+}
+
+/** A4 turned sideways, for wide report tables (decision 83). */
+export const A4_LANDSCAPE: PageSize = { width: A4.height, height: A4.width };
 
 export interface FramedPdf {
   /** PDF metadata. */
@@ -295,11 +304,14 @@ export interface FramedPdf {
   /** Footer text before "Page n of m". */
   footer: string;
   warn: (message: string) => void;
+  /** A4 portrait unless given (reports with wide tables use A4_LANDSCAPE; never with a letterhead). */
+  pageSize?: PageSize;
 }
 
 /** Lays the blocks out on A4 pages, with the letterhead or the built-in header, footer and stamps. */
 export async function renderFramedPdf(input: FramedPdf): Promise<RenderResult> {
   const { warn, name } = input;
+  const size: PageSize = input.letterhead ? A4 : (input.pageSize ?? A4);
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const f: Fonts = {
@@ -338,7 +350,7 @@ export async function renderFramedPdf(input: FramedPdf): Promise<RenderResult> {
 
   const area = background && input.letterhead
     ? areaToPoints(input.letterhead.layout.area)
-    : { x: MARGIN, y: MARGIN, width: A4.width - MARGIN * 2, height: A4.height - MARGIN * 2 };
+    : { x: MARGIN, y: MARGIN, width: size.width - MARGIN * 2, height: size.height - MARGIN * 2 };
 
   const blocks: Block[] = [...(background ? [] : [companyHeader(input.company, f, logo), rule()]), ...input.blocks(f)];
   // Rows of a table sit together; other blocks are separated by a gap.
@@ -353,7 +365,7 @@ export async function renderFramedPdf(input: FramedPdf): Promise<RenderResult> {
   }
 
   const newPage = () => {
-    const page = pdf.addPage([A4.width, A4.height]);
+    const page = pdf.addPage([size.width, size.height]);
     if (background?.page) page.drawPage(background.page, { x: 0, y: 0, width: A4.width, height: A4.height });
     if (background?.image) page.drawImage(background.image, { x: 0, y: 0, width: A4.width, height: A4.height });
     return page;
@@ -375,13 +387,13 @@ export async function renderFramedPdf(input: FramedPdf): Promise<RenderResult> {
   });
 
   pages.forEach((page, i) => {
-    for (const st of input.stamps) stamp(page, st.text, f.bold, st.color === "red" ? COLOR.red : COLOR.muted);
+    for (const st of input.stamps) stamp(page, st.text, f.bold, st.color === "red" ? COLOR.red : COLOR.muted, size);
     const right = `Page ${i + 1} of ${pages.length}`;
-    const size = 7.5;
+    const footSize = 7.5;
     page.drawLine({ start: { x: area.x, y: area.y + 12 }, end: { x: area.x + area.width, y: area.y + 12 }, thickness: 0.5, color: COLOR.rule });
-    const leftText = wrapText(input.footer, f.regular, size, area.width - f.regular.widthOfTextAtSize(right, size) - 12)[0] ?? "";
-    page.drawText(leftText, { x: area.x, y: area.y + 2, size, font: f.regular, color: COLOR.muted });
-    page.drawText(right, { x: area.x + area.width - f.regular.widthOfTextAtSize(right, size), y: area.y + 2, size, font: f.regular, color: COLOR.muted });
+    const leftText = wrapText(input.footer, f.regular, footSize, area.width - f.regular.widthOfTextAtSize(right, footSize) - 12)[0] ?? "";
+    page.drawText(leftText, { x: area.x, y: area.y + 2, size: footSize, font: f.regular, color: COLOR.muted });
+    page.drawText(right, { x: area.x + area.width - f.regular.widthOfTextAtSize(right, footSize), y: area.y + 2, size: footSize, font: f.regular, color: COLOR.muted });
   });
 
   return { bytes: await pdf.save(), template: background ? "LETTERHEAD" : "BUILT_IN", pages: pages.length };

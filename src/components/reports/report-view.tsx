@@ -19,16 +19,16 @@ const numeric = (t: ColumnType) => t !== "text";
 export function SummaryTiles({ items }: { items: SummaryItem[] }) {
   if (items.length === 0) return null;
   return (
-    <dl className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="report-summary">
+    <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="report-summary">
       {items.map((s) => (
         <Card key={s.label} size="sm">
           <CardContent>
-            <dt className="text-xs text-muted-foreground">{s.label}</dt>
-            <dd className="text-lg font-bold tabular-nums">{formatCell(s.type, s.value, "screen")}</dd>
+            <p className="text-xs text-muted-foreground">{s.label}</p>
+            <p className="text-lg font-bold tabular-nums">{formatCell(s.type, s.value, "screen")}</p>
           </CardContent>
         </Card>
       ))}
-    </dl>
+    </div>
   );
 }
 

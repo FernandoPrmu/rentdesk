@@ -8,7 +8,7 @@ import { buildIncome, buildMachines } from "../build";
 import type { ReportDocument } from "../document";
 import { formatCell, formatMoneyCell } from "../document";
 import { presetRange } from "../period";
-import { columnFractions, renderReportPdf, tableFontSize } from "./pdf";
+import { columnFractions, pageFor, renderReportPdf, tableFontSize } from "./pdf";
 import { DATE_FORMAT, excelCell, MONEY_FORMAT, reportXlsx, safeText, sheetName } from "./xlsx";
 
 /**
@@ -186,7 +186,11 @@ describe("report PDF (RPT-07)", () => {
     });
     expect(String.fromCharCode(...result.bytes.subarray(0, 5))).toBe("%PDF-");
     const text = await pdfText(result.bytes);
-    for (const s of ["Lanka Copiers", "Machine performance", "1 Aug 2026 – 12 Oct 2026", "Canon iR C3226 (C-1)", "12,800.00", "3,400", "9,800.00", "76.6%", "Total", "Page 1 of 1"]) {
+    // Twelve columns: A4 landscape, so no label or serial is broken mid-word.
+    const { PDFDocument } = await import("pdf-lib");
+    const page = (await PDFDocument.load(result.bytes)).getPage(0);
+    expect(page.getWidth()).toBeGreaterThan(page.getHeight());
+    for (const s of ["Lanka Copiers", "Machine performance", "1 Aug 2026 – 12 Oct 2026", "Canon iR C3226 (C-1)", "Commitment", "B&W excess", "12,800.00", "3,400", "9,800.00", "76.6%", "Total", "Page 1 of 1"]) {
       expect(text).toContain(s);
     }
   });
@@ -209,6 +213,8 @@ describe("report PDF (RPT-07)", () => {
     expect(f[0]).toBeGreaterThan(f[2]);
     expect(tableFontSize(4)).toBe(9);
     expect(tableFontSize(12)).toBe(7);
+    expect(tableFontSize(12, true)).toBe(8);
+    expect(pageFor(sample).width).toBeLessThan(pageFor(sample).height);
   });
 
   it("cell text formats", () => {

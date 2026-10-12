@@ -141,3 +141,20 @@ to the same principle (a defined status, a reason, a notification and an audit e
 | Charge decided after the machine went back | Refused with a clear message (no next bill); the final invoice on return bills charges still waiting | Owner request page, Return | DB `srv` | done |
 | Charge while a reading waits for review | The charge waits for the next bill; a rejected draft frees the charges it held | — | DB `srv` | done |
 | Owner suspended or customer suspended | Their requests stop escalating; the owner can still act | — | DB `srv` | done |
+
+## Reports, settings and support access (task 11)
+
+Not section 11 rows, but paths with the same risk (wrong data shown, a silent change, access without a trace).
+`rpt` = `reports.db.test.ts`.
+
+| Scenario | How RentDesk handles it | Screens | Tests | Status |
+| --- | --- | --- | --- | --- |
+| An owner asks for another tenant's report | Report functions are security invoker (RLS) and answer only that owner or an admin (0035); the export route uses the signed-in user's client and refuses another owner's id | Reports, exports | DB `rpt`; E2E `reports.spec.ts` | done |
+| A customer calls an owner report directly | Nothing comes back (null), not even totals of their own rows | — | DB `rpt` | done |
+| An admin needs to see an owner's business | Support view: read only, amber banner, every page and export logged (`SUPPORT_VIEW`: admin, owner, page, optional reason) before anything shows (decision 81) | Admin › Owners › Open support view | DB `rpt`; E2E `reports.spec.ts` | done |
+| An admin tries to change an owner's data | No forms in the support view; the owner portal redirects admins; no admin write policies; workflow functions refuse an admin actor | — | DB `rpt`; E2E `reports.spec.ts` | done |
+| A setting is set to something that breaks the schedule (a reminder after its deadline, an escalation before the reminder) | Refused with the field and the reason, in the form and again in the database; nothing saved (decision 82) | Admin › Settings, Settings › Reminders and deadlines | U `rules.test.ts`; DB `rpt` (SQL = TS); E2E `reports.spec.ts` | done |
+| The admin changes a default so that an owner's overrides no longer fit | The owner's page says which ones; the daily job skips a reminder that falls after its deadline; the owner's next save must fix it | Settings › Reminders and deadlines | U `rules.test.ts` | done |
+| Who changed a setting, and from what | Audit entry with old → new and the actor for every change; Admin › Audit log, Settings › Change history | Admin › Audit log | DB `rpt`; E2E `reports.spec.ts` | done |
+| An agreement ends without anyone noticing | The owner is told once, within their notice (default 30 days), in-app and by email; "Ending soon" on the agreement, the customer profile and Rental information (decision 86) | Notifications, agreement, Reports › Rental information | U `daily.test.ts`; DB `rpt` | done |
+| A text cell in an export looks like a formula | Kept as text with a leading apostrophe (decision 83) | Excel exports | U `export.test.ts` | done |

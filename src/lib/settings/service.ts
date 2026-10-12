@@ -7,6 +7,7 @@ import {
   changedKeys,
   OWNER_KEYS,
   parseDbProblems,
+  problemFieldErrors,
   SETTING_KEYS,
   type SettingKey,
   type SettingsValues,
@@ -54,7 +55,7 @@ export async function getOwnerOverrides(ownerId: string): Promise<Partial<Record
 function problemResult(message: string): ActionResult<{ changed: string[] }> {
   const problems = parseDbProblems(message);
   if (problems.length === 0) return fail(message);
-  return fail("Please check the highlighted fields.", Object.fromEntries(problems.map((p) => [p.key, p.message])));
+  return fail("Please check the highlighted fields.", problemFieldErrors(problems));
 }
 
 async function callUpdate(

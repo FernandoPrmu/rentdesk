@@ -209,6 +209,13 @@ function rangeMessage(field: SettingField): string {
   return `Enter a number from ${field.min} to ${field.max}.`;
 }
 
+/** Field errors for a form: the first problem of each field. */
+export function problemFieldErrors(problems: SettingProblem[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of problems) out[p.key] ??= p.message;
+  return out;
+}
+
 /** "meter_reminder_days: must be ..." from the database -> { key, message }. */
 export function parseDbProblems(message: string): SettingProblem[] {
   return message

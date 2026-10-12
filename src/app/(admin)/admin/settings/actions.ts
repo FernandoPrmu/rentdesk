@@ -5,7 +5,7 @@ import { refresh } from "next/cache";
 import { type ActionResult, fail } from "@/lib/action-result";
 import { formValues } from "@/lib/accounts/schemas";
 import { currentActor } from "@/lib/auth/current-user";
-import { parseSettingsForm, settingsProblems } from "@/lib/settings/rules";
+import { parseSettingsForm, problemFieldErrors, settingsProblems } from "@/lib/settings/rules";
 import { getPlatformSettings, updatePlatformSettings } from "@/lib/settings/service";
 import { platformKeysIn } from "@/lib/settings/view";
 
@@ -16,7 +16,7 @@ export async function savePlatformSettingsAction(_prev: ActionResult<{ changed: 
   if (Object.keys(parsed.fieldErrors).length > 0) return fail("Please check the highlighted fields.", parsed.fieldErrors);
   const current = await getPlatformSettings();
   const problems = settingsProblems({ ...current, ...parsed.changes } as Parameters<typeof settingsProblems>[0]);
-  if (problems.length > 0) return fail("Please check the highlighted fields.", Object.fromEntries(problems.map((p) => [p.key, p.message])));
+  if (problems.length > 0) return fail("Please check the highlighted fields.", problemFieldErrors(problems));
   const result = await updatePlatformSettings(actor, parsed.changes);
   if (result.ok) refresh();
   return result;

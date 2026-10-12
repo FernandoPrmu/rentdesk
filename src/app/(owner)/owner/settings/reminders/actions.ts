@@ -5,7 +5,7 @@ import { refresh } from "next/cache";
 import { type ActionResult, fail } from "@/lib/action-result";
 import { formValues } from "@/lib/accounts/schemas";
 import { currentActor } from "@/lib/auth/current-user";
-import { effectiveSettings, parseSettingsForm, settingsProblems } from "@/lib/settings/rules";
+import { effectiveSettings, parseSettingsForm, problemFieldErrors, settingsProblems } from "@/lib/settings/rules";
 import { getOwnerOverrides, getPlatformSettings, updateOwnerSettings } from "@/lib/settings/service";
 import { OWNER_REMINDER_GROUPS, ownerKeysIn } from "@/lib/settings/view";
 
@@ -16,7 +16,7 @@ export async function saveReminderSettingsAction(_prev: ActionResult<{ changed: 
   if (Object.keys(parsed.fieldErrors).length > 0) return fail("Please check the highlighted fields.", parsed.fieldErrors);
   const [platform, current] = await Promise.all([getPlatformSettings(), getOwnerOverrides(actor.id)]);
   const problems = settingsProblems(effectiveSettings(platform, { ...current, ...parsed.changes }));
-  if (problems.length > 0) return fail("Please check the highlighted fields.", Object.fromEntries(problems.map((p) => [p.key, p.message])));
+  if (problems.length > 0) return fail("Please check the highlighted fields.", problemFieldErrors(problems));
   const result = await updateOwnerSettings(actor, parsed.changes);
   if (result.ok) refresh();
   return result;

@@ -390,6 +390,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_cron_begin_run",
         "rpc_cron_context",
         "rpc_cron_due_agreements",
+        "rpc_cron_ending_agreements",
         "rpc_cron_expired_photos",
         "rpc_cron_finish_run",
         "rpc_cron_last_success",
@@ -408,6 +409,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_escalate_service_request",
         "rpc_escalate_ticket",
         "rpc_log_direct_delivery",
+        "rpc_log_support_view",
         "rpc_login_gate_state",
         "rpc_mark_delivery_bounced",
         "rpc_mark_invoice_pdf_failed",
@@ -454,6 +456,7 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_set_invoice_credit",
         "rpc_set_machine_status",
         "rpc_set_ticket_pause",
+        "rpc_settings_problems",
         "rpc_settle_deposit",
         "rpc_submit_dispute_photo",
         "rpc_submit_meter_reading",
@@ -462,12 +465,16 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_update_agreement_terms",
         "rpc_update_customer",
         "rpc_update_owner",
+        "rpc_update_owner_settings",
+        "rpc_update_platform_settings",
         "rpc_verify_payment",
         "rpc_write_audit",
       ]);
       for (const r of rows) {
         expect(r.anon, `anon: ${r.signature}`).toBe(false);
-        expect(r.authenticated, `authenticated: ${r.signature}`).toBe(false);
+        // Task 11: the read-only report functions (security invoker, stable; RLS decides,
+        // reports.db.test.ts) are the only public functions signed-in users may call.
+        if (!r.name.startsWith("report_")) expect(r.authenticated, `authenticated: ${r.signature}`).toBe(false);
       }
       for (const r of wrappers) expect(r.service, `service_role: ${r.signature}`).toBe(true);
 
@@ -481,7 +488,9 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         await asPostgres(db);
       }
     });
-  });
+    // About 700 calls (4 roles x every wrapper), each a round trip with a savepoint: on
+    // the free tier this alone can take over the default two minutes (task 11).
+  }, 360_000);
 
   it("authenticated users cannot execute workflow functions", async () => {
     await isolated(db, async () => {

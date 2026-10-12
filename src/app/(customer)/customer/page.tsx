@@ -2,12 +2,14 @@ import { Camera, CircleCheck, Clock, Gauge, Receipt, Star, TriangleAlert, Wrench
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { CustomerSummary } from "@/components/reports/customer-summary";
 import { requestTitle } from "@/components/service/service-display";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
+import { customerDashboard } from "@/lib/reports/queries";
 import { customerServiceTasks } from "@/lib/service/queries";
 import { listCustomerTicketRows } from "@/lib/tickets/queries";
 import { type CustomerTask, customerHome } from "@/lib/tickets/view";
@@ -20,11 +22,13 @@ export const metadata: Metadata = { title: "Home" };
  * One "Enter meter reading" task per machine (the newest ticket, covering every
  * month since the last confirmed reading), one "Pay" task per unpaid bill, and
  * what is waiting for the rental company. Service requests (CP-07): a repair to
- * confirm, a service to rate, and a button to ask for service.
+ * confirm, a service to rate, and a button to ask for service. Below that (CP-01):
+ * balance and credit, machines with the next billing date, the latest bill, recent
+ * payments and open requests.
  */
 export default async function CustomerHomePage() {
   const user = await requireUser("CUSTOMER");
-  const [rows, service] = await Promise.all([listCustomerTicketRows(user.id), customerServiceTasks(user.id)]);
+  const [rows, service, summary] = await Promise.all([listCustomerTicketRows(user.id), customerServiceTasks(user.id), customerDashboard()]);
   const { tasks, waiting } = customerHome(rows, new Date());
   const serviceTasks = service.toConfirm.length + service.toRate.length;
 
@@ -107,6 +111,8 @@ export default async function CustomerHomePage() {
           </ul>
         </section>
       )}
+
+      <CustomerSummary d={summary} />
     </div>
   );
 }

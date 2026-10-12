@@ -3,12 +3,14 @@ import Link from "next/link";
 
 import { OwnerMoneyTabs } from "@/components/payments/payment-views";
 import { PageHeader } from "@/components/portal/portal-shell";
+import { ExportButtons, exportHref } from "@/components/reports/report-view";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate } from "@/lib/format";
 import { formatInvoiceMoney } from "@/lib/invoices/pdf/format";
 import { AGE_BUCKET_LABEL, AGE_BUCKETS } from "@/lib/payments/ageing";
 import { countPaymentsToVerify, getOutstanding } from "@/lib/payments/service";
+import { presetRange } from "@/lib/reports/period";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +19,8 @@ export const metadata: Metadata = { title: "Outstanding" };
 /**
  * PAY-09 / RPT-04 (decision 45): unpaid bills per customer by days past the due
  * date: current, 1-30, 31-60, 60+. A bill with a slip waiting is current. Cards
- * at 360 px, a table on wider screens; tap a customer for their profile.
+ * at 360 px, a table on wider screens; tap a customer for their profile. PDF and
+ * Excel through the reports export (RPT-07).
  */
 export default async function OutstandingPage() {
   await requireUser("OWNER");
@@ -26,7 +29,11 @@ export default async function OutstandingPage() {
   const money = (cents: number) => (cents > 0 ? formatInvoiceMoney(cents) : "–");
   return (
     <>
-      <PageHeader title="Outstanding" description={`Unpaid bills by days past the due date, on ${formatDate(report.today)}.`} />
+      <PageHeader
+        title="Outstanding"
+        description={`Unpaid bills by days past the due date, on ${formatDate(report.today)}.`}
+        action={<ExportButtons href={(f) => exportHref("ageing", presetRange("this_month", report.today), f)} />}
+      />
       <OwnerMoneyTabs active="outstanding" toVerify={toVerify} />
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="ageing-totals">

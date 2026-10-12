@@ -4,6 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 import { publicEnv } from "@/lib/env";
+import { statsFetch } from "@/lib/supabase/query-stats";
 import type { Database } from "@/types/db";
 
 /**
@@ -19,6 +20,7 @@ export async function createClient() {
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
+      global: { fetch: statsFetch("user") },
       cookies: {
         getAll() {
           return cookieStore.getAll();

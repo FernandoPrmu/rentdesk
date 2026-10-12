@@ -32,7 +32,8 @@ let noticeBefore: number;
 test.beforeAll(async () => {
   ownerId = await profileId(DEMO.ownerLanka.username);
   adminId = await profileId(DEMO.admin.username);
-  const customerId = await profileId(DEMO.custPerera.username);
+  // Not cust.perera: notifications.spec counts her unread notifications while specs run in parallel.
+  const customerId = await profileId(DEMO.custSilva.username);
   const machineId = await createMachine(ownerId, serial, "RPT 3000");
   const agreementId = await assignMachine(ownerId, machineId, customerId, today);
   ({ invoiceNo } = await issueFirstInvoice(agreementId, 2600));
@@ -98,7 +99,7 @@ test("the owner's dashboard taps through, and every report opens and exports PDF
 });
 
 test("the customer's Home shows balance, machines, latest bill, payments and requests", async ({ page }) => {
-  await signInCached(page, DEMO.custPerera, "/customer");
+  await signInCached(page, DEMO.custSilva, "/customer");
   await expect(page.getByRole("heading", { name: "What you need to do now" })).toBeVisible();
   await expect(page.getByTestId("customer-outstanding")).toContainText("Rs.");
   await expect(page.getByTestId("customer-machines")).toContainText(serial);

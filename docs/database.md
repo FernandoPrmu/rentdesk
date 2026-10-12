@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0035`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0036`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -487,13 +487,17 @@ app's own per-account and per-IP limits above protect logins instead.
   writes), the bill's PDF (wait, then attach), owner suspension told to customers, bounces and direct sends, RLS on
   deliveries, the log view and preferences. The sender runs with a fake transport: nothing is sent.
 
-## Dashboards, reports, settings and the support view (migrations 0034–0035)
+## Dashboards, reports, settings and the support view (migrations 0034–0036)
 
 - **Report functions (RPT-01..08, CP-01, ADM-04).** `public.report_*` are **security invoker** and **stable**, granted
   to `authenticated` (never `anon`): RLS decides what they read and they cannot write. They are the only public functions
   signed-in users may call (`rls.db.test.ts` checks the list, and that each is invoker and stable). Owner reports take
   `p_owner_id` and, since 0035, answer only when `app.report_allowed(p_owner_id)` (that owner, or an admin): a customer
-  calling one directly with their owner's id gets null instead of totals of their own rows.
+  calling one directly with their owner's id gets null instead of totals of their own rows. Since 0036 the guard is a
+  scalar subquery (`(select app.report_allowed(...))`, an InitPlan run once per call): as a plain call in the row
+  helpers' `where` it ran per row and read `profiles` each time, and under the full e2e load the dashboards averaged over
+  a second (`pg_stat_statements`) and hit the 8 s statement timeout; the owner dashboard went from 63 ms to 40 ms server
+  time on its own. Pages show a retry when a dashboard cannot be read, and the customer's tasks never depend on it.
 
   | Function | Returns |
   | --- | --- |

@@ -159,6 +159,13 @@ const TEMPLATES = {
     title: `${c.count ?? 0} overdue ${c.count === 1 ? "bill" : "bills"}: ${money(c)}`,
     body: "Your weekly summary of bills that are past their due date.",
   }),
+  // AGR-03 (decision 86): once per end date, the owner's notice days before it.
+  "agreement.ending": (c) => ({
+    title: `Agreement ending soon: ${c.customer ?? "customer"}`,
+    body: `The rental of ${machine(c)} ends on ${c.dueDate ? formatDate(c.dueDate) : "its end date"}${
+      c.days === undefined ? "" : c.days === 0 ? " (today)" : ` (in ${c.days} ${c.days === 1 ? "day" : "days"})`
+    }. Renew it or plan the return.`,
+  }),
   "invoice.late_fee": (c) => ({
     title: `Late fee added: ${money(c)}`,
     body: `${bill(c)} for ${machine(c)} was not paid in time, so a late fee was added.`,

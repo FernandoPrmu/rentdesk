@@ -24,7 +24,8 @@ import { type CronTicket, decideTicket, type Decision, ESCALATION_ADMIN, ESCALAT
  *
  * Steps, in order: pause/resume tickets of suspended accounts, open due cycles
  * (catching up every missed one), the ticket sweep (overdue, estimate, reminders,
- * escalation, late fee), meter photo and orphan slip purge, weekly overdue
+ * escalation, late fee), service escalation, agreement end reminders (AGR-03),
+ * meter photo and orphan slip purge, weekly overdue
  * summaries, then the invoice and receipt PDFs still pending (new, changed by this
  * run, or a failed earlier try).
  *
@@ -91,6 +92,7 @@ export const COUNT_KEYS = [
   "receiptPdfs",
   "slipsDeleted",
   "serviceEscalated",
+  "agreementsEnding",
   "emailsSent",
   "emailsFailed",
   "skipped",
@@ -301,6 +303,9 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
 
     // Service requests not acknowledged in time (SRV-08, spec 7.3; decision 61).
     await escalateServiceRequests(rpc, now, adminIds, batch, counts, record, checkTime);
+
+    // AGR-03 (decision 86): agreements ending within the owner's notice, told once per end date.
+    await remindEndingAgreements(rpc, today, batch, counts, record, checkTime);
 
     // g. Meter photos: confirmed (deleted on confirm, INV-09) and expired rejected attempts (6.5).
     for (;;) {
@@ -696,6 +701,63 @@ export async function escalateServiceRequests(
     }
     if (rows.length < batch) return;
     after = rows[rows.length - 1].id;
+  }
+}
+
+interface EndingAgreement {
+  agreement_id: string;
+  owner_id: string;
+  end_date: string;
+  days_left: number;
+  customer_name: string;
+  machine_name: string;
+  serial_no: string;
+}
+
+/** The key that makes the reminder once per agreement and end date (a new end date gets its own). */
+export const endingDedupeKey = (a: Pick<EndingAgreement, "agreement_id" | "end_date">) => `agreement-ending:${a.agreement_id}:${a.end_date}`;
+
+/**
+ * AGR-03 (decision 86): an essential in-app + email reminder to the owner when a live
+ * agreement's end date is within their notice (default 30 days). rpc_notify_once with
+ * the key above: a second run, or an overlapping one, sends nothing new; a missed day
+ * catches up (the window is "end date within N days", not "exactly N days").
+ */
+export async function remindEndingAgreements(
+  rpc: Rpc,
+  today: string,
+  batch: number,
+  counts: Pick<CronCounts, "agreementsEnding" | "skipped">,
+  record: (e: CronErrorEntry) => void = () => {},
+  checkTime: () => void = () => {},
+) {
+  const tried = new Set<string>();
+  for (;;) {
+    checkTime();
+    const rows = ((await rpc("rpc_cron_ending_agreements", { p_today: today, p_limit: batch })) as EndingAgreement[]).filter((a) => !tried.has(endingDedupeKey(a)));
+    if (rows.length === 0) return;
+    for (const a of rows) {
+      checkTime();
+      tried.add(endingDedupeKey(a));
+      try {
+        const r = await rpc("rpc_notify_once", {
+          p_owner_id: a.owner_id,
+          p_dedupe_key: endingDedupeKey(a),
+          p_notifications: notificationsFor(
+            "agreement.ending",
+            [owner(a.owner_id)],
+            { customer: a.customer_name, machine: `${a.machine_name} (${a.serial_no})`, dueDate: a.end_date, days: a.days_left },
+            { link: `/owner/agreements/${a.agreement_id}`, data: { agreement_id: a.agreement_id, end_date: a.end_date } },
+          ),
+        });
+        const skipped = typeof r === "object" && r !== null && "skipped" in r && (r as { skipped?: unknown }).skipped;
+        if (skipped) counts.skipped += 1;
+        else counts.agreementsEnding += 1;
+      } catch (error) {
+        record(errorEntry("agreement ending", a.agreement_id, error));
+      }
+    }
+    if (rows.length < batch) return;
   }
 }
 

@@ -122,6 +122,7 @@ export const EVENTS = {
   "payment.overdue": e("Bill overdue", "CUSTOMER", "REMINDER", ["machine", "invoice_no", "amount", "due_date"], { sms: true }),
   "payment.overdue_owner": e("Customer's payment overdue", "OWNER", "UPDATE", ["customer_name", "machine", "invoice_no", "amount", "due_date"]),
   "payment.overdue_summary": e("Weekly overdue summary", "OWNER", "REMINDER", ["count", "amount"]),
+  "agreement.ending": e("Rental agreement ending soon", "OWNER", "ESSENTIAL", ["customer_name", "machine", "due_date", "days"]),
   "invoice.late_fee": e("Late fee added", "CUSTOMER", "ESSENTIAL", ["machine", "invoice_no", "amount"]),
 
   // Hand-overs (TKT-04)

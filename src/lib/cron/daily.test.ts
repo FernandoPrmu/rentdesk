@@ -252,3 +252,41 @@ describe("admin alerts about the daily job (11.7, rule 53)", () => {
     expect(alerts(calls)[0]).toMatchObject({ p_dedupe_key: "cron-failed:run-1" });
   });
 });
+
+describe("agreement end reminders (AGR-03, decision 86)", () => {
+  const ending = {
+    agreement_id: "00000000-0000-4000-8000-0000000000a1",
+    owner_id: "00000000-0000-4000-8000-0000000000b1",
+    end_date: "2026-11-01",
+    days_left: 22,
+    customer_name: "Perera Traders",
+    machine_name: "Canon iR C3226",
+    serial_no: "C-1",
+  };
+
+  it("tells the owner once per agreement and end date, essential, linking to the agreement", async () => {
+    let sent = 0;
+    const { rpc, calls } = fakeRpc({
+      rpc_cron_ending_agreements: () => (sent === 0 ? [ending] : []),
+      rpc_notify_once: () => {
+        sent += 1;
+        return { sent: 1 };
+      },
+    });
+    const result = await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });
+    expect(result.counts.agreementsEnding).toBe(1);
+    const [, args] = calls.find(([fn]) => fn === "rpc_notify_once")!;
+    expect(args.p_dedupe_key).toBe(`agreement-ending:${ending.agreement_id}:2026-11-01`);
+    expect(args.p_notifications).toEqual([
+      expect.objectContaining({ user_id: ending.owner_id, event: "agreement.ending", link: `/owner/agreements/${ending.agreement_id}`, title: "Agreement ending soon: Perera Traders" }),
+    ]);
+    expect((args.p_notifications as { body: string }[])[0].body).toBe("The rental of Canon iR C3226 (C-1) ends on 1 Nov 2026 (in 22 days). Renew it or plan the return.");
+  });
+
+  it("an agreement already reminded (or one that keeps coming back) is not sent twice in a run", async () => {
+    const { rpc, calls } = fakeRpc({ rpc_cron_ending_agreements: () => [ending], rpc_notify_once: () => ({ skipped: true }) });
+    const result = await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });
+    expect(calls.filter(([fn]) => fn === "rpc_notify_once")).toHaveLength(1);
+    expect(result.counts).toMatchObject({ agreementsEnding: 0, skipped: 1 });
+  });
+});

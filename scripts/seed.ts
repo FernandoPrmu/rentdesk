@@ -278,18 +278,13 @@ async function seedPlansTemplatesAndBranding(ids: Record<string, string>) {
   );
   check(await admin.from("owners").update({ plan_id: planId }).in("id", [ids.ownerA, ids.ownerB]), "assign plan");
 
-  const templates = [
-    { event: "ticket.created", channel: "EMAIL" as const, subject: "Meter reading needed for {{machine}}", body: "Please submit your meter reading and photo by {{due_date}}." },
-    { event: "invoice.issued", channel: "EMAIL" as const, subject: "Invoice {{invoice_no}}", body: "Your invoice for {{period}} is {{amount}}. Due {{due_date}}." },
-    { event: "payment.closed", channel: "EMAIL" as const, subject: "Payment received", body: "Thank you. Your payment for invoice {{invoice_no}} is confirmed." },
-  ];
+  // Email templates ship as built-in defaults (decision 71); global rows exist only when the
+  // admin edits one. Remove the placeholder rows earlier seeds wrote ({{var}} syntax).
   check(
-    await admin.from("notification_templates").upsert(
-      templates.map((t) => ({ ...t, owner_id: null, locale: "en" })),
-      { onConflict: "owner_id,event,channel,locale", ignoreDuplicates: true },
-    ),
-    "templates",
+    await admin.from("notification_templates").delete().is("owner_id", null).in("event", ["ticket.created", "invoice.issued", "payment.closed"]).like("subject", "%{{%"),
+    "old placeholder templates",
   );
+  check(await admin.from("notification_templates").delete().is("owner_id", null).eq("event", "payment.closed"), "old placeholder templates");
 
   // Owner A is onboarded with branding; owner B has not completed setup yet (a re-run
   // undoes a setup done while testing, so the onboarding gate can be shown again).
@@ -793,6 +788,7 @@ async function seedServiceRequests(ids: Record<string, string>) {
 
 async function main() {
   console.log(`Seeding ${SUPABASE_URL}`);
+  const started = new Date(Date.now() - 60_000).toISOString();
 
   console.log("Accounts");
   const ids = await ensureUsers();
@@ -811,6 +807,14 @@ async function main() {
   console.log(`  demo meter photos refreshed: ${await refreshDemoPhotos(ids)}`);
   console.log(`  invoice PDFs made: ${await makeInvoicePdfs(ids)}`);
   console.log(`  receipt PDFs made: ${await makeReceiptPdfs(ids)}`);
+  // Demo data must not fill a real inbox (the dev redirect): emails the seed caused are logged, not sent.
+  const skipped = await admin
+    .from("notification_deliveries")
+    .update({ status: "SKIPPED", last_error: "SEED: demo data, not sent" }, { count: "exact" })
+    .eq("status", "PENDING")
+    .gte("created_at", started);
+  if (skipped.error) throw new Error(`skip seed emails: ${skipped.error.message}`);
+  console.log(`  demo emails skipped: ${skipped.count ?? 0}`);
 
   const tickets = check(
     await admin

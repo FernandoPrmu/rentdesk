@@ -3,10 +3,12 @@ import { formatRupees } from "../money.ts";
 
 /**
  * The one place notifications are built (TKT-04, NOT-01, spec 9). Every workflow
- * rpc takes the result as `p_notifications` and writes the rows in the same
- * transaction as the change (outbox). Today every event goes to the in-app centre
- * only; NOT-02 adds EMAIL to CHANNELS below and a sender for the PENDING email
- * rows, without touching any caller.
+ * rpc takes the result as `p_notifications` and writes the in-app rows in the same
+ * transaction as the change. For events of the delivery catalogue (`events.ts`,
+ * `public.notification_events`) the database adds the email (and SMS / WhatsApp)
+ * delivery rows in that transaction too (outbox, decision 65); `outbox.ts` sends
+ * them after the request. Each item carries its facts as template variables
+ * (`data.vars`) for the editable email templates (NOT-04).
  * Only relative imports: the daily job runs in DB tests under plain Node.
  */
 
@@ -298,9 +300,44 @@ const TEMPLATES = {
 
 export type NotificationEvent = keyof typeof TEMPLATES;
 
-/** Channels per event. NOT-02 (email) and NOT-03 (SMS/WhatsApp, paid) extend this. */
-const CHANNELS: Partial<Record<NotificationEvent, NotificationChannel[]>> = {};
-const DEFAULT_CHANNELS: NotificationChannel[] = ["IN_APP"];
+/** Every event this builder makes (each must be in the catalogue, events.ts). */
+export const NOTIFICATION_EVENTS = Object.keys(TEMPLATES) as NotificationEvent[];
+
+/**
+ * Template variables (NOT-04) from the facts of a message, formatted as the
+ * in-app text formats them. Only the facts given are included.
+ */
+export function contextVars(c: NotificationContext): Record<string, string> {
+  const v: Record<string, string | undefined> = {
+    customer_name: c.customer,
+    machine: c.machine,
+    cycle_no: c.cycleNo === undefined ? undefined : String(c.cycleNo),
+    deadline: c.byDate ? formatDate(c.byDate) : undefined,
+    due_date: c.dueDate ? formatDate(c.dueDate) : undefined,
+    amount: c.amountCents === undefined ? undefined : formatRupees(c.amountCents),
+    invoice_no: c.invoiceNo ?? undefined,
+    invoice_nos: c.invoiceNos && c.invoiceNos.length > 0 ? c.invoiceNos.join(", ") : undefined,
+    balance: c.balanceCents === undefined ? undefined : formatRupees(c.balanceCents),
+    credit: c.creditCents ? formatRupees(c.creditCents) : undefined,
+    totals: c.totals,
+    changes: c.changes,
+    reason: c.reason,
+    count: c.count === undefined ? undefined : String(c.count),
+    days: c.days === undefined ? undefined : String(c.days),
+    hours: c.hours === undefined ? undefined : String(c.hours),
+    months: c.months === undefined ? undefined : String(c.months),
+    preview: c.preview,
+    last_run: c.lastRunAt ? formatDate(c.lastRunAt.slice(0, 10)) : undefined,
+    urgency: c.urgency ? c.urgency.charAt(0) + c.urgency.slice(1).toLowerCase() : undefined,
+    priority: c.urgency ? priority(c) : undefined,
+    request: c.request,
+    technician: c.technician,
+    planned_date: c.plannedDate ? formatDate(c.plannedDate) : undefined,
+    rating: c.rating === undefined ? undefined : String(c.rating),
+  };
+  // An empty {priority} is a value (NORMAL and LOW requests); other empty facts are left out.
+  return Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => e[1] !== undefined && (e[1] !== "" || e[0] === "priority")));
+}
 
 /** Where each role opens a ticket. "{entity_id}" is replaced with the ticket id by the rpc. */
 const TICKET_LINK: Record<RecipientRole, string> = {
@@ -319,15 +356,12 @@ export function notificationsFor(
   options: { link?: string | null; data?: Record<string, unknown> } = {},
 ): NotificationItem[] {
   const { title, body } = TEMPLATES[event](context);
-  const channels = CHANNELS[event] ?? DEFAULT_CHANNELS;
-  const items: NotificationItem[] = [];
-  for (const r of recipients) {
+  // The in-app row; the database adds the email / SMS deliveries (decision 65).
+  const data = { ...options.data, vars: contextVars(context) };
+  return recipients.map((r) => {
     const link = options.link === null ? undefined : (options.link ?? TICKET_LINK[r.role]);
-    for (const channel of channels) {
-      items.push({ user_id: r.userId, event, channel, title, body, ...(link ? { link } : {}), ...(options.data ? { data: options.data } : {}) });
-    }
-  }
-  return items;
+    return { user_id: r.userId, event, channel: "IN_APP" as const, title, body, ...(link ? { link } : {}), data };
+  });
 }
 
 /** Where each role opens a payment. "{entity_id}" is replaced with the payment id by the rpc. */

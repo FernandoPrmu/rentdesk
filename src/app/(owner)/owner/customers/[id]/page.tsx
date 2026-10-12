@@ -240,6 +240,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
             status={customer.profile.status}
             statusAction={setCustomerStatusAction.bind(null, customer.id)}
             resetAction={resetCustomerPasswordAction.bind(null, customer.id)}
+            email={customer.email}
           />
         </CardContent>
       </Card>

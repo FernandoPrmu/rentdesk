@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, CalendarClock, FileText, House, LayoutDashboard, LifeBuoy, type LucideIcon, Printer, Receipt, Settings, Ticket, TriangleAlert, Users, Wrench } from "lucide-react";
+import { Building2, CalendarClock, FileText, House, LayoutDashboard, LifeBuoy, type LucideIcon, Mail, Printer, Receipt, Settings, Ticket, TriangleAlert, Users, Wrench } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
@@ -26,6 +26,7 @@ const NAV: Record<Portal, NavItem[]> = {
     { href: "/admin/invoices", label: "Invoices", icon: FileText },
     { href: "/admin/escalations", label: "Escalations", icon: TriangleAlert },
     { href: "/admin/jobs", label: "Daily job", icon: CalendarClock },
+    { href: "/admin/emails", label: "Emails", icon: Mail },
   ],
   owner: [
     { href: "/owner", label: "Home", icon: House, exact: true },

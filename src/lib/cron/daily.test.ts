@@ -187,6 +187,28 @@ describe("buildEstimate (11.6, rule 13)", () => {
     expect(steps.indexOf("rpc_cron_pending_receipt_pdfs")).toBeGreaterThan(steps.indexOf("rpc_cron_pending_invoice_pdfs"));
   });
 
+  it("sends due emails last (after the PDFs, so they can be attached); a sender error is reported, not fatal", async () => {
+    const order: string[] = [];
+    const generate = vi.fn(async () => {
+      order.push("pdf");
+      return { status: "CREATED" as const };
+    });
+    const deliverEmails = vi.fn(async () => {
+      order.push("emails");
+      return { sent: 3, failed: 1, retry: 2 };
+    });
+    const { rpc } = fakeRpc({ rpc_cron_pending_invoice_pdfs: () => ["inv-1"] });
+    const result = await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" }, { generate, deliverEmails });
+    expect(order).toEqual(["pdf", "emails"]);
+    expect(deliverEmails).toHaveBeenCalledWith(NOW, expect.any(Number));
+    expect(result.counts).toMatchObject({ emailsSent: 3, emailsFailed: 1 });
+    expect(result.status).toBe("SUCCESS");
+
+    const failing = await runDailyJob(fakeRpc({}).rpc, storage, { now: NOW, trigger: "CRON" }, { generate, deliverEmails: vi.fn(async () => Promise.reject(new Error("smtp down"))) });
+    expect(failing.status).toBe("PARTIAL");
+    expect(failing.errors).toEqual([expect.objectContaining({ step: "emails", message: "smtp down" })]);
+  });
+
   it("without a PDF port the step is skipped", async () => {
     const { rpc, calls } = fakeRpc({});
     await runDailyJob(rpc, storage, { now: NOW, trigger: "CRON" });

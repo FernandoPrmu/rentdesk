@@ -113,6 +113,9 @@ export async function deleteE2eAccounts(): Promise<void> {
     );
     const ids = rows.map((r) => r.id);
     if (ids.length > 0) {
+      // Deliveries of their notifications go with them (cascade); direct sends (login details) and preferences do not.
+      await db.query("delete from public.notification_deliveries where user_id = any($1) or owner_id = any($1)", [ids]);
+      await db.query("delete from public.notification_preferences where user_id = any($1) or owner_id = any($1)", [ids]);
       await db.query("delete from public.notifications where user_id = any($1) or owner_id = any($1)", [ids]);
       await db.query("delete from public.customers where id = any($1) or owner_id = any($1)", [ids]);
       await db.query("delete from public.owner_company_profiles where owner_id = any($1)", [ids]);

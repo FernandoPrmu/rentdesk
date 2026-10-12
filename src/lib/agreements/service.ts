@@ -18,6 +18,7 @@ import { BillingError } from "@/lib/billing/errors";
 import { buildReturnInvoice } from "@/lib/billing/return-invoice";
 import { type DbError, dbErrorMessage } from "@/lib/db-errors";
 import { getDepositState } from "@/lib/deposits/queries";
+import { kickOutbox } from "@/lib/notifications/server";
 import { planSettlement } from "@/lib/deposits/settlement";
 import { BRANDING_SNAPSHOT_COLUMNS, brandingSnapshot } from "@/lib/invoices/branding-snapshot";
 import { onInvoiceChanged } from "@/lib/invoices/issued";
@@ -49,6 +50,7 @@ export async function assignMachine(
     p_today: todayInColombo(),
   });
   if (error) return fail(message(error));
+  kickOutbox();
   await onInvoiceChanged(finalInvoiceId(data));
   return ok({ agreementId: (data as { agreement_id: string }).agreement_id });
 }
@@ -121,6 +123,7 @@ export async function returnMachine(actor: CurrentUser, agreementId: string, inp
     p_today: todayInColombo(),
   });
   if (error) return fail(message(error));
+  kickOutbox();
   // INV-09: the final invoice's PDF (the daily job retries if this fails).
   await onInvoiceChanged(finalInvoiceId(data));
   return ok(undefined);
@@ -150,6 +153,7 @@ export async function reassignMachine(
     p_today: todayInColombo(),
   });
   if (error) return fail(message(error));
+  kickOutbox();
   await onInvoiceChanged(finalInvoiceId(data));
   return ok({ agreementId: (data as { agreement_id: string }).agreement_id });
 }
@@ -164,7 +168,9 @@ export async function settleDeposit(actor: CurrentUser, agreementId: string, inp
     p_settlement: settlementPayload(input) as Json,
     p_today: todayInColombo(),
   });
-  return error ? fail(message(error)) : ok(undefined);
+  if (error) return fail(message(error));
+  kickOutbox();
+  return ok(undefined);
 }
 
 export interface TermsChange {
@@ -190,6 +196,7 @@ export async function updateAgreementTerms(
     p_today: todayInColombo(),
   });
   if (error) return fail(message(error));
+  kickOutbox();
   const r = data as { pricing_changed: boolean; effective_from_cycle_no: number | null; effective_from_date: string | null };
   return ok({ pricingChanged: r.pricing_changed, effectiveFromCycleNo: r.effective_from_cycle_no, effectiveFromDate: r.effective_from_date });
 }

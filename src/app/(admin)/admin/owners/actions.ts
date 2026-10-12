@@ -16,7 +16,7 @@ export async function createOwnerAction(_prev: CreateAccountResult | null, formD
   const actor = await currentActor("ADMIN");
   const parsed = ownerSchema.safeParse(formValues(formData));
   if (!parsed.success) return fail("Please check the highlighted fields.", fieldErrorsFrom(parsed.error.issues));
-  return createOwner(actor, parsed.data);
+  return createOwner(actor, parsed.data, { sendEmail: formData.get("send_email") === "on" });
 }
 
 export async function updateOwnerAction(ownerId: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
@@ -39,11 +39,11 @@ export async function setOwnerStatusAction(ownerId: string, _prev: ActionResult 
   return result;
 }
 
-export async function resetOwnerPasswordAction(ownerId: string): Promise<ActionResult<ShownCredentials>> {
+export async function resetOwnerPasswordAction(ownerId: string, sendEmail = false): Promise<ActionResult<ShownCredentials>> {
   const actor = await currentActor("ADMIN");
   if (!uuidSchema.safeParse(ownerId).success) return fail("Owner not found.");
-  const result = await resetAccountPassword(actor, ownerId);
+  const result = await resetAccountPassword(actor, ownerId, { sendEmail: sendEmail === true });
   if (!result.ok) return result;
   refresh();
-  return ok({ username: result.data.username, temporaryPassword: result.data.temporaryPassword });
+  return ok({ username: result.data.username, temporaryPassword: result.data.temporaryPassword, email: result.data.email });
 }

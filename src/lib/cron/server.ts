@@ -5,6 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateInvoicePdf } from "@/lib/invoices/pdf-job";
 import { supabaseInvoiceFiles } from "@/lib/invoices/pdf-server";
 import { loadInvoiceFonts } from "@/lib/invoices/pdf/fonts";
+import { queuesDelivery } from "@/lib/notifications/events";
+import { deliverNow, kickOutbox } from "@/lib/notifications/server";
 import { generateReceiptPdf } from "@/lib/payments/receipt-pdf/job";
 import { supabaseReceiptFiles } from "@/lib/payments/receipt-pdf/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -23,6 +25,9 @@ export function supabaseRpc(client: SupabaseClient<Database>): Rpc {
     // Generic port: each caller names an rpc_* wrapper and its arguments.
     const { data, error } = await client.rpc(fn as never, args as never);
     if (error) throw new RpcError(error.code, error.message);
+    // Only a change that queued an email (or SMS) in its transaction wakes the sender, after
+    // the response (decision 67). In-app-only changes and reads never schedule anything.
+    if (queuesDelivery(args.p_notifications)) kickOutbox();
     return data;
   };
 }
@@ -60,5 +65,6 @@ export function runDailyJobNow(options: DailyJobOptions): Promise<DailyJobResult
   return runDailyJob(rpc, meterPhotoStorage(admin), options, {
     generate: (invoiceId, now) => generateInvoicePdf(rpc, files, () => loadInvoiceFonts(), invoiceId, now),
     generateReceipt: (receiptId, now) => generateReceiptPdf(rpc, receiptFiles, () => loadInvoiceFonts(), receiptId, now),
+    deliverEmails: (now, budgetMs) => deliverNow({ now: () => (options.simulated ? now : new Date()), budgetMs }),
   });
 }

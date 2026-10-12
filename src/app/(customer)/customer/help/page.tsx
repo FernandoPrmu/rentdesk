@@ -1,4 +1,4 @@
-import { ChevronRight, KeyRound, Mail, Phone, Wrench } from "lucide-react";
+import { Bell, ChevronRight, KeyRound, Mail, MailCheck, Phone, Wrench } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -59,6 +59,16 @@ export default async function CustomerHelpPage() {
           <p className="text-sm text-muted-foreground">
             Signed in as <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">{user.username}</code>
           </p>
+          <Link href="/customer/notifications" className="flex h-12 items-center gap-3 rounded-lg border px-4 font-medium">
+            <Bell className="size-5 text-primary" aria-hidden />
+            <span className="flex-1">Notifications</span>
+            <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+          </Link>
+          <Link href="/customer/help/notifications" className="flex h-12 items-center gap-3 rounded-lg border px-4 font-medium">
+            <MailCheck className="size-5 text-primary" aria-hidden />
+            <span className="flex-1">Email settings</span>
+            <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+          </Link>
           <Link href="/change-password" className="flex h-12 items-center gap-3 rounded-lg border px-4 font-medium">
             <KeyRound className="size-5 text-primary" aria-hidden />
             <span className="flex-1">Change password</span>

@@ -3,13 +3,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { CustomerSummary } from "@/components/reports/customer-summary";
+import { SummaryUnavailable } from "@/components/reports/summary-unavailable";
 import { requestTitle } from "@/components/service/service-display";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
-import { customerDashboard } from "@/lib/reports/queries";
+import { customerDashboardOrNull } from "@/lib/reports/queries";
 import { customerServiceTasks } from "@/lib/service/queries";
 import { listCustomerTicketRows } from "@/lib/tickets/queries";
 import { type CustomerTask, customerHome } from "@/lib/tickets/view";
@@ -28,7 +29,7 @@ export const metadata: Metadata = { title: "Home" };
  */
 export default async function CustomerHomePage() {
   const user = await requireUser("CUSTOMER");
-  const [rows, service, summary] = await Promise.all([listCustomerTicketRows(user.id), customerServiceTasks(user.id), customerDashboard()]);
+  const [rows, service, summary] = await Promise.all([listCustomerTicketRows(user.id), customerServiceTasks(user.id), customerDashboardOrNull()]);
   const { tasks, waiting } = customerHome(rows, new Date());
   const serviceTasks = service.toConfirm.length + service.toRate.length;
 
@@ -112,7 +113,7 @@ export default async function CustomerHomePage() {
         </section>
       )}
 
-      <CustomerSummary d={summary} />
+      {summary ? <CustomerSummary d={summary} /> : <SummaryUnavailable href="/customer" />}
     </div>
   );
 }

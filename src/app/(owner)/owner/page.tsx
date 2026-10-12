@@ -5,6 +5,7 @@ import Link from "next/link";
 import { DepositsToSettle } from "@/components/deposits/deposits-to-settle";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { OWNER_LINKS, OwnerDashboardCards } from "@/components/reports/owner-dashboard";
+import { SummaryUnavailable } from "@/components/reports/summary-unavailable";
 import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/current-user";
 import { listDepositsToSettle } from "@/lib/deposits/queries";
@@ -21,8 +22,12 @@ export const metadata: Metadata = { title: "Home" };
  */
 export default async function OwnerHomePage() {
   const user = await requireUser("OWNER");
-  const d = await ownerDashboard(user.id);
-  const deposits = d.deposits.count > 0 ? await listDepositsToSettle() : [];
+  // A slow free-tier database must not take the whole Home down: show a retry instead.
+  const d = await ownerDashboard(user.id).catch((error: unknown) => {
+    console.error("[owner dashboard]", error instanceof Error ? error.message : error);
+    return null;
+  });
+  const deposits = d && d.deposits.count > 0 ? await listDepositsToSettle() : [];
   return (
     <>
       <PageHeader
@@ -39,7 +44,11 @@ export default async function OwnerHomePage() {
           </div>
         }
       />
-      <OwnerDashboardCards d={d} links={OWNER_LINKS} depositsList={deposits.length > 0 ? <DepositsToSettle items={deposits} empty="Nothing to settle." /> : null} />
+      {d ? (
+        <OwnerDashboardCards d={d} links={OWNER_LINKS} depositsList={deposits.length > 0 ? <DepositsToSettle items={deposits} empty="Nothing to settle." /> : null} />
+      ) : (
+        <SummaryUnavailable href="/owner" message="Your dashboard could not be loaded just now." />
+      )}
     </>
   );
 }

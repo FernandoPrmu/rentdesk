@@ -59,6 +59,19 @@ export async function customerDashboard(): Promise<CustomerDashboard> {
   return call(await createClient(), "report_customer_dashboard", {});
 }
 
+/**
+ * The customer Home summary, or null when it cannot be read now (a slow free-tier
+ * database): the tasks above it must still show (task 11).
+ */
+export async function customerDashboardOrNull(): Promise<CustomerDashboard | null> {
+  try {
+    return await customerDashboard();
+  } catch (error) {
+    console.error("[customer summary]", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 export async function adminDashboard(now = new Date()): Promise<AdminDashboard | null> {
   return call(await createClient(), "report_admin_dashboard", { p_today: todayInColombo(now), p_now: now.toISOString() });
 }

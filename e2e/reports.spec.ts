@@ -94,7 +94,7 @@ test("the owner's dashboard taps through, and every report opens and exports PDF
 
   // A custom range is checked: start after end shows a message, not an error page.
   await page.goto("/owner/reports/income?range=custom&from=2026-05-01&to=2026-04-01");
-  await expect(page.getByRole("alert")).toHaveText("The start date must be before the end date.");
+  await expect(page.getByTestId("range-filter").getByRole("alert")).toHaveText("The start date must be before the end date.");
 });
 
 test("the customer's Home shows balance, machines, latest bill, payments and requests", async ({ page }) => {

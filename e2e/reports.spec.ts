@@ -82,7 +82,7 @@ test("the owner's dashboard taps through, and every report opens and exports PDF
       const row = sheets[0].data.find((r) => typeof r[0] === "string" && r[0].includes(serial));
       expect(row?.[2]).toBe(6500);
       expect(row?.[6]).toBe(2600);
-      expect((await pdfText(pdf.bytes)).replace(/s+/g, "")).toContain(serial);
+      expect((await pdfText(pdf.bytes)).replace(/\s+/g, "")).toContain(serial);
     }
     if (report === "ageing") {
       const bills = sheets.find((s) => s.sheet === "Unpaid bills")!;

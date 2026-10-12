@@ -81,12 +81,12 @@ export function rangeQuery(range: DateRange): string {
   return range.preset === "custom" ? `range=custom&from=${range.from}&to=${range.to}` : `range=${range.preset}`;
 }
 
-const monthFormat = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", month: "short", year: "numeric" });
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const dayFormat = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
 
-/** "2026-10-01" -> "Oct 2026". */
+/** "2026-10-01" -> "Oct 2026" (fixed names: ICU versions differ, e.g. "Sept"). */
 export function monthLabel(month: IsoDate): string {
-  return monthFormat.format(new Date(`${month.slice(0, 10)}T00:00:00Z`));
+  return `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
 }
 
 /** "1 Aug 2026 – 12 Oct 2026". */

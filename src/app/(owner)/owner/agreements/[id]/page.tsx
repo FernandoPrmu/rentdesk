@@ -23,6 +23,7 @@ import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 import { centsToRupeesInput, formatRupees } from "@/lib/money";
 import { getLateFeeSources } from "@/lib/settings/billing";
 import { describeOwnerDefault } from "@/lib/settings/billing-schema";
+import { getAgreementNoticeDays } from "@/lib/settings/service";
 import { DEPOSIT_KIND_LABEL, PAYMENT_METHOD_LABEL } from "@/lib/status-labels";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
@@ -38,13 +39,13 @@ const CREDIT_STATUS_LABEL: Record<string, string> = { AVAILABLE: "not used yet",
  * its ledger, settle later; advance payments (DEP-01..04).
  */
 export default async function AgreementPage({ params, searchParams }: PageProps<"/owner/agreements/[id]">) {
-  await requireUser("OWNER");
+  const owner = await requireUser("OWNER");
   const { id } = await params;
   if (!uuidSchema.safeParse(id).success) notFound();
   const agreement = await getAgreement(id);
   if (!agreement) notFound();
   const supabase = await createClient();
-  const [history, deposit, advances, lateFee, baselines] = await Promise.all([
+  const [history, deposit, advances, lateFee, baselines, noticeDays] = await Promise.all([
     getTermsHistory(id),
     getDepositState(supabase, id),
     getAdvances(id),
@@ -54,6 +55,7 @@ export default async function AgreementPage({ params, searchParams }: PageProps<
       .select("id, counter_type, value, previous_value, old_meter_reading, carried_copies, reason, recorded_at")
       .eq("agreement_id", id)
       .order("recorded_at", { ascending: false }),
+    getAgreementNoticeDays(owner.id),
   ]);
   const { assigned } = await searchParams;
   const ownerDefault = describeOwnerDefault(lateFee);
@@ -77,7 +79,7 @@ export default async function AgreementPage({ params, searchParams }: PageProps<
         <div className="-mt-3 flex flex-wrap gap-2">
           <Badge variant={live ? "secondary" : "outline"}>{STATUS_LABEL[agreement.status]}</Badge>
           <MachineTypeBadge type={machine.type} />
-          {live && isEndingSoon(agreement.end_date, today) && <Badge variant="destructive">Ending soon</Badge>}
+          {live && isEndingSoon(agreement.end_date, today, noticeDays) && <Badge variant="destructive">Ending soon</Badge>}
           {!live && deposit.heldCents > 0 && <Badge variant="destructive">Deposit to settle</Badge>}
         </div>
       </div>

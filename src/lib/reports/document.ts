@@ -65,6 +65,10 @@ export function formatMoneyCell(cents: number): string {
 /** A cell as text. `style` "screen" shows money as "Rs. 12,800". */
 export function formatCell(type: ColumnType, value: CellValue, style: "screen" | "table" = "table"): string {
   if (value === null || value === "") return "—";
+  // A label in a typed column (the "Total" row) is shown as it is.
+  if (typeof value === "string" && type !== "text" && !(type === "date" || type === "month" ? /^\d{4}-\d{2}-\d{2}/.test(value) : Number.isFinite(Number(value)))) {
+    return value;
+  }
   switch (type) {
     case "money":
       return style === "screen" ? formatRupees(Number(value)) : formatMoneyCell(Number(value));

@@ -219,5 +219,20 @@ describe("report PDF (RPT-07)", () => {
     expect(formatCell("month", "2026-10-01")).toBe("Oct 2026");
     expect(formatCell("percent", 76.6)).toBe("76.6%");
     expect(formatCell("count", null)).toBe("—");
+    // The totals row's label in a month or money column.
+    expect(formatCell("month", "Total")).toBe("Total");
+    expect(formatCell("date", "Total", "screen")).toBe("Total");
+    expect(formatCell("money", "Total")).toBe("Total");
+  });
+
+  it("a report whose totals row labels a month column renders (income)", async () => {
+    const doc = buildIncome(
+      [{ month: "2026-09-01", commitment_cents: 1, excess_cents: 0, other_cents: 0, discount_cents: 0, invoices: 1, payments_cents: 0, advances_cents: 0, deposits_kept_cents: 0, refunds_cents: 0 }],
+      ctx,
+    );
+    const result = await renderReportPdf(doc, { company: { name: "Lanka Copiers", address: null, phone: null, email: null }, assets: { logo: null, letterhead: null }, fonts, generatedLabel: "now" });
+    const text = await pdfText(result.bytes);
+    expect(text).toContain("Sep 2026");
+    expect(text).toContain("Total");
   });
 });

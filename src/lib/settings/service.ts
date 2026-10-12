@@ -52,6 +52,13 @@ export async function getOwnerOverrides(ownerId: string): Promise<Partial<Record
   return pick(data as Row | null, OWNER_KEYS);
 }
 
+/** AGR-03: the owner's agreement end notice (their setting, else the platform default). */
+export async function getAgreementNoticeDays(ownerId: string): Promise<number> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("owner_settings_effective").select("agreement_end_notice_days").eq("owner_id", ownerId).maybeSingle();
+  return data?.agreement_end_notice_days ?? 30;
+}
+
 function problemResult(message: string): ActionResult<{ changed: string[] }> {
   const problems = parseDbProblems(message);
   if (problems.length === 0) return fail(message);

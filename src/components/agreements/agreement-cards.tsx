@@ -35,9 +35,12 @@ export function AgreementCards({
   deposits,
   inService,
   requestService = false,
+  noticeDays,
 }: {
   agreements: CustomerAgreement[];
   today: string;
+  /** AGR-03: "Ending soon" within the owner's notice (default 30 days). */
+  noticeDays?: number;
   linkBase?: string;
   empty: string;
   /** DEP-01: deposit held per agreement. */
@@ -65,7 +68,7 @@ export function AgreementCards({
               )}
               <MachineTypeBadge type={a.machine.type} />
               {!live && <Badge variant="outline">Returned</Badge>}
-              {live && isEndingSoon(a.end_date, today) && <Badge variant="destructive">Ending soon</Badge>}
+              {live && isEndingSoon(a.end_date, today, noticeDays) && <Badge variant="destructive">Ending soon</Badge>}
               {live && inService?.has(a.machine.id) && <InServiceBadge />}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">

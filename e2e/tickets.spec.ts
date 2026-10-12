@@ -78,7 +78,9 @@ test.describe("billing cycle tickets and the daily job", () => {
 
   test("the admin sees the daily job's log, runs it now, and the escalations list", async ({ page }) => {
     await signInCached(page, DEMO.admin, "/admin");
-    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Daily job" }).click();
+    // At 360 px the daily job is under More (task 11).
+    await page.getByTestId("nav-more").click();
+    await page.getByRole("navigation", { name: "More" }).getByRole("link", { name: "Daily job" }).click();
     await expect(page.getByRole("heading", { name: "Daily job" })).toBeVisible();
     const before = await page.getByTestId("cron-run").count();
     expect(before).toBeGreaterThan(0);

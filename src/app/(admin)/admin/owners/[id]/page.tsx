@@ -1,3 +1,4 @@
+import { Eye } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
@@ -11,10 +12,13 @@ import { AccountForm } from "@/components/accounts/account-form";
 import { AccountSummary } from "@/components/accounts/account-summary";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { getOwner } from "@/lib/accounts/queries";
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { requireUser } from "@/lib/auth/current-user";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Owner" };
 
@@ -50,6 +54,25 @@ export default async function OwnerDetailPage({ params }: PageProps<"/admin/owne
             suspendWarning="All of this owner's customers are blocked too, and they are told by email."
             email={owner.email}
           />
+        </CardContent>
+      </Card>
+      <Card data-testid="support-entry">
+        <CardHeader>
+          <CardTitle>Support view</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form action={`/admin/owners/${owner.id}/support`} method="get" className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              See this owner&apos;s dashboard, reports and lists as they see them. Read only; every page you open is recorded in the audit log.
+            </p>
+            <label className="grid gap-1.5 text-sm">
+              Reason <span className="text-muted-foreground">(optional)</span>
+              <Input name="reason" maxLength={300} className="h-12 text-base" placeholder="e.g. Owner asked about a report" />
+            </label>
+            <button type="submit" className={cn(buttonVariants({ variant: "outline" }), "h-12 w-full gap-2 text-base sm:w-auto")}>
+              <Eye className="size-5" aria-hidden /> Open support view
+            </button>
+          </form>
         </CardContent>
       </Card>
       <Card>

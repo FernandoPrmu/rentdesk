@@ -16,6 +16,7 @@ import {
   buildUsage,
 } from "@/lib/reports/build";
 import { REPORT_INFO, type OwnerReportId } from "@/lib/reports/catalogue";
+import { createDashboardCache, withTimeout } from "@/lib/reports/dashboard-cache";
 import type { ReportDocument } from "@/lib/reports/document";
 import type { DateRange } from "@/lib/reports/period";
 import type {
@@ -32,6 +33,7 @@ import type {
   ServiceDemand,
   UsageRow,
 } from "@/lib/reports/types";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/db";
 
@@ -59,21 +61,80 @@ export async function customerDashboard(): Promise<CustomerDashboard> {
   return call(await createClient(), "report_customer_dashboard", {});
 }
 
+// ---------------------------------------------------------------------------
+// Home dashboards: cached and time-limited (task 11 load fix, decision 84)
+// ---------------------------------------------------------------------------
+
+/** How long a Home waits for its dashboard before showing "Try again". */
+export const DASHBOARD_TIMEOUT_MS = 4_000;
+const VERSION_TIMEOUT_MS = 2_000;
+const dashboards = createDashboardCache<unknown>({ ttlMs: 60_000, maxEntries: 1_000 });
+
 /**
- * The customer Home summary, or null when it cannot be read now (a slow free-tier
- * database): the tasks above it must still show (task 11).
+ * The tenant's change signal: the newest audit entry of the owner (every write path
+ * is audited with its owner). One index lookup with the service role, no RLS. Null
+ * when the owner has none; undefined when it could not be read now.
  */
-export async function customerDashboardOrNull(): Promise<CustomerDashboard | null> {
+async function tenantVersion(ownerId: string | null): Promise<string | null | undefined> {
   try {
-    return await customerDashboard();
-  } catch (error) {
-    console.error("[customer summary]", error instanceof Error ? error.message : error);
-    return null;
+    let query = createAdminClient().from("audit_logs").select("created_at");
+    // null: the whole platform (the admin dashboard).
+    if (ownerId) query = query.eq("owner_id", ownerId);
+    const { data, error } = await withTimeout(Promise.resolve(query.order("created_at", { ascending: false }).limit(1).maybeSingle()), VERSION_TIMEOUT_MS);
+    return error ? undefined : (data?.created_at ?? null);
+  } catch {
+    return undefined;
   }
+}
+
+export type DashboardResult<T> = { ok: true; data: T } | { ok: false };
+
+async function cachedDashboard<T>(label: string, key: string, ownerId: string | null, load: () => Promise<T>): Promise<DashboardResult<T>> {
+  try {
+    const version = await tenantVersion(ownerId);
+    return { ok: true, data: (await withTimeout(dashboards.get(key, version, load), DASHBOARD_TIMEOUT_MS)) as T };
+  } catch (error) {
+    console.error(`[${label}]`, error instanceof Error ? error.message : error);
+    return { ok: false };
+  }
+}
+
+/**
+ * The owner's Home cards (also the admin's support view of that owner: the same
+ * figures, read with the viewer's own client, so RLS decides). Never throws.
+ */
+export async function ownerDashboardForHome(ownerId: string): Promise<DashboardResult<OwnerDashboard>> {
+  const today = todayInColombo();
+  const client = await createClient();
+  return cachedDashboard("owner dashboard", `owner:${ownerId}:${today}`, ownerId, () => ownerDashboard(ownerId, today, client));
+}
+
+/** The customer's Home summary (CP-01). Never throws; the tasks never wait for it. */
+export async function customerDashboardForHome(customer: { id: string; owner_id: string | null }): Promise<DashboardResult<CustomerDashboard>> {
+  const today = todayInColombo();
+  const client = await createClient();
+  return cachedDashboard("customer summary", `customer:${customer.id}:${today}`, customer.owner_id ?? customer.id, () =>
+    call<CustomerDashboard>(client, "report_customer_dashboard", {}),
+  );
 }
 
 export async function adminDashboard(now = new Date()): Promise<AdminDashboard | null> {
   return call(await createClient(), "report_admin_dashboard", { p_today: todayInColombo(now), p_now: now.toISOString() });
+}
+
+/**
+ * ADM-04 for the admin Home: the same cache and time limit (the platform-wide figures
+ * are the same for every admin; the change signal is the newest audit entry anywhere).
+ */
+export async function adminDashboardForHome(): Promise<DashboardResult<AdminDashboard>> {
+  const now = new Date();
+  const client = await createClient();
+  const result = await cachedDashboard("admin dashboard", `admin:${todayInColombo(now)}`, null, async () => {
+    const d = await call<AdminDashboard | null>(client, "report_admin_dashboard", { p_today: todayInColombo(now), p_now: now.toISOString() });
+    if (!d) throw new Error("not an admin");
+    return d;
+  });
+  return result;
 }
 
 /** The company name on owner reports (RLS: the owner, or an admin). */

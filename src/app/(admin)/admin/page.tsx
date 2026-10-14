@@ -1,15 +1,16 @@
 import { CalendarClock, ChevronRight, Mail } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 
 import { PageHeader } from "@/components/portal/portal-shell";
+import { SummaryUnavailable } from "@/components/reports/summary-unavailable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { MISSED_RUN_HOURS } from "@/lib/cron/daily";
 import { formatDateTime } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
-import { adminDashboard } from "@/lib/reports/queries";
+import { adminDashboardForHome } from "@/lib/reports/queries";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Admin" };
@@ -45,18 +46,33 @@ function Meter({ used, limit, label }: { used: number; limit: number; label: str
   );
 }
 
-/** ADM-04: platform counts, email usage against the free-tier limits, daily-job health. One database call. */
+/**
+ * ADM-04: platform counts, email usage against the free-tier limits, daily-job health.
+ * The header renders at once; the figures stream in from one cached call (decision 84)
+ * and show "Try again" when slow, never a page error.
+ */
 export default async function AdminHomePage() {
   await requireUser("ADMIN");
+  return (
+    <>
+      <PageHeader title="Dashboard" description="Platform overview" />
+      <Suspense fallback={<div className="h-48 animate-pulse rounded-xl bg-muted" aria-busy="true" aria-label="Loading the dashboard" />}>
+        <AdminFigures />
+      </Suspense>
+    </>
+  );
+}
+
+async function AdminFigures() {
+  const result = await adminDashboardForHome();
+  if (!result.ok) return <SummaryUnavailable href="/admin" message="The dashboard could not be loaded just now." />;
+  const d = result.data;
   const now = new Date();
-  const d = await adminDashboard(now);
-  if (!d) throw new Error("admin dashboard: not available");
   const lastSuccess = d.job.last_success;
   const gapHours = lastSuccess ? Math.floor((now.getTime() - Date.parse(lastSuccess)) / 3_600_000) : null;
   const jobLate = gapHours === null || gapHours >= MISSED_RUN_HOURS;
   return (
     <>
-      <PageHeader title="Dashboard" description="Platform overview" />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="admin-dashboard">
         <Stat label="Owners" value={sum(d.owners)} href="/admin/owners" sub={`${d.owners.ACTIVE ?? 0} active · ${d.owners.SUSPENDED ?? 0} suspended`} testId="stat-owners" />
         <Stat label="Customers" value={sum(d.customers)} href="/admin/reports" sub={`${d.customers.ACTIVE ?? 0} active`} />

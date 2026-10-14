@@ -48,7 +48,18 @@ export const OWNER_LINKS: DashboardLinks = {
   ratings: "/owner/service?status=CLOSED",
 };
 
-const STAGE_ORDER = ["METER_REQUESTED", "PENDING_OWNER_REVIEW", "AWAITING_PAYMENT", "PAYMENT_SUBMITTED", "PARTIALLY_PAID", "OVERDUE", "DISPUTED", "REOPENED"];
+/** Placeholder while the cards stream in (same grid, so nothing jumps). */
+export function DashboardSkeleton() {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" aria-busy="true" aria-label="Loading your dashboard" data-testid="dashboard-loading">
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} className="h-36 animate-pulse rounded-xl bg-muted" />
+      ))}
+    </div>
+  );
+}
+
+const STAGE_ORDER =["METER_REQUESTED", "PENDING_OWNER_REVIEW", "AWAITING_PAYMENT", "PAYMENT_SUBMITTED", "PARTIALLY_PAID", "OVERDUE", "DISPUTED", "REOPENED"];
 
 function CardLink({ href, children, testId, className }: { href: string; children: ReactNode; testId?: string; className?: string }) {
   return (

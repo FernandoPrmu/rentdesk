@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/portal/portal-shell";
 import { type DashboardLinks, OwnerDashboardCards } from "@/components/reports/owner-dashboard";
+import { SummaryUnavailable } from "@/components/reports/summary-unavailable";
 import { requireUser } from "@/lib/auth/current-user";
-import { ownerDashboard } from "@/lib/reports/queries";
+import { ownerDashboardForHome } from "@/lib/reports/queries";
 import { openSupportView, supportBase } from "@/lib/support/view";
 
 export const metadata: Metadata = { title: "Support view" };
@@ -32,11 +33,15 @@ export default async function SupportDashboardPage({ params, searchParams }: Pag
   const { id } = await params;
   const { reason } = await searchParams;
   const owner = await openSupportView(admin, id, supportBase(id), typeof reason === "string" ? reason : null);
-  const d = await ownerDashboard(id);
+  const result = await ownerDashboardForHome(id);
   return (
     <>
       <PageHeader title={owner.business_name} description="The owner's Home, as they see it." />
-      <OwnerDashboardCards d={d} links={supportLinks(id)} />
+      {result.ok ? (
+        <OwnerDashboardCards d={result.data} links={supportLinks(id)} />
+      ) : (
+        <SummaryUnavailable href={supportBase(id)} message="The dashboard could not be loaded just now." />
+      )}
     </>
   );
 }

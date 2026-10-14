@@ -1,33 +1,29 @@
 import { BarChart3, Plus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { DepositsToSettle } from "@/components/deposits/deposits-to-settle";
 import { PageHeader } from "@/components/portal/portal-shell";
-import { OWNER_LINKS, OwnerDashboardCards } from "@/components/reports/owner-dashboard";
+import { DashboardSkeleton, OWNER_LINKS, OwnerDashboardCards } from "@/components/reports/owner-dashboard";
 import { SummaryUnavailable } from "@/components/reports/summary-unavailable";
 import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/current-user";
 import { listDepositsToSettle } from "@/lib/deposits/queries";
-import { ownerDashboard } from "@/lib/reports/queries";
+import { ownerDashboardForHome } from "@/lib/reports/queries";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Home" };
 
 /**
- * Owner Home (RPT-01, spec 10.1): one database call for every card (income this month
- * against last month, outstanding and overdue, readings and slips to review, tickets by
- * stage, open service requests by urgency, machines, rating, deposits to settle, ending
- * agreements, top machines, recent payments). The deposits list loads only when there is one.
+ * Owner Home (RPT-01, spec 10.1). The header and actions render at once; the cards
+ * (income vs last month, outstanding and overdue, to review, tickets by stage, service
+ * by urgency, machines, rating, deposits, ending agreements, top machines, recent
+ * payments) stream in from one cached database call (decision 84) and show "Try again"
+ * if it takes longer than a few seconds, never a page error.
  */
 export default async function OwnerHomePage() {
   const user = await requireUser("OWNER");
-  // A slow free-tier database must not take the whole Home down: show a retry instead.
-  const d = await ownerDashboard(user.id).catch((error: unknown) => {
-    console.error("[owner dashboard]", error instanceof Error ? error.message : error);
-    return null;
-  });
-  const deposits = d && d.deposits.count > 0 ? await listDepositsToSettle() : [];
   return (
     <>
       <PageHeader
@@ -44,11 +40,17 @@ export default async function OwnerHomePage() {
           </div>
         }
       />
-      {d ? (
-        <OwnerDashboardCards d={d} links={OWNER_LINKS} depositsList={deposits.length > 0 ? <DepositsToSettle items={deposits} empty="Nothing to settle." /> : null} />
-      ) : (
-        <SummaryUnavailable href="/owner" message="Your dashboard could not be loaded just now." />
-      )}
+      <Suspense fallback={<DashboardSkeleton />}>
+        <OwnerCards ownerId={user.id} />
+      </Suspense>
     </>
   );
+}
+
+async function OwnerCards({ ownerId }: { ownerId: string }) {
+  const result = await ownerDashboardForHome(ownerId);
+  if (!result.ok) return <SummaryUnavailable href="/owner" message="Your dashboard could not be loaded just now." />;
+  const d = result.data;
+  const deposits = d.deposits.count > 0 ? await listDepositsToSettle().catch(() => []) : [];
+  return <OwnerDashboardCards d={d} links={OWNER_LINKS} depositsList={deposits.length > 0 ? <DepositsToSettle items={deposits} empty="Nothing to settle." /> : null} />;
 }

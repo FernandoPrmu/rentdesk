@@ -68,16 +68,20 @@ export async function customerDashboard(): Promise<CustomerDashboard> {
 /** How long a Home waits for its dashboard before showing "Try again". */
 export const DASHBOARD_TIMEOUT_MS = 4_000;
 const VERSION_TIMEOUT_MS = 2_000;
+/** Audit entries that never change a dashboard figure (they must not invalidate it). */
+const NON_DATA_ACTIONS = ["LOGIN", "LOGIN_FAILED", "LOGOUT", "LOCKOUT", "PASSWORD_CHANGED", "SUPPORT_VIEW", "REPORT_EXPORTED", "ACCESS_DENIED"];
 const dashboards = createDashboardCache<unknown>({ ttlMs: 60_000, maxEntries: 1_000 });
 
 /**
- * The tenant's change signal: the newest audit entry of the owner (every write path
- * is audited with its owner). One index lookup with the service role, no RLS. Null
- * when the owner has none; undefined when it could not be read now.
+ * The tenant's change signal: the newest audit entry of the owner that records a data
+ * change (every write path is audited with its owner). One index lookup with the
+ * service role, no RLS. Null when the owner has none; undefined when it could not be
+ * read now.
  */
 async function tenantVersion(ownerId: string | null): Promise<string | null | undefined> {
   try {
-    let query = createAdminClient().from("audit_logs").select("created_at");
+    // Sign-ins, support views and exports are audited too but change no figure.
+    let query = createAdminClient().from("audit_logs").select("created_at").not("action", "in", `(${NON_DATA_ACTIONS.join(",")})`);
     // null: the whole platform (the admin dashboard).
     if (ownerId) query = query.eq("owner_id", ownerId);
     const { data, error } = await withTimeout(Promise.resolve(query.order("created_at", { ascending: false }).limit(1).maybeSingle()), VERSION_TIMEOUT_MS);

@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0037`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0038`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -487,7 +487,7 @@ app's own per-account and per-IP limits above protect logins instead.
   writes), the bill's PDF (wait, then attach), owner suspension told to customers, bounces and direct sends, RLS on
   deliveries, the log view and preferences. The sender runs with a fake transport: nothing is sent.
 
-## Dashboards, reports, settings and the support view (migrations 0034–0037)
+## Dashboards, reports, settings and the support view (migrations 0034–0038)
 
 - **Report functions (RPT-01..08, CP-01, ADM-04).** `public.report_*` are **security invoker** and **stable**, granted
   to `authenticated` (never `anon`): RLS decides what they read and they cannot write. They are the only public functions
@@ -499,7 +499,12 @@ app's own per-account and per-IP limits above protect logins instead.
   a second (`pg_stat_statements`) and hit the 8 s statement timeout; the owner dashboard went from 63 ms to 40 ms server
   time on its own. 0037 makes the owner dashboard read each row helper once (a window from last month, two months for
   the top machines) instead of six times: the same figures (checked for every owner on three dates), about 45 % less
-  work. Pages show a retry when a dashboard cannot be read, and the customer's tasks never depend on it.
+  work. **0038**: the owner and customer dashboards are PL/pgSQL (the statement is prepared once per connection; a SQL
+  function with a SET clause was re-planned on every call, 4.4 ms) and read each table once into CTEs; same results for
+  every owner and customer; 27.8 → 17.4 ms and 11.0 → 7.8 ms server time. EXPLAIN (ANALYZE, BUFFERS) showed no scan
+  problem: the dev data is small (all tables under 100 rows except `audit_logs`, 21k) and each RLS table reference costs
+  about 1 ms of policy evaluation, so the work was per reference and per call. The server caches dashboards per tenant
+  (decision 84) and pages stream them with a 4 s limit and a retry.
 
   | Function | Returns |
   | --- | --- |

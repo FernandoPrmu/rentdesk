@@ -94,6 +94,8 @@ async function tenantVersion(ownerId: string | null): Promise<string | null | un
 export type DashboardResult<T> = { ok: true; data: T } | { ok: false };
 
 async function cachedDashboard<T>(label: string, key: string, ownerId: string | null, load: () => Promise<T>): Promise<DashboardResult<T>> {
+  // DASHBOARDS=off: measurement only (task 11 A/B under the e2e load); Home shows "Try again".
+  if (process.env.DASHBOARDS === "off") return { ok: false };
   try {
     const version = await tenantVersion(ownerId);
     return { ok: true, data: (await withTimeout(dashboards.get(key, version, load), DASHBOARD_TIMEOUT_MS)) as T };

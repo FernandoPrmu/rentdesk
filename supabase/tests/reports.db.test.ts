@@ -49,6 +49,8 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
   });
 
   const one = async <R = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows[0] as R;
+  /** The platform's agreement end notice now (an e2e run may have changed it and not put it back). */
+  const platformNotice = async () => (await one<{ n: number }>("select agreement_end_notice_days as n from public.platform_settings")).n;
   /** A report function's jsonb result as `user`. */
   const report = async <R = Record<string, unknown>>(user: string | "anon", sql: string, params: unknown[] = []): Promise<R> => {
     if (user === "anon") await asAnon(db);
@@ -118,6 +120,24 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
         expect(a1.open_requests).toHaveLength(1);
         expect(await report(f.custA1, "public.report_admin_dashboard($1, now())", [today])).toBeNull();
         expect((await sqlError(db, "set local role anon; select public.report_income(gen_random_uuid(), current_date, current_date)"))?.code).toBe("42501");
+      });
+    });
+
+    it("the definer dashboards (0039) answer only an active owner or customer, like RLS did", async () => {
+      await isolated(db, async () => {
+        expect(await report(f.ownerA, "public.report_owner_dashboard($1, $2)", [f.ownerA, today])).not.toBeNull();
+        // Another owner, a customer, a suspended owner, a suspended customer, customers of a suspended owner.
+        expect(await report(f.ownerB, "public.report_owner_dashboard($1, $2)", [f.ownerA, today])).toBeNull();
+        expect(await report(f.custA1, "public.report_owner_dashboard($1, $2)", [f.ownerA, today])).toBeNull();
+        await db.query("update public.profiles set status = 'SUSPENDED' where id = $1", [f.custA2]);
+        expect(await report(f.custA2, "public.report_customer_dashboard()")).toBeNull();
+        expect(await report(f.custA1, "public.report_customer_dashboard()")).not.toBeNull();
+        await db.query("update public.profiles set status = 'SUSPENDED' where id = $1", [f.ownerA]);
+        expect(await report(f.ownerA, "public.report_owner_dashboard($1, $2)", [f.ownerA, today])).toBeNull();
+        expect(await report(f.custA1, "public.report_customer_dashboard()")).toBeNull();
+        // Owner B is untouched and still sees only B.
+        const b = await report<{ machines: Record<string, number> }>(f.ownerB, "public.report_owner_dashboard($1, $2)", [f.ownerB, today]);
+        expect(b.machines).toEqual({ RENTED: 1 });
       });
     });
 
@@ -203,7 +223,7 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
         expect(ageing.map((a) => a.balance_cents)).toEqual([RS(6500)]);
         await db.query("update public.rental_agreements set end_date = $2::date + 10 where id = $1", [f.agrA1Mono, today]);
         const rental = await report<{ machines: Record<string, number>; agreements: { id: string; days_left: number | null }[]; notice_days: number }>(f.ownerA, "public.report_rental($1, $2)", [f.ownerA, today]);
-        expect(rental.notice_days).toBe(30);
+        expect(rental.notice_days).toBe(await platformNotice());
         expect(rental.agreements.find((a) => a.id === f.agrA1Mono)?.days_left).toBe(10);
         const service = await report<{ total: number; by_type: Record<string, number>; toner_history: unknown[] }>(f.ownerA, "public.report_service_demand($1, $2, $3)", [f.ownerA, from, to]);
         expect(service).toMatchObject({ total: 1, by_type: { TONER: 1 } });
@@ -370,9 +390,9 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
           }
           return counts;
         };
-        await db.query("update public.rental_agreements set end_date = $2::date + 31 where id = $1", [f.agrA1Mono, today]);
+        await db.query("update public.rental_agreements set end_date = $2::date + $3::int + 1 where id = $1", [f.agrA1Mono, today, await platformNotice()]);
         expect((await run()).agreementsEnding).toBe(0);
-        await db.query("update public.rental_agreements set end_date = $2::date + 30 where id = $1", [f.agrA1Mono, today]);
+        await db.query("update public.rental_agreements set end_date = $2::date + $3::int where id = $1", [f.agrA1Mono, today, await platformNotice()]);
         expect((await run()).agreementsEnding).toBe(1);
         expect((await run()).agreementsEnding).toBe(0);
         const n = await one<{ id: string; link: string; title: string }>("select id, link, title from public.notifications where user_id = $1 and event = 'agreement.ending'", [f.ownerA]);
@@ -382,8 +402,8 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
         // A changed end date gets its own reminder; another owner's notice is their own.
         await db.query("update public.rental_agreements set end_date = $2::date + 5 where id = $1", [f.agrA1Mono, today]);
         expect((await run()).agreementsEnding).toBe(1);
-        await db.query("update public.rental_agreements set end_date = $2::date + 40 where id = $1", [f.agrB1Mono, today]);
-        await db.query("insert into public.owner_settings (owner_id, agreement_end_notice_days) values ($1, 60) on conflict (owner_id) do update set agreement_end_notice_days = 60", [f.ownerB]);
+        await db.query("update public.rental_agreements set end_date = $2::date + $3::int + 10 where id = $1", [f.agrB1Mono, today, await platformNotice()]);
+        await db.query("insert into public.owner_settings (owner_id, agreement_end_notice_days) values ($1, $2) on conflict (owner_id) do update set agreement_end_notice_days = $2", [f.ownerB, (await platformNotice()) + 30]);
         expect((await run()).agreementsEnding).toBe(1);
         expect(await count(db, "select 1 from public.notifications where user_id = $1 and event = 'agreement.ending'", [f.ownerB])).toBe(1);
       });
@@ -407,6 +427,10 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
        from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'report\\_%'`,
     );
     expect(rows.length).toBe(12);
-    for (const r of rows) expect(r, r.name).toMatchObject({ definer: false, volatile: "s", auth: true });
+    // 0039 (decision 84): the two Home dashboards run as definer with an explicit guard
+    // (their isolation is tested above); every other report is invoker, so RLS applies.
+    const definers = ["report_customer_dashboard", "report_owner_dashboard"];
+    for (const r of rows) expect(r, r.name).toMatchObject({ definer: definers.includes(r.name), volatile: "s", auth: true });
+    expect((await sqlError(db, "set local role anon; select public.report_owner_dashboard(gen_random_uuid(), current_date)"))?.code).toBe("42501");
   });
 });

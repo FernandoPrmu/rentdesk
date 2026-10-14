@@ -42,10 +42,24 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await deleteE2eMachines(serial);
+  // Settings first and each step on its own: a dropped connection in one (seen on the
+  // free tier) must not leave the platform default changed for every later run.
   const db = service();
-  await db.rpc("rpc_update_platform_settings", { p_actor_id: adminId, p_changes: { agreement_end_notice_days: noticeBefore } });
-  await db.rpc("rpc_update_owner_settings", { p_actor_id: ownerId, p_changes: { agreement_end_notice_days: null } });
+  const steps = [
+    () => db.rpc("rpc_update_platform_settings", { p_actor_id: adminId, p_changes: { agreement_end_notice_days: noticeBefore } }),
+    () => db.rpc("rpc_update_owner_settings", { p_actor_id: ownerId, p_changes: { agreement_end_notice_days: null } }),
+    () => deleteE2eMachines(serial),
+  ];
+  const errors: unknown[] = [];
+  for (const step of steps) {
+    try {
+      const result = await step();
+      if (result && typeof result === "object" && "error" in result && result.error) errors.push(result.error);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length) throw new Error(`reports.spec clean-up: ${errors.map((e) => (e instanceof Error ? e.message : JSON.stringify(e))).join("; ")}`);
 });
 
 async function download(page: Page, name: "PDF" | "Excel"): Promise<{ file: Download; bytes: Buffer }> {

@@ -13,6 +13,9 @@ test.use({ storageState: { cookies: [], origins: [] } });
 const IPHONE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 
+/** The card waits for the user's first tap or key press (decision 90). */
+const interact = (page: Page) => page.keyboard.press("Shift");
+
 /** Fires a fake `beforeinstallprompt` whose prompt() records that it was called. */
 async function fireInstallEvent(page: Page, outcome: "accepted" | "dismissed" = "accepted") {
   await page.evaluate((choice) => {
@@ -80,12 +83,16 @@ test.describe("install prompt (decision 90)", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/customer$/);
     const card = page.getByTestId("install-prompt");
+    await page.waitForTimeout(1000);
+    await expect(card).toHaveCount(0); // not before the user's first tap or key press
+    await interact(page);
     await expect(card.getByRole("heading", { name: "Install RentDesk on this phone" })).toBeVisible();
     await card.getByRole("button", { name: "Not now", exact: true }).click();
     await expect(card).toHaveCount(0);
 
     await page.reload();
     await fireInstallEvent(page);
+    await interact(page);
     await page.waitForTimeout(2000);
     await expect(page.getByTestId("install-prompt")).toHaveCount(0);
   });
@@ -93,6 +100,7 @@ test.describe("install prompt (decision 90)", () => {
   test("Install opens the browser's dialog and the card goes away", async ({ page }) => {
     await signInCached(page, DEMO.ownerLanka, "/owner");
     await fireInstallEvent(page, "accepted");
+    await interact(page);
     const card = page.getByTestId("install-prompt");
     await card.getByRole("button", { name: "Install" }).click();
     await expect(card).toHaveCount(0);
@@ -104,12 +112,14 @@ test.describe("install prompt (decision 90)", () => {
     const context = await browser.newContext({ userAgent: IPHONE_UA, viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
     await signInCached(page, DEMO.custPerera, "/customer");
+    await interact(page);
     const card = page.getByTestId("install-prompt");
     await expect(card.getByText("Add to Home Screen")).toBeVisible();
     await expect(card.getByText(/tap the Share button/)).toBeVisible();
     await card.getByRole("button", { name: "Got it" }).click();
     await expect(card).toHaveCount(0);
     await page.reload();
+    await interact(page);
     await page.waitForTimeout(2500);
     await expect(page.getByTestId("install-prompt")).toHaveCount(0);
     await context.close();

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { ClearOnLogin } from "@/components/pwa/clear-on-login";
@@ -21,10 +20,8 @@ export default function LoginPage() {
           <CardDescription>Use the username and password you were given.</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* The form reads ?next= and ?reason= from the URL. */}
-          <Suspense fallback={<div className="h-64" />}>
-            <LoginForm />
-          </Suspense>
+          {/* Static: ?next= is read when the form is sent, ?reason= by its own Suspense inside. */}
+          <LoginForm />
         </CardContent>
       </Card>
     </AppShell>

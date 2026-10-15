@@ -62,11 +62,24 @@ function isStandalone(): boolean {
 
 /**
  * "Install RentDesk" card above the bottom bar (decision 90). Rendered only by the
- * portal shell, so it never appears on /login before sign-in.
+ * portal shell, so it never appears on /login before sign-in. It appears after the
+ * user's first tap or key press: the page's own content comes first, and the card is
+ * never the page's largest paint (LCP, task 12).
  */
 export function InstallPrompt({ withBottomBar }: { withBottomBar: "always" | "mobile" }) {
   const [platform, setPlatform] = useState<InstallPlatform | null>(null);
   const [promptEvent, setPromptEvent] = useState<PromptEvent | null>(null);
+  const [interacted, setInteracted] = useState(false);
+
+  useEffect(() => {
+    const done = () => setInteracted(true);
+    window.addEventListener("pointerdown", done, { once: true, passive: true });
+    window.addEventListener("keydown", done, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", done);
+      window.removeEventListener("keydown", done);
+    };
+  }, []);
 
   useEffect(() => {
     const decide = (event: PromptEvent | null) =>
@@ -92,7 +105,7 @@ export function InstallPrompt({ withBottomBar }: { withBottomBar: "always" | "mo
     };
   }, []);
 
-  if (!platform) return null;
+  if (!platform || !interacted) return null;
 
   const dismiss = () => {
     store("dismissed");

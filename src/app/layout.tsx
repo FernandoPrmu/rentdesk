@@ -19,6 +19,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const ZOD_JITLESS = "(globalThis.__zod_globalConfig ??= {}).jitless = true;";
+
 export const metadata: Metadata = {
   title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
   description: "Photocopy machine rental management.",
@@ -37,6 +39,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+      <head>
+        {/* Before any chunk loads: Zod 4 builds object schemas without `new Function` in the
+            browser. Its feature probe is otherwise reported as a CSP violation (decision 87).
+            Zod reads this global when it loads, so no page pays for Zod unless it uses it. */}
+        <script dangerouslySetInnerHTML={{ __html: ZOD_JITLESS }} />
+      </head>
       <body className="flex min-h-full flex-col">
         <SerwistProvider>{children}</SerwistProvider>
         <UpdateBanner />

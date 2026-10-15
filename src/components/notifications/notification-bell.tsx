@@ -8,6 +8,9 @@ import type { createClient } from "@/lib/supabase/client";
 
 type Client = ReturnType<typeof createClient>;
 
+/** The user's own changes (read one, mark all) tell the bell at once, without waiting for Realtime. */
+export const BELL_REFRESH_EVENT = "rentdesk:bell-refresh";
+
 /** supabase-js (Realtime + Auth, about 60 KB compressed) loads after the page has painted (task 12). */
 const loadClient = () => import("@/lib/supabase/client").then((m) => m.createClient());
 
@@ -88,11 +91,13 @@ export function NotificationBell({ userId, initialCount, href }: { userId: strin
     }
     const onFocus = () => void recount();
     window.addEventListener("focus", onFocus);
+    window.addEventListener(BELL_REFRESH_EVENT, soon);
     return () => {
       cancelled = true;
       cancelIdle();
       if (pending) clearTimeout(pending);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener(BELL_REFRESH_EVENT, soon);
       if (channel && client) void client.removeChannel(channel);
     };
   }, [userId, recount]);

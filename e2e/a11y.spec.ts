@@ -2,7 +2,8 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 
 import { signInCached } from "./support/auth";
-import { DEMO } from "./support/demo";
+import { assignMachine, createMachine, openFirstCycle } from "./support/billing";
+import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 
 // Accessibility at 360 px (spec 13 usability; task 12): axe-core on the main pages of
 // each portal, WCAG 2.1 A and AA rules. Serious and critical findings fail the test;
@@ -47,13 +48,25 @@ test("customer portal: Home, bills, a bill, pay, service, machines, help", async
   }
 });
 
-test("customer meter entry page", async ({ page }) => {
-  await signInCached(page, DEMO.custSilva, "/customer");
-  const meter = page.locator('a[href*="/meter"]').first();
-  test.skip((await meter.count()) === 0, "no meter task open for this customer today");
-  await meter.click();
-  await expect(page).toHaveURL(/\/meter$/);
-  await audit(page, "/customer/tickets/[id]/meter");
+test.describe("customer meter entry page", () => {
+  const serial = `${E2E_SERIAL_PREFIX}A11Y-${Date.now().toString(36).toUpperCase()}`;
+  let ticketId = "";
+
+  test.beforeAll(async () => {
+    const owner = await profileId(DEMO.ownerLanka.username);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
+    const agreementId = await assignMachine(owner, await createMachine(owner, serial, "A11Y 100"), await profileId(DEMO.custSilva.username), today);
+    ticketId = await openFirstCycle(agreementId);
+  });
+
+  test.afterAll(async () => {
+    await deleteE2eMachines(serial);
+  });
+
+  test("its own machine's open cycle", async ({ page }) => {
+    await signInCached(page, DEMO.custSilva, "/customer");
+    await check(page, `/customer/tickets/${ticketId}/meter`);
+  });
 });
 
 test("owner portal: Home, tickets, review, customers, machines, invoices, reports", async ({ page }) => {
@@ -95,7 +108,8 @@ test("keyboard only: skip to content, then sign in with Tab and Enter", async ({
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/customer$/);
 
-  // In the portal the skip link comes first too, and the main navigation is reachable by name.
+  // In the portal (a fresh page load) the skip link comes first too, and the main navigation is reachable by name.
+  await page.goto("/customer");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
   await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Bills" }).last()).toBeVisible();

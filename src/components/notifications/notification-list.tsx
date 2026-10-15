@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { loadMoreNotifications, markAllNotificationsRead, markNotificationRead } from "@/app/actions/notifications";
 import { useHydrated } from "@/components/forms/use-hydrated";
+import { BELL_REFRESH_EVENT } from "@/components/notifications/notification-bell";
 import { Button } from "@/components/ui/button";
 import { unreachable } from "@/lib/actions/client-errors";
 import { formatDateTime } from "@/lib/format";
@@ -32,6 +33,7 @@ export function NotificationList({ initial, more: initialMore }: { initial: Cent
         setItems((all) => all.map((i) => (i.id === item.id ? { ...i, readAt: new Date().toISOString() } : i)));
         try {
           await markNotificationRead(item.id);
+          window.dispatchEvent(new Event(BELL_REFRESH_EVENT));
         } catch {
           // Still open the page; it stays unread on the server and the bell shows it.
         }
@@ -46,6 +48,7 @@ export function NotificationList({ initial, more: initialMore }: { initial: Cent
         if (!result.ok) return void toast.error(result.error);
         const now = new Date().toISOString();
         setItems((all) => all.map((i) => (i.readAt ? i : { ...i, readAt: now })));
+        window.dispatchEvent(new Event(BELL_REFRESH_EVENT));
         toast.success("All marked as read");
       } catch {
         toast.error(unreachable("safe"));

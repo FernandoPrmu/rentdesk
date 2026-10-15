@@ -28,7 +28,7 @@
     "cron:run": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cron-run.ts",
     "check:bundle": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-bundle-secrets.ts",
     "golive:wipe": "node --env-file=.env.admin.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/go-live-wipe.ts",
-    "golive:admin": "node --env-file=.env.admin.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/create-admin.ts"
+    "golive:admin": "node --conditions=react-server --env-file=.env.admin.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/create-admin.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

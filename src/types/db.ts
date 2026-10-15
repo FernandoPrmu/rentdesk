@@ -2446,6 +2446,7 @@ export type Database = {
       payment_slips: {
         Row: {
           created_at: string
+          file_deleted_at: string | null
           id: string
           mime_type: string
           original_sha256: string | null
@@ -2460,6 +2461,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          file_deleted_at?: string | null
           id?: string
           mime_type: string
           original_sha256?: string | null
@@ -2474,6 +2476,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          file_deleted_at?: string | null
           id?: string
           mime_type?: string
           original_sha256?: string | null
@@ -3966,6 +3969,10 @@ export type Database = {
         Args: { p_limit: number; p_now: string }
         Returns: Json
       }
+      rpc_cron_expired_slips: {
+        Args: { p_limit: number; p_now: string }
+        Returns: Json
+      }
       rpc_cron_finish_run: {
         Args: {
           p_counts: Json
@@ -4086,6 +4093,10 @@ export type Database = {
       }
       rpc_mark_receipt_pdf_failed: {
         Args: { p_error: string; p_receipt_id: string }
+        Returns: number
+      }
+      rpc_mark_slips_deleted: {
+        Args: { p_ids: Json; p_now: string }
         Returns: number
       }
       rpc_mark_ticket_overdue: {

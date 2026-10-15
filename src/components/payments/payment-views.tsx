@@ -2,6 +2,7 @@ import { ChevronRight, Download, FileClock, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { formatInvoiceMoney } from "@/lib/invoices/pdf/format";
 import { duplicateText } from "@/lib/payments/duplicates";
@@ -214,5 +215,22 @@ export function DuplicateNotice({ reasons, earlier }: { reasons: string[]; earli
       )}
       <p className="mt-1 text-muted-foreground">Check it against your bank statement before accepting.</p>
     </div>
+  );
+}
+
+/** The slip when its file is gone (retention, decision 91) or its link could not be made just now (decision 47). */
+export function SlipFileNotice({ deletedAt, unavailable, title }: { deletedAt: string | null; unavailable: boolean; title: string }) {
+  if (!deletedAt && !unavailable) return null;
+  return (
+    <Card data-testid="slip-file-notice">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm text-muted-foreground">
+        {deletedAt
+          ? `The slip file was deleted on ${formatDateTime(deletedAt)} because its keeping period ended. The payment, its amount and reference are kept.`
+          : "The slip could not be loaded just now. Reload the page to see it."}
+      </CardContent>
+    </Card>
   );
 }

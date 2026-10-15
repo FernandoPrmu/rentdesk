@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PhotoViewer } from "@/components/meter/photo-viewer";
-import { AllocationList, PaymentStatusBadge, paymentAmount, ReceiptButton } from "@/components/payments/payment-views";
+import { AllocationList, paymentAmount, PaymentStatusBadge, ReceiptButton, SlipFileNotice } from "@/components/payments/payment-views";
 import { BackLink } from "@/components/portal/back-link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,6 +96,7 @@ export default async function CustomerPaymentPage({ params, searchParams }: Page
           <AllocationList payment={p} hrefBase="/customer/bills" />
         </CardContent>
       </Card>
+      <SlipFileNotice deletedAt={p.slipDeletedAt} unavailable={p.slipUnavailable} title="Your slip" />
       {p.slipUrl && (
         <Card>
           <CardHeader>

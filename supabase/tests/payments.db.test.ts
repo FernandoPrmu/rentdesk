@@ -512,6 +512,45 @@ describe.skipIf(!DB_URL)("payments (linked dev database, rolled back)", () => {
       });
     });
 
+    it("slip files are deleted after the retention period; the row, its hash and an audit entry stay (decision 91)", async () => {
+      await isolated(db, async () => {
+        const slipId = (await one<{ id: string }>("select id from public.payment_slips where storage_path = $1", [slipPath(f)])).id;
+        const expired = async () => (await call<{ id: string; storage_path: string }[]>("app.cron_expired_slips(now(), 500)")).map((s) => s.id);
+        const age = (days: number) => db.query("update public.payment_slips set uploaded_at = now() - make_interval(days => $2) where id = $1", [slipId, days]);
+
+        // Platform default 2,555 days (7 years), counted on the Colombo calendar from the upload day.
+        expect((await one<{ d: number }>("select payment_slip_retention_days as d from public.owner_settings_effective where owner_id = $1", [f.ownerA])).d).toBe(2555);
+        await age(2555);
+        expect(await expired()).not.toContain(slipId); // its payment still waits for the owner's check
+        await verify(f.payments.a2Mono, false, null, "Wrong amount");
+        expect(await expired()).toContain(slipId);
+        await age(2554);
+        expect(await expired()).not.toContain(slipId);
+
+        // The setting in force on the day decides: an owner override (or an admin change) applies to old slips too.
+        await db.query("update public.owner_settings set payment_slip_retention_days = 30 where owner_id = $1", [f.ownerA]);
+        await age(31);
+        expect(await expired()).toContain(slipId);
+
+        await asService(db);
+        expect(await call<number>("public.rpc_mark_slips_deleted($1::jsonb, now())", [JSON.stringify([slipId])])).toBe(1);
+        expect(await call<number>("public.rpc_mark_slips_deleted($1::jsonb, now())", [JSON.stringify([slipId])])).toBe(0);
+        await asPostgres(db);
+        const row = await one<{ deleted: boolean; sha256: string; path: string }>(
+          "select file_deleted_at is not null as deleted, sha256, storage_path as path from public.payment_slips where id = $1",
+          [slipId],
+        );
+        expect(row).toMatchObject({ deleted: true, path: slipPath(f) });
+        expect(row.sha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(await expired()).not.toContain(slipId);
+        expect(
+          await one("select actor_id, owner_id, details ->> 'retention_days' as days from public.audit_logs where action = 'PAYMENT_SLIP_FILE_DELETED' and entity_id = $1", [slipId]),
+        ).toEqual({ actor_id: null, owner_id: f.ownerA, days: "30" });
+        // Duplicate detection keeps working on the stored fingerprint (decision 40).
+        expect(await count(db, "select 1 from public.payment_slips where owner_id = $1 and sha256 = $2", [f.ownerA, row.sha256])).toBeGreaterThan(0);
+      });
+    });
+
     it("slips, allocations, receipts and refunds: own customer and own tenant only", async () => {
       await isolated(db, async () => {
         const { paymentId } = await a2Paid(RS(7_000));

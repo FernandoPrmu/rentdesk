@@ -370,9 +370,13 @@ export interface PaymentDetail extends PaymentRow {
   reject_reason: string | null;
   reverse_reason: string | null;
   reversed_at: string | null;
-  slips: { storage_path: string; mime_type: string; size_bytes: number }[];
+  slips: { storage_path: string; mime_type: string; size_bytes: number; file_deleted_at: string | null }[];
   /** A 5-minute link to the slip (signed with the viewer's own client: storage RLS decides). */
   slipUrl: string | null;
+  /** When the slip file was deleted after the retention period (decision 91); the payment record stays. */
+  slipDeletedAt: string | null;
+  /** The slip exists but its link could not be made just now (never shown as "no slip", decision 47). */
+  slipUnavailable: boolean;
   slipMime: string | null;
   duplicateOf: { id: string; submitted_at: string; status: string; amount_cents: number; reference: string | null; customer: string } | null;
   receiptVersions: { version: number; reason: string; created_at: string }[];
@@ -383,7 +387,7 @@ export async function getPaymentDetail(client: Admin, id: string): Promise<Payme
   const { data, error } = await client
     .from("payments")
     .select(
-      `${PAYMENT_COLUMNS}, note, reject_reason, reverse_reason, reversed_at, slips:payment_slips!payment_slips_payment_fkey(storage_path, mime_type, size_bytes)`,
+      `${PAYMENT_COLUMNS}, note, reject_reason, reverse_reason, reversed_at, slips:payment_slips!payment_slips_payment_fkey(storage_path, mime_type, size_bytes, file_deleted_at)`,
     )
     .eq("id", id)
     .maybeSingle();
@@ -392,17 +396,19 @@ export async function getPaymentDetail(client: Admin, id: string): Promise<Payme
   const p = data as unknown as PaymentDetail;
   const slip = p.slips[0] ?? null;
   const [signed, dup, versions, credits] = await Promise.all([
-    slip ? client.storage.from(SLIP_BUCKET).createSignedUrl(slip.storage_path, 5 * 60) : null,
+    slip && !slip.file_deleted_at ? client.storage.from(SLIP_BUCKET).createSignedUrl(slip.storage_path, 5 * 60) : null,
     p.duplicate_of_payment_id
       ? client.from("payments").select("id, submitted_at, status, amount_cents, reference, customer:customers!payments_customer_fkey(name)").eq("id", p.duplicate_of_payment_id).maybeSingle()
       : null,
     p.receipts[0] ? client.from("receipt_pdf_versions").select("version, reason, created_at").eq("receipt_id", p.receipts[0].id).order("version", { ascending: false }) : null,
     client.from("credits").select("id, kind, status, amount_cents").eq("source_payment_id", id),
   ]);
-  const d = dup?.data as { id: string; submitted_at: string; status: string; amount_cents: number; reference: string | null; customer: { name: string } } | null | undefined;
+  const d = (dup ? must(dup, "duplicate payment") : null) as { id: string; submitted_at: string; status: string; amount_cents: number; reference: string | null; customer: { name: string } } | null | undefined;
   return {
     ...p,
     slipUrl: signed?.data?.signedUrl ?? null,
+    slipDeletedAt: slip?.file_deleted_at ?? null,
+    slipUnavailable: Boolean(signed && !signed.data?.signedUrl),
     slipMime: slip?.mime_type ?? null,
     duplicateOf: d ? { id: d.id, submitted_at: d.submitted_at, status: d.status, amount_cents: d.amount_cents, reference: d.reference, customer: d.customer.name } : null,
     receiptVersions: (versions ? must(versions, "receipt versions") : null) ?? [],

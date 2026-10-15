@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 
 import { signInCached } from "./support/auth";
-import { createMachine, issueFirstInvoice } from "./support/billing";
+import { assignMachine, createMachine, issueFirstInvoice } from "./support/billing";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 
 // Client decisions at 360 px: assign with a security deposit and an advance payment
@@ -13,9 +13,11 @@ test.describe.configure({ mode: "serial" });
 
 test.afterAll(async () => {
   await deleteE2eMachines(serial);
+  await deleteE2eMachines(laterSerial);
 });
 
 const serial = `${E2E_SERIAL_PREFIX}DEP-${Date.now().toString(36).toUpperCase()}`;
+const laterSerial = `${E2E_SERIAL_PREFIX}DPL-${Date.now().toString(36).toUpperCase()}`;
 let machineId = "";
 let agreementUrl = "";
 let firstInvoice = { invoiceNo: "", totalCents: 0 };
@@ -125,5 +127,48 @@ test.describe("deposits, advances and returning with a balance (DEP-01..04, RET-
     // Rs. 3,000 less Rs. 1,000 from the deposit.
     await expect(first).toContainText("Rs. 2,000");
     await expect(first).toContainText("Partially paid");
+  });
+});
+
+test.describe("a deposit kept at return and settled later (DEP-04)", () => {
+  let laterMachineId = "";
+  let laterAgreementId = "";
+
+  test.beforeAll(async () => {
+    const owner = await profileId(DEMO.ownerLanka.username);
+    laterMachineId = await createMachine(owner, laterSerial, "MP 2555");
+    laterAgreementId = await assignMachine(owner, laterMachineId, await profileId(DEMO.custSilva.username), today, today, false, {
+      upfront: [{ type: "SECURITY_DEPOSIT", amount_cents: 150_000, received_on: today, method: "CASH", reference: "DEP-LATER" }],
+    });
+  });
+
+  test("returned with 'keep holding it'; listed under Deposits to settle; then refunded from the agreement page", async ({ page }) => {
+    await signInOwner(page);
+    await page.goto(`/owner/machines/${laterMachineId}/return`);
+    await expect(page.getByTestId("return-deposit-held")).toHaveText("Rs. 1,500");
+    await page.getByLabel("Closing B&W reading").fill("1,050");
+    await page.getByLabel("Reason for the return").fill("Customer moved office");
+    await page.getByRole("radio", { name: /Keep holding it, settle later/ }).check();
+    await page.getByRole("button", { name: "Return machine" }).click();
+    await expect(page).toHaveURL(/\?returned=1$/);
+
+    // On the owner's Home and the customer's profile.
+    await page.goto("/owner");
+    const card = page.getByTestId("card-deposits");
+    await expect(card.getByRole("list", { name: "Deposits to settle" })).toContainText(laterSerial);
+    await page.goto(`/owner/customers/${await profileId(DEMO.custSilva.username)}`);
+    await expect(page.getByRole("list", { name: "Deposits to settle" }).filter({ visible: true })).toContainText(laterSerial);
+
+    // Settle later: nothing towards the bills, the whole deposit refunded in cash.
+    await page.goto(`/owner/agreements/${laterAgreementId}`);
+    await expect(page.getByTestId("agreement-deposit-held")).toHaveText("Rs. 1,500");
+    await page.getByLabel("Pay unpaid bills").fill("0");
+    await page.getByLabel("Refund to the customer").fill("1,500");
+    await choose(page, "Refunded by", "Cash");
+    await expect(page.getByTestId("deposit-total")).toContainText("Adds up to the deposit held: Rs. 1,500");
+    await page.getByRole("button", { name: "Settle deposit" }).click();
+    await expect(page.getByTestId("agreement-deposit-held")).toHaveText("Rs. 0");
+    await expect(page.getByRole("list", { name: "Deposit history" })).toContainText("Refunded");
+    await expect(page.getByRole("heading", { name: "Settle deposit" })).toHaveCount(0);
   });
 });

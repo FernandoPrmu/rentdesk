@@ -76,3 +76,28 @@ export async function getMachineType(id: string) {
   if (error) throw new Error(`machine type: ${error.message}`);
   return data?.type ?? null;
 }
+
+/**
+ * MAC-05: the machine's confirmed meter readings, newest first (24 cycles), across
+ * every rental. RLS: the owner's own tenant only. Values never change after confirm
+ * (INV-10); a corrected value shows what was typed first.
+ */
+export async function listMachineMeterHistory(machineId: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("meter_submissions")
+    .select(
+      `id, source, reviewed_at,
+       ticket:billing_cycle_tickets!meter_submissions_ticket_fkey!inner(id, cycle_no, period_start, period_end, machine_id,
+         customer:customers!billing_cycle_tickets_customer_fkey(name)),
+       readings:meter_readings!meter_readings_submission_fkey(counter_type, previous_value, current_value, corrected_from_value, rolled_over)`,
+    )
+    .eq("status", "CONFIRMED")
+    .eq("ticket.machine_id", machineId)
+    .order("reviewed_at", { ascending: false })
+    .limit(24);
+  if (error) throw new Error(`meter history: ${error.message}`);
+  return data;
+}
+
+export type MeterHistoryRow = Awaited<ReturnType<typeof listMachineMeterHistory>>[number];

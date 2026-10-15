@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { setMachineStatusAction } from "@/app/(owner)/owner/machines/actions";
 import { Facts } from "@/components/agreements/agreement-display";
 import { MachineStatusBadge, MachineTypeBadge } from "@/components/machines/machine-badges";
+import { MeterHistory } from "@/components/machines/meter-history";
 import { MachineStatusButton } from "@/components/machines/machine-status-dialog";
 import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
@@ -17,7 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatCount, formatDate } from "@/lib/format";
-import { getMachine } from "@/lib/machines/queries";
+import { getMachine, listMachineMeterHistory } from "@/lib/machines/queries";
 import { formatRupees } from "@/lib/money";
 import { listMachineRequests, machineServiceCost } from "@/lib/service/queries";
 import { ACTIVE_STATUSES } from "@/lib/service/states";
@@ -34,7 +35,7 @@ export default async function MachineDetailPage({ params, searchParams }: PagePr
   // RLS: another owner's machine is simply "not found".
   const machine = await getMachine(id);
   if (!machine) notFound();
-  const [{ returned }, service] = await Promise.all([searchParams, listMachineRequests(id)]);
+  const [{ returned }, service, meterHistory] = await Promise.all([searchParams, listMachineRequests(id), listMachineMeterHistory(id)]);
   const serviceCost = await machineServiceCost(id);
   const current = machine.current;
   const past = machine.agreements.filter((a) => a.status === "TERMINATED");
@@ -172,9 +173,10 @@ export default async function MachineDetailPage({ params, searchParams }: PagePr
       <Card>
         <CardHeader>
           <CardTitle>Meter history</CardTitle>
+          <CardDescription>Confirmed readings per billing cycle, newest first (the last 24).</CardDescription>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          Confirmed meter readings per cycle will be listed here once billing cycles are in use.
+        <CardContent>
+          <MeterHistory rows={meterHistory} />
         </CardContent>
       </Card>
     </div>

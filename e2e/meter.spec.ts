@@ -22,11 +22,13 @@ const serial = `${E2E_SERIAL_PREFIX}MTR-${Date.now().toString(36).toUpperCase()}
 const MODEL = "MP 3055";
 const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
 let ticketId = "";
+let machineId = "";
 
 test.beforeAll(async () => {
   const owner = await profileId(DEMO.ownerLanka.username);
   const customer = await profileId(DEMO.custPerera.username);
-  const agreementId = await assignMachine(owner, await createMachine(owner, serial, MODEL), customer, today);
+  machineId = await createMachine(owner, serial, MODEL);
+  const agreementId = await assignMachine(owner, machineId, customer, today);
   ticketId = await openFirstCycle(agreementId);
 });
 
@@ -121,6 +123,13 @@ test.describe("meter reading with the live camera, and the owner's review", () =
     await expect(page.getByTestId("review-total")).toHaveText("Rs. 6,250");
     await page.getByRole("button", { name: "Confirm invoice" }).click();
     await expect(page.getByText(/^Invoice INV-\d+ sent to the customer$/)).toBeVisible();
+
+    // MAC-05: the confirmed reading is in the machine's meter history, linking to its ticket.
+    await page.goto(`/owner/machines/${machineId}`);
+    const history = page.getByTestId("meter-history");
+    await expect(history).toContainText("Cycle 1");
+    await expect(history).toContainText("Customer's photo");
+    await expect(history.getByRole("link")).toHaveAttribute("href", `/owner/tickets/${ticketId}`);
 
     await signIn(page, "customer");
     await page.goto(`/customer/tickets/${ticketId}`);

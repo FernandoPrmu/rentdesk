@@ -33,6 +33,7 @@ import { formatRupees } from "@/lib/money";
 import { listCustomerCredits, listPayments } from "@/lib/payments/service";
 import { listCustomerServiceHistory } from "@/lib/service/queries";
 import { ACTIVE_STATUSES } from "@/lib/service/states";
+import { getAgreementNoticeDays } from "@/lib/settings/service";
 import { createClient } from "@/lib/supabase/server";
 
 import { refundCreditAction } from "../../payments/actions";
@@ -50,7 +51,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
   const customer = await getCustomer(id);
   if (!customer) notFound();
 
-  const [agreements, balances, billing, toSettle, payments, credits, service] = await Promise.all([
+  const [agreements, balances, billing, toSettle, payments, credits, service, noticeDays] = await Promise.all([
     listCustomerAgreements(id),
     getCustomerBalances(id),
     getCustomerBilling(id),
@@ -58,6 +59,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
     listPayments(await createClient(), { customerId: id, limit: 20 }),
     listCustomerCredits(owner, id),
     listCustomerServiceHistory(id),
+    getAgreementNoticeDays(owner.id),
   ]);
   const deposits = await getDepositsHeld(agreements.map((a) => a.id));
   const inService = new Set(service.rows.filter((r) => ACTIVE_STATUSES.includes(r.status)).map((r) => r.machine.id));
@@ -115,7 +117,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          <AgreementCards agreements={live} today={today} linkBase="/owner/agreements" deposits={deposits} inService={inService} empty="No machines rented at the moment." />
+          <AgreementCards agreements={live} today={today} noticeDays={noticeDays} linkBase="/owner/agreements" deposits={deposits} inService={inService} empty="No machines rented at the moment." />
           {past.length > 0 && (
             <details className="text-sm">
               <summary className="cursor-pointer py-2 font-medium">Earlier rentals ({past.length})</summary>

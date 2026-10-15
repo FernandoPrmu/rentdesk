@@ -3,6 +3,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { signInCached } from "./support/auth";
 import { assignMachine, createMachine, submitFirstReading } from "./support/billing";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
+import { openFromMore } from "./support/nav";
 
 // One machine goes through its whole life at 360 px: register, assign to a seed
 // customer, seen by that customer, price change from the next cycle, return. A
@@ -48,7 +49,7 @@ const signInOwner = (page: Page) => signInCached(page, DEMO.ownerLanka, "/owner"
 test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
   test("owner registers a machine", async ({ page }) => {
     await signInOwner(page);
-    await page.getByRole("link", { name: "Machines" }).first().click();
+    await openFromMore(page, "Machines");
     await page.getByRole("link", { name: "New machine" }).click();
 
     await page.getByRole("button", { name: "Register machine" }).click();
@@ -174,7 +175,7 @@ test.describe("machines and agreements (MAC-01..04, AGR-01..02)", () => {
     await expect(page.getByRole("list", { name: "Machines" }).getByRole("link")).toHaveCount(1);
 
     // Same page without filters: the form shows the new (empty) values.
-    await page.getByRole("link", { name: "Machines", exact: true }).first().click();
+    await openFromMore(page, "Machines");
     await expect(page).toHaveURL(/\/owner\/machines$/);
     await expect(page.getByLabel("Search")).toHaveValue("");
     await expect(page.getByRole("combobox", { name: "Status", exact: true })).toContainText("All statuses");

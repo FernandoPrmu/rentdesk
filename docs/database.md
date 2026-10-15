@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0033`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0039`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -30,8 +30,8 @@ and workflow functions. It is **not** exposed through the Data API.
 | | `owner_company_profiles` | Branding (spec 17): company, logo, bank details, letterhead + layout, payment instructions, `onboarding_completed_at`. Server-write-only since 0022 |
 | | `customers` | Customer details (status lives in `profiles`) |
 | | `subscription_plans` | Optional plans (ADM-07) |
-| Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee, login lockout and session timeout |
-| | `owner_settings` | Per-owner overrides (null = inherit); view `owner_settings_effective` merges them |
+| Settings | `platform_settings` | Global defaults (single row): stage deadlines, reminders, grace period, late fee, service escalation, disputes, agreement end notice, login lockout and session timeout, email limits. Written only through `update_platform_settings` (0034) |
+| | `owner_settings` | Per-owner overrides (null = inherit); view `owner_settings_effective` merges them. Written only through `update_owner_settings` (0034) |
 | Fleet | `machines` | Brand, model, serial, `MONO`/`COLOUR`, status, counter maximum (rollover) |
 | | `rental_agreements` | Current terms, installation, initial/closing readings, `first_billing_date`, cycle calendar (`next_cycle_no/date`), `billing_day` (the first billing date's day of the month; cycles are monthly), late fee setting, return idempotency key |
 | | `agreement_terms_history` | Every version of the pricing terms (commitment, included copies, rates, due days, late fee setting), who changed it, when, and the cycle it applies from. Append-only |
@@ -487,6 +487,79 @@ app's own per-account and per-IP limits above protect logins instead.
   writes), the bill's PDF (wait, then attach), owner suspension told to customers, bounces and direct sends, RLS on
   deliveries, the log view and preferences. The sender runs with a fake transport: nothing is sent.
 
+## Dashboards, reports, settings and the support view (migrations 0034–0039)
+
+- **Report functions (RPT-01..08, CP-01, ADM-04).** `public.report_*` are **security invoker** and **stable**, granted
+  to `authenticated` (never `anon`): RLS decides what they read and they cannot write. They are the only public functions
+  signed-in users may call (`rls.db.test.ts` checks the list, and that each is invoker and stable). Owner reports take
+  `p_owner_id` and, since 0035, answer only when `app.report_allowed(p_owner_id)` (that owner, or an admin): a customer
+  calling one directly with their owner's id gets null instead of totals of their own rows. Since 0036 the guard is a
+  scalar subquery (`(select app.report_allowed(...))`, an InitPlan run once per call): as a plain call in the row
+  helpers' `where` it ran per row and read `profiles` each time, and under the full e2e load the dashboards averaged over
+  a second (`pg_stat_statements`) and hit the 8 s statement timeout; the owner dashboard went from 63 ms to 40 ms server
+  time on its own. 0037 makes the owner dashboard read each row helper once (a window from last month, two months for
+  the top machines) instead of six times: the same figures (checked for every owner on three dates), about 45 % less
+  work. **0038**: the owner and customer dashboards are PL/pgSQL (the statement is prepared once per connection; a SQL
+  function with a SET clause was re-planned on every call, 4.4 ms) and read each table once into CTEs; same results for
+  every owner and customer; 27.8 → 17.4 ms and 11.0 → 7.8 ms server time. EXPLAIN (ANALYZE, BUFFERS) showed no scan
+  problem: the dev data is small (all tables under 100 rows except `audit_logs`, 21k) and each RLS table reference costs
+  about 1 ms of policy evaluation, so the work was per reference and per call. The server caches dashboards per tenant
+  (decision 84) and pages stream them with a 4 s limit and a retry. **0039**: an A/B under the full e2e load (dashboards
+  on: 490 s of database time, 22 statement timeouts; off: 97 s, none) showed they still tipped the free tier over, so
+  `report_owner_dashboard` and `report_customer_dashboard` are now **security definer** with the policies' rules made
+  explicit: the owner dashboard answers only `app.report_allowed(owner)` (that owner, active, or an admin; the helpers
+  read the caller's JWT inside a definer function too) and filters `owner_id` on every table and helper; the customer
+  summary uses `app.current_customer_id()` (null for a suspended customer or a customer of a suspended owner), filters
+  `customer_id` everywhere and never shows DRAFT or REJECTED bills, as the invoices policy did. 17.6 → 5.0 ms and
+  7.7 → 0.5 ms, the same results (checked for every owner and customer). These two are the only definer report
+  functions; `reports.db.test.ts` checks that, and their isolation (other owner, customer, suspended owner, suspended
+  customer, customers of a suspended owner, anon).
+
+  | Function | Returns |
+  | --- | --- |
+  | `report_owner_dashboard(owner, today)` | every Home card in one call (income this month vs last month and the same day last month, outstanding/overdue, readings and slips to review, tickets by stage, service by urgency/type with the top 5, deposits to settle, machines by status, rating, agreements ending, top machines, recent payments) |
+  | `report_income(owner, from, to)` | per month: commitment, excess, other charges, discounts, bills; payments, advances, deposit kept, refunds (decision 77) |
+  | `report_machines(owner, from, to)` | per machine: revenue (net of discounts), commitment, B&W / colour excess, copies from the stored engine calculation, service and toner cost, requests (decision 79) |
+  | `report_customers(owner, from, to)` | per customer: invoiced, collected, outstanding and overdue now, credit, bills paid and paid on time, average days to pay (decision 80) |
+  | `report_service_demand(owner, from, to)` | counts by type, urgency, month, machine, customer and toner colour; hours to acknowledge / resolve; rating; the last 6 toner request dates per machine (forecast input) |
+  | `report_usage(owner, from, to)` | copies per month (bill period end) per machine and customer, normal bills only |
+  | `report_rental(owner, today)` | machines by status, live agreements with end dates and days left, the owner's notice days |
+  | `report_cycle_status(owner, from, to)` | tickets by stage, average hours per stage (from `ticket_events`), late, overdue, late readings, reminders, escalations |
+  | `report_ageing_invoices(owner)` | unpaid issued bills (bucketed in TS, `payments/ageing.ts`) |
+  | `report_customer_dashboard()` | the signed-in customer's balance, credit, machines with next cycle date, latest bill, recent payments, open requests |
+  | `report_admin_dashboard(today, now)` / `report_admin_activity(from, to)` | admins only (null for anyone else): platform counts, email usage vs limits (UTC day / month), daily-job health; counts over time, owner activity, delivery statistics |
+
+  Row helpers under them: `app.report_invoice_lines` (issued, not cancelled bills by Colombo issue date, each line classed
+  COMMITMENT / EXCESS / OTHER / DISCOUNT / PAID_CREDIT) and `app.report_collected` (payments, advances, deposit kept,
+  refunds), both invoker and guarded. `app.report_service_costs` is the one **security definer** helper: it reads
+  `service_requests.cost_cents` (hidden from clients, decision 64) after checking the caller is that owner or an admin.
+- **Indexes.** `invoices (owner_id, issued_at)` and `(owner_id, period_end)` for issued bills, `payments (owner_id, paid_on)`
+  for accepted ones, `service_requests (owner_id, resolved_at)`, `billing_cycle_tickets (owner_id, cycle_date)`,
+  `credit_refunds (owner_id, refunded_on)`, `deposit_transactions (owner_id, kind, occurred_on)`, `audit_logs (action, created_at)`,
+  `notification_deliveries (channel, created_at)`, `notifications (owner_id, data->>'dedupe_key')` and
+  `rental_agreements (end_date)` for live agreements.
+- **Settings (ADM-06, decision 82).** Client insert/update grants on `platform_settings` and `owner_settings` are revoked:
+  the only writes are `app.update_platform_settings(admin, changes)` and `app.update_owner_settings(owner, changes)`
+  (service-role `rpc_*` wrappers). Both check the actor's role, refuse unknown keys (`app.platform_setting_keys`,
+  `app.owner_setting_keys`), and run `app.settings_problems` on the complete result (an owner's overrides over the current
+  platform defaults); the problems come back as `RD400 "key: message; ..."`. The row's audit trigger records old → new
+  with the actor. An owner's `null` means "platform default". New setting `agreement_end_notice_days` (1-180, default 30) on
+  both tables and in `owner_settings_effective` (replaced in place, so its grants stay).
+- **Support view (ADM-08, decision 81).** `app.log_support_view(admin, owner, path, reason)` writes a `SUPPORT_VIEW` audit
+  row (actor, owner, entity `owners`, `{path, reason}`); only an active admin, only an owner, only `/admin/owners/...` paths.
+  The support pages read with the admin's own client (RLS: admins read every tenant; no admin write policies), and every
+  workflow function checks that the actor is the owner.
+- **Agreement end reminders (AGR-03, decision 86).** Event `agreement.ending` (owner, ESSENTIAL, email).
+  `app.cron_ending_agreements(today)` lists live agreements of active owners whose end date is within the owner's notice
+  and that were not reminded for that end date (`notifications.data.dedupe_key = 'agreement-ending:<id>:<end date>'`);
+  the daily job sends through `rpc_notify_once` with that key.
+- **Tests.** `reports.db.test.ts`: every report as owner A, owner B, a customer, an admin and anon; known totals (income
+  with payments, advances, a kept deposit and a refund; machines with copies and service cost; customers' payment
+  behaviour; the dashboard before and after); the support log and its refusals; an admin's writes refused (tables and
+  workflow functions); settings SQL rules = TS rules, audit old → new, owner override, reset and refusals, no direct
+  writes; agreement end reminders once per end date with an essential email, a new end date, another owner's notice,
+  suspended owners skipped.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -512,6 +585,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
   - `DB_TEST_APPLY_MIGRATIONS=1` also applies not-yet-pushed migrations inside the test transaction
     first.
 - `notifications.db.test.ts`: the email outbox and sender (see above).
+- `reports.db.test.ts`: report functions, settings, the support view and agreement end reminders (see above).
+  `rls.db.test.ts` gives its wrapper-privilege test 6 minutes: about 700 refused calls take over 2 minutes on the free tier.
 - `payments.db.test.ts`: every payment flow, SQL split = TypeScript split, duplicates, receipts gap-free and under concurrency (committed
   fixture, skipped with `DB_TEST_APPLY_MIGRATIONS=1`), orphan slips, RLS on slips, allocations, receipts and refunds.
 - `npm run db:seed` (`scripts/seed.ts`) creates demo accounts, machines, agreements and tickets in

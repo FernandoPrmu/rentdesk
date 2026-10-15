@@ -2192,6 +2192,7 @@ export type Database = {
       }
       owner_settings: {
         Row: {
+          agreement_end_notice_days: number | null
           created_at: string
           estimated_billing_enabled: boolean | null
           grace_period_days: number | null
@@ -2221,6 +2222,7 @@ export type Database = {
           weekly_summary_dow: number | null
         }
         Insert: {
+          agreement_end_notice_days?: number | null
           created_at?: string
           estimated_billing_enabled?: boolean | null
           grace_period_days?: number | null
@@ -2250,6 +2252,7 @@ export type Database = {
           weekly_summary_dow?: number | null
         }
         Update: {
+          agreement_end_notice_days?: number | null
           created_at?: string
           estimated_billing_enabled?: boolean | null
           grace_period_days?: number | null
@@ -2650,6 +2653,7 @@ export type Database = {
       }
       platform_settings: {
         Row: {
+          agreement_end_notice_days: number
           dispute_escalation_days: number
           dispute_reminder_days: number[]
           email_daily_limit: number
@@ -2693,6 +2697,7 @@ export type Database = {
           whatsapp_enabled: boolean
         }
         Insert: {
+          agreement_end_notice_days?: number
           dispute_escalation_days?: number
           dispute_reminder_days?: number[]
           email_daily_limit?: number
@@ -2736,6 +2741,7 @@ export type Database = {
           whatsapp_enabled?: boolean
         }
         Update: {
+          agreement_end_notice_days?: number
           dispute_escalation_days?: number
           dispute_reminder_days?: number[]
           email_daily_limit?: number
@@ -3724,6 +3730,7 @@ export type Database = {
       }
       owner_settings_effective: {
         Row: {
+          agreement_end_notice_days: number | null
           dispute_escalation_days: number | null
           dispute_reminder_days: number[] | null
           estimated_billing_enabled: boolean | null
@@ -3765,6 +3772,48 @@ export type Database = {
     }
     Functions: {
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      report_admin_activity: {
+        Args: { p_from: string; p_to: string }
+        Returns: Json
+      }
+      report_admin_dashboard: {
+        Args: { p_now: string; p_today: string }
+        Returns: Json
+      }
+      report_ageing_invoices: { Args: { p_owner_id: string }; Returns: Json }
+      report_customer_dashboard: { Args: never; Returns: Json }
+      report_customers: {
+        Args: { p_from: string; p_owner_id: string; p_to: string }
+        Returns: Json
+      }
+      report_cycle_status: {
+        Args: { p_from: string; p_owner_id: string; p_to: string }
+        Returns: Json
+      }
+      report_income: {
+        Args: { p_from: string; p_owner_id: string; p_to: string }
+        Returns: Json
+      }
+      report_machines: {
+        Args: { p_from: string; p_owner_id: string; p_to: string }
+        Returns: Json
+      }
+      report_owner_dashboard: {
+        Args: { p_owner_id: string; p_today: string }
+        Returns: Json
+      }
+      report_rental: {
+        Args: { p_owner_id: string; p_today: string }
+        Returns: Json
+      }
+      report_service_demand: {
+        Args: { p_from: string; p_owner_id: string; p_to: string }
+        Returns: Json
+      }
+      report_usage: {
+        Args: { p_from: string; p_owner_id: string; p_to: string }
+        Returns: Json
+      }
       rpc_add_ticket_comment: {
         Args: {
           p_actor_id: string
@@ -3909,6 +3958,10 @@ export type Database = {
         Args: { p_limit: number; p_today: string }
         Returns: Json
       }
+      rpc_cron_ending_agreements: {
+        Args: { p_limit?: number; p_today: string }
+        Returns: Json
+      }
       rpc_cron_expired_photos: {
         Args: { p_limit: number; p_now: string }
         Returns: Json
@@ -4005,6 +4058,15 @@ export type Database = {
           p_user_id: string
         }
         Returns: string
+      }
+      rpc_log_support_view: {
+        Args: {
+          p_admin_id: string
+          p_owner_id: string
+          p_path: string
+          p_reason?: string
+        }
+        Returns: number
       }
       rpc_login_gate_state: {
         Args: { p_ip: unknown; p_username: string }
@@ -4379,6 +4441,7 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_settings_problems: { Args: { p_settings: Json }; Returns: string[] }
       rpc_settle_deposit: {
         Args: {
           p_actor_id: string
@@ -4459,6 +4522,14 @@ export type Database = {
       }
       rpc_update_owner: {
         Args: { p_actor_id: string; p_details: Json; p_owner_id: string }
+        Returns: Json
+      }
+      rpc_update_owner_settings: {
+        Args: { p_actor_id: string; p_changes: Json }
+        Returns: Json
+      }
+      rpc_update_platform_settings: {
+        Args: { p_actor_id: string; p_changes: Json }
         Returns: Json
       }
       rpc_verify_payment: {

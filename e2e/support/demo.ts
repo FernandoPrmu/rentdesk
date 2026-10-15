@@ -100,8 +100,10 @@ export const E2E_PREFIX = "E2E";
  * Deletes accounts the e2e tests created (`owner.e2e-*`, `cust.e2e-*`). Owners and
  * profiles reference each other, so this runs as one transaction over
  * SUPABASE_DB_URL (the same connection the database tests use). Audit entries stay.
+ * `createdBefore` keeps newer ones (db:cleanup-test-data must not touch a running suite).
+ * Returns how many accounts were deleted.
  */
-export async function deleteE2eAccounts(): Promise<void> {
+export async function deleteE2eAccounts(createdBefore?: Date): Promise<number> {
   const url = process.env.SUPABASE_DB_URL;
   if (!url) throw new Error("e2e: SUPABASE_DB_URL must be set (.env.local) to clean up test accounts");
   const db = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
@@ -109,7 +111,8 @@ export async function deleteE2eAccounts(): Promise<void> {
   try {
     await db.query("begin");
     const { rows } = await db.query<{ id: string }>(
-      "select id from public.profiles where username like 'owner.e2e-%' or username like 'cust.e2e-%'",
+      "select id from public.profiles where (username like 'owner.e2e-%' or username like 'cust.e2e-%') and ($1::timestamptz is null or created_at < $1)",
+      [createdBefore ?? null],
     );
     const ids = rows.map((r) => r.id);
     if (ids.length > 0) {
@@ -127,6 +130,7 @@ export async function deleteE2eAccounts(): Promise<void> {
       await db.query("delete from auth.users where id = any($1)", [ids]);
     }
     await db.query("commit");
+    return ids.length;
   } catch (error) {
     await db.query("rollback");
     throw error;
@@ -144,9 +148,9 @@ export const E2E_SERIAL_PREFIX = "E2E-";
  * payments (slips, allocations, receipts and their files, credits and refunds),
  * deposit entries, advance credits, terms history and notifications.
  * Credits of seed customers that an e2e invoice used become available again.
- * Audit entries stay.
+ * Audit entries stay. `createdBefore` keeps newer machines; returns how many were deleted.
  */
-export async function deleteE2eMachines(serial?: string): Promise<void> {
+export async function deleteE2eMachines(serial?: string, createdBefore?: Date): Promise<number> {
   const url = process.env.SUPABASE_DB_URL;
   if (!url) throw new Error("e2e: SUPABASE_DB_URL must be set (.env.local) to clean up test machines");
   const db = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
@@ -156,7 +160,10 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
     // One spec cleans up only its own machine: spec files run in parallel.
     const { rows } = serial
       ? await db.query<{ id: string }>("select id from public.machines where serial_no = $1", [serial])
-      : await db.query<{ id: string }>("select id from public.machines where serial_no like $1", [`${E2E_SERIAL_PREFIX}%`]);
+      : await db.query<{ id: string }>("select id from public.machines where serial_no like $1 and ($2::timestamptz is null or created_at < $2)", [
+          `${E2E_SERIAL_PREFIX}%`,
+          createdBefore ?? null,
+        ]);
     const machines = rows.map((r) => r.id);
     if (machines.length > 0) {
       // Service requests on these machines: photos, notifications, trail, discount credits.
@@ -246,6 +253,7 @@ export async function deleteE2eMachines(serial?: string): Promise<void> {
       await db.query("delete from public.machines where id = any($1)", [machines]);
     }
     await db.query("commit");
+    return machines.length;
   } catch (error) {
     await db.query("rollback");
     throw error;

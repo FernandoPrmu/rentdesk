@@ -1,4 +1,4 @@
-import { Building2, ChevronRight, FileText, KeyRound, Mail, Receipt } from "lucide-react";
+import { BellRing, Building2, ChevronRight, FileText, KeyRound, Mail, Receipt } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -11,6 +11,7 @@ export const metadata: Metadata = { title: "Settings" };
 const LINKS = [
   { href: "/owner/settings/company", label: "Company details and logo", icon: Building2 },
   { href: "/owner/settings/billing", label: "Billing: late fee", icon: Receipt },
+  { href: "/owner/settings/reminders", label: "Reminders and deadlines", icon: BellRing },
   { href: "/owner/settings/invoice-template", label: "Invoice template and letterhead", icon: FileText },
   { href: "/owner/settings/notifications", label: "Emails: settings, templates, delivery log", icon: Mail },
   { href: "/change-password", label: "Change password", icon: KeyRound },

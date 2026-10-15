@@ -1,13 +1,17 @@
 import { Camera, CircleCheck, Clock, Gauge, Receipt, Star, TriangleAlert, Wrench } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 
+import { CustomerSummary } from "@/components/reports/customer-summary";
+import { SummaryUnavailable } from "@/components/reports/summary-unavailable";
 import { requestTitle } from "@/components/service/service-display";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
 import { formatDate } from "@/lib/format";
 import { formatRupees } from "@/lib/money";
+import { customerDashboardForHome } from "@/lib/reports/queries";
 import { customerServiceTasks } from "@/lib/service/queries";
 import { listCustomerTicketRows } from "@/lib/tickets/queries";
 import { type CustomerTask, customerHome } from "@/lib/tickets/view";
@@ -20,7 +24,9 @@ export const metadata: Metadata = { title: "Home" };
  * One "Enter meter reading" task per machine (the newest ticket, covering every
  * month since the last confirmed reading), one "Pay" task per unpaid bill, and
  * what is waiting for the rental company. Service requests (CP-07): a repair to
- * confirm, a service to rate, and a button to ask for service.
+ * confirm, a service to rate, and a button to ask for service. Below that (CP-01):
+ * balance and credit, machines with the next billing date, the latest bill, recent
+ * payments and open requests.
  */
 export default async function CustomerHomePage() {
   const user = await requireUser("CUSTOMER");
@@ -107,8 +113,18 @@ export default async function CustomerHomePage() {
           </ul>
         </section>
       )}
+
+      {/* CP-01: streams in after the tasks; never holds them up (decision 84). */}
+      <Suspense fallback={<div className="h-40 animate-pulse rounded-xl bg-muted" aria-busy="true" aria-label="Loading your account" />}>
+        <AccountSummary customer={{ id: user.id, owner_id: user.owner_id }} />
+      </Suspense>
     </div>
   );
+}
+
+async function AccountSummary({ customer }: { customer: { id: string; owner_id: string | null } }) {
+  const result = await customerDashboardForHome(customer);
+  return result.ok ? <CustomerSummary d={result.data} /> : <SummaryUnavailable href="/customer" />;
 }
 
 function TaskCard({ task }: { task: CustomerTask }) {

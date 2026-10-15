@@ -3,6 +3,7 @@ import sharp from "sharp";
 
 import { signInCached } from "./support/auth";
 import { assignMachine, createMachine } from "./support/billing";
+import { waitForDashboard } from "./support/dashboard";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 import { resolvedBreakdown } from "./support/service";
 
@@ -59,6 +60,7 @@ test("toner for a colour machine with a photo: owner acknowledges, assigns, reso
 
   // Owner: the HIGH request is on Home, highlighted; the list shows it among the first.
   await asOwner(page);
+  await waitForDashboard(page, "home-service");
   const card = shown(page, "home-service");
   await expect(card).toContainText("urgent or high");
   await expect(card.getByRole("link", { name: /Toner: cyan, magenta/ }).first()).toBeVisible();

@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { publicEnv } from "@/lib/env";
 import { serverEnv } from "@/lib/env.server";
+import { statsFetch } from "@/lib/supabase/query-stats";
 import type { Database } from "@/types/db";
 
 /**
@@ -16,6 +17,7 @@ export function createAdminClient() {
     publicEnv().NEXT_PUBLIC_SUPABASE_URL,
     serverEnv("SUPABASE_SERVICE_ROLE_KEY"),
     {
+      global: { fetch: statsFetch("service") },
       auth: {
         persistSession: false,
         autoRefreshToken: false,

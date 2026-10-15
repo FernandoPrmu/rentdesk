@@ -62,6 +62,7 @@ export function FormField({
   min,
   max,
   prefix,
+  disabled,
 }: {
   name: string;
   label: string;
@@ -80,9 +81,11 @@ export function FormField({
   max?: string;
   /** Short text shown inside the box on the left, e.g. "Rs.". */
   prefix?: string;
+  disabled?: boolean;
 }) {
   const id = `field-${name}`;
   const common = {
+    disabled,
     id,
     name,
     ...(value !== undefined ? { value } : { defaultValue }),

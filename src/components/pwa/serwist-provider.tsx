@@ -3,6 +3,8 @@
 import { SerwistProvider as BaseSerwistProvider } from "@serwist/next/react";
 import type { ReactNode } from "react";
 
+import "@/lib/zod-client";
+
 /**
  * Registers /sw.js in production builds only, so dev never serves stale cached pages.
  * `cacheOnNavigation` is off: it would ask the worker to fetch every visited page

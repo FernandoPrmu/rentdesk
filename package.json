@@ -21,7 +21,8 @@
     "db:types": "supabase gen types typescript --linked > src/types/db.ts",
     "db:seed": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed.ts",
     "db:cleanup-test-data": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cleanup-test-data.ts",
-    "cron:run": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cron-run.ts"
+    "cron:run": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cron-run.ts",
+    "check:bundle": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-bundle-secrets.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -46,6 +47,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@serwist/cli": "^9.5.13",
     "@tailwindcss/turbopack": "^4",

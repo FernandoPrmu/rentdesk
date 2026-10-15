@@ -18,6 +18,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["supabase/tests/**/*.db.test.ts"],
+    // The production lock (decision 95): refuses before any suite connects.
+    globalSetup: ["./supabase/tests/global-setup.ts"],
     testTimeout: 120_000,
     hookTimeout: 180_000,
     // One remote connection per file at a time keeps the free-tier pooler happy.

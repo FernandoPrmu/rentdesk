@@ -12,14 +12,15 @@
  *   - notifications older than --days about rows that no longer exist (their deliveries
  *     go with them), and direct sends (login details) older than --days.
  *
- * Refuses to run unless SUPABASE_DB_URL and NEXT_PUBLIC_SUPABASE_URL both point at the
- * dev project. --dry-run reports the counts and changes nothing.
+ * Refuses to run against a production database (the production lock, decision 95), and
+ * unless SUPABASE_DB_URL and NEXT_PUBLIC_SUPABASE_URL point at the same project.
+ * --dry-run reports the counts and changes nothing.
  */
 import pg from "pg";
 
 import { deleteE2eAccounts, deleteE2eMachines, E2E_SERIAL_PREFIX } from "../e2e/support/demo.ts";
-
-const DEV_PROJECT_REF = "gpviraoifdnakkigrfga";
+import { apiProjectRef, dbProjectRef } from "../src/lib/ops/environment.ts";
+import { exitIfProduction } from "./lib/production-lock.ts";
 
 /** Audit actions only sign-ins, sessions and exports write; the seed writes none of them. */
 const SESSION_ACTIONS = [
@@ -46,16 +47,20 @@ const dryRun = args.has("dry-run");
 const days = Number(args.get("days") || 7);
 if (!Number.isInteger(days) || days < 1) fail("--days must be a whole number of at least 1.");
 
+// The production lock first (decision 95): never trim a production database.
+await exitIfProduction("npm run db:cleanup-test-data", [process.env]);
+
 const dbUrl = process.env.SUPABASE_DB_URL;
 const apiUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 if (!dbUrl || !apiUrl) fail("SUPABASE_DB_URL and NEXT_PUBLIC_SUPABASE_URL must be set (.env.local).");
-if (dbProjectRef(dbUrl) !== DEV_PROJECT_REF || apiProjectRef(apiUrl) !== DEV_PROJECT_REF) {
-  fail(`Refusing to run: SUPABASE_DB_URL and NEXT_PUBLIC_SUPABASE_URL must point at the dev project (${DEV_PROJECT_REF}).`);
+const projectRef = dbProjectRef(dbUrl);
+if (!projectRef || projectRef !== apiProjectRef(apiUrl)) {
+  fail("Refusing to run: SUPABASE_DB_URL and NEXT_PUBLIC_SUPABASE_URL must point at the same Supabase project.");
 }
 
 const logsBefore = new Date(Date.now() - days * 86_400_000);
 const leftoversBefore = new Date(Date.now() - LEFTOVER_AGE_MS);
-console.log(`${dryRun ? "Dry run on" : "Cleaning"} dev project ${DEV_PROJECT_REF}`);
+console.log(`${dryRun ? "Dry run on" : "Cleaning"} development project ${projectRef}`);
 console.log(`  leftovers created before ${leftoversBefore.toISOString()}, logs before ${logsBefore.toISOString()}`);
 
 const db = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
@@ -132,28 +137,6 @@ async function count(sql: string, params: unknown[]): Promise<number> {
 
 function ident(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;
-}
-
-/** Project ref of a Supabase Postgres URL: the pooler's `postgres.<ref>` user or the direct `db.<ref>.supabase.co` host. */
-function dbProjectRef(url: string): string | null {
-  try {
-    const { username, hostname } = new URL(url);
-    const direct = /^db\.([a-z0-9]+)\.supabase\.co$/.exec(hostname);
-    if (direct) return direct[1]!;
-    const pooler = /^postgres\.([a-z0-9]+)$/.exec(decodeURIComponent(username));
-    return hostname.endsWith(".pooler.supabase.com") && pooler ? pooler[1]! : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Project ref of the Supabase API URL (`https://<ref>.supabase.co`). */
-function apiProjectRef(url: string): string | null {
-  try {
-    return /^([a-z0-9]+)\.supabase\.co$/.exec(new URL(url).hostname)?.[1] ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function fail(message: string): never {

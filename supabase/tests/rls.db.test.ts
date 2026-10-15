@@ -473,6 +473,9 @@ describe.skipIf(!DB_URL)("RLS (linked dev database, rolled back)", () => {
         "rpc_write_audit",
       ]);
       for (const r of rows) {
+        // Task 13 (decision 95): rentdesk_environment() returns only "development" or
+        // "production", for the dev guard and /api/health; production-lock.db.test.ts.
+        if (r.name === "rentdesk_environment") continue;
         expect(r.anon, `anon: ${r.signature}`).toBe(false);
         // Task 11: the read-only report functions (security invoker, stable; RLS decides,
         // reports.db.test.ts) are the only public functions signed-in users may call.

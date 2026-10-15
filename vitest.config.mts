@@ -8,7 +8,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "scripts/**/*.test.ts"],
     // `server-only` throws outside a React Server environment; stub it for unit tests.
     alias: { "server-only": fileURLToPath(new URL("./test/server-only-stub.ts", import.meta.url)) },
   },

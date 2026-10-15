@@ -4,7 +4,7 @@ import { Download, Share, SquarePlus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { INSTALL_PROMPT_KEY, installPlatform, type InstallPlatform, type InstallState } from "@/lib/pwa/install";
+import { EARLY_INSTALL_EVENT, INSTALL_PROMPT_KEY, installPlatform, type InstallPlatform, type InstallState } from "@/lib/pwa/install";
 import { cn } from "@/lib/utils";
 
 type PromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
@@ -38,6 +38,12 @@ function setCaught(e: PromptEvent | null) {
 /** Root layout: keeps the install event (and hides the browser's own banner) on every page. */
 export function InstallEventCatcher() {
   useEffect(() => {
+    // Fired before hydration: the head script (CATCH_EARLY_INSTALL_EVENT) kept it.
+    const early = window as unknown as Record<string, PromptEvent | undefined>;
+    if (early[EARLY_INSTALL_EVENT]) {
+      setCaught(early[EARLY_INSTALL_EVENT]);
+      delete early[EARLY_INSTALL_EVENT];
+    }
     const onPrompt = (e: Event) => {
       e.preventDefault();
       setCaught(e as PromptEvent);

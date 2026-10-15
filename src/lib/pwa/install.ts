@@ -9,6 +9,16 @@
 
 export const INSTALL_PROMPT_KEY = "rentdesk:install-prompt";
 
+/** Where the root layout's head script keeps a `beforeinstallprompt` that fired before React. */
+export const EARLY_INSTALL_EVENT = "__rentdeskInstallEvent";
+
+/**
+ * Inline head script (root layout): Chrome may fire `beforeinstallprompt` before the page
+ * has hydrated, when no React listener exists yet and the event would be lost for this
+ * page load. This catches it first; the install catcher takes it over when it mounts.
+ */
+export const CATCH_EARLY_INSTALL_EVENT = `addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.${EARLY_INSTALL_EVENT}=e});`;
+
 export type InstallState = "dismissed" | "installed";
 
 export type InstallPlatform = "prompt" | "ios";

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isKeptCache, isPrecacheable, isStaticAsset, offlineAssetRefs, PRECACHE_PREFIX, STATIC_CACHE } from "./cache-policy.mts";
 import { clearUserData } from "./clear-user-data.ts";
-import { INSTALL_PROMPT_KEY, installPlatform, isIos } from "./install.ts";
+import { CATCH_EARLY_INSTALL_EVENT, EARLY_INSTALL_EVENT, INSTALL_PROMPT_KEY, installPlatform, isIos } from "./install.ts";
 import { isNewVersion, parseVersion, resolveBuildId } from "./version.ts";
 
 const ORIGIN = "https://rentdesk.example";
@@ -131,6 +131,17 @@ describe("install prompt (decision 90)", () => {
     expect(installPlatform({ ...base, userAgent: iphone, standalone: true })).toBeNull();
     expect(installPlatform({ ...base, userAgent: iphone, stored: "dismissed" })).toBeNull();
     expect(installPlatform({ ...base, userAgent: android, hasPromptEvent: true, stored: "installed" })).toBeNull();
+  });
+
+  it("the head script keeps an event fired before hydration and hides the browser's banner", () => {
+    const listeners: Record<string, (e: unknown) => void> = {};
+    const win: Record<string, unknown> = {};
+    new Function("addEventListener", "window", CATCH_EARLY_INSTALL_EVENT)((type: string, fn: (e: unknown) => void) => (listeners[type] = fn), win);
+    let prevented = false;
+    const event = { preventDefault: () => (prevented = true) };
+    listeners.beforeinstallprompt(event);
+    expect(prevented).toBe(true);
+    expect(win[EARLY_INSTALL_EVENT]).toBe(event);
   });
 });
 

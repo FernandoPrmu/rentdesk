@@ -71,8 +71,20 @@ test("the manifest is complete and every icon loads", async ({ request, page }) 
 
 test.describe("install prompt (decision 90)", () => {
   test("never on the sign-in page, then once after signing in; Not now is remembered", async ({ page }) => {
-    await page.goto("/login");
+    // Chrome may fire the event before the page has hydrated: the app's scripts (not its
+    // stylesheets, which would block the head script) are held back until it has fired, so
+    // the head script is all that can catch it.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/_next/static/chunks/*.js", async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
     await fireInstallEvent(page);
+    release();
+    await page.waitForLoadState("load");
+    await page.unrouteAll({ behavior: "wait" });
     await page.waitForTimeout(2000);
     await expect(page.getByTestId("install-prompt")).toHaveCount(0);
 

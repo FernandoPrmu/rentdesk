@@ -6,6 +6,7 @@ import { SerwistProvider } from "@/components/pwa/serwist-provider";
 import { UpdateBanner } from "@/components/pwa/update-banner";
 import { Toaster } from "@/components/ui/sonner";
 import { APP_NAME, THEME_COLOR } from "@/lib/brand";
+import { CATCH_EARLY_INSTALL_EVENT } from "@/lib/pwa/install";
 
 import "./globals.css";
 
@@ -44,6 +45,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             browser. Its feature probe is otherwise reported as a CSP violation (decision 87).
             Zod reads this global when it loads, so no page pays for Zod unless it uses it. */}
         <script dangerouslySetInnerHTML={{ __html: ZOD_JITLESS }} />
+        {/* Keeps a beforeinstallprompt that fires before hydration (decision 90). */}
+        <script dangerouslySetInnerHTML={{ __html: CATCH_EARLY_INSTALL_EVENT }} />
       </head>
       <body className="flex min-h-full flex-col">
         <SerwistProvider>{children}</SerwistProvider>

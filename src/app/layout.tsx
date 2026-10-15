@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
+import { InstallEventCatcher } from "@/components/pwa/install-prompt";
 import { SerwistProvider } from "@/components/pwa/serwist-provider";
+import { UpdateBanner } from "@/components/pwa/update-banner";
 import { Toaster } from "@/components/ui/sonner";
 import { APP_NAME, THEME_COLOR } from "@/lib/brand";
 
@@ -37,6 +39,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <SerwistProvider>{children}</SerwistProvider>
+        <UpdateBanner />
+        <InstallEventCatcher />
         <Toaster position="top-center" richColors />
       </body>
     </html>

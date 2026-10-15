@@ -1,5 +1,6 @@
 import { type ReactNode, Suspense } from "react";
 
+import { InstallPrompt } from "@/components/pwa/install-prompt";
 import { BottomNav, type Portal, SidebarNav } from "@/components/portal/portal-nav";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ export function PortalShell({
         </main>
       </div>
       <BottomNav portal={portal} className={isCustomer ? undefined : "md:hidden"} />
+      <InstallPrompt withBottomBar={isCustomer ? "always" : "mobile"} />
     </div>
   );
 }

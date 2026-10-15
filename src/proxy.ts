@@ -136,9 +136,10 @@ export const config = {
   matcher: [
     {
       // Everything except Next internals, API routes (cron has its own secret),
-      // the service worker, the manifest and static files.
+      // the service worker, the manifest, static files and the offline page (the
+      // service worker stores it, so it must never depend on who is signed in).
       source:
-        "/((?!_next/|api/|sw\\.js|swe-worker|manifest\\.webmanifest|favicon\\.ico|icon|apple-icon|.*\\.(?:png|jpg|jpeg|svg|webp|ico|txt|js|map)$).*)",
+        "/((?!_next/|api/|sw\\.js|swe-worker|manifest\\.webmanifest|favicon\\.ico|icon|apple-icon|offline$|.*\\.(?:png|jpg|jpeg|svg|webp|ico|txt|js|map)$).*)",
       // Router prefetches (production builds prefetch every visible link) skip the
       // guard: a redirect answer is logged in the browser as a failed load. They carry
       // only the static shell (partial prefetching), every page checks the user again

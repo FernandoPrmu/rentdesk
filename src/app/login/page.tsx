@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { ClearOnLogin } from "@/components/pwa/clear-on-login";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { LoginForm } from "./login-form";
@@ -11,6 +12,7 @@ export const metadata: Metadata = { title: "Sign in" };
 export default function LoginPage() {
   return (
     <AppShell>
+      <ClearOnLogin />
       <Card className="w-full">
         <CardHeader>
           <CardTitle className="text-xl">

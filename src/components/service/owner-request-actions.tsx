@@ -8,6 +8,7 @@ import { FormError, FormField } from "@/components/forms/form-field";
 import { ReasonDialog } from "@/components/forms/reason-dialog";
 import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
+import { unreachable } from "@/lib/actions/client-errors";
 import type { ActionResult } from "@/lib/action-result";
 import { formatRupees, rupeesToCents } from "@/lib/money";
 import type { OwnerStepForm } from "@/lib/service/service";
@@ -43,7 +44,7 @@ function useStep(requestId: string, action: Action) {
         after?.();
         router.refresh();
       } catch {
-        setError("The server could not be reached. Please try again.");
+        setError(unreachable("safe"));
       }
     });
   return { pending, error, fieldErrors, run };

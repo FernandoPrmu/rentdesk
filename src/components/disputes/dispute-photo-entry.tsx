@@ -64,6 +64,7 @@ export function DisputePhotoEntry({
         setErrors((result.fieldErrors ?? {}) as ReadingErrors);
         setMessage(result.error);
       } catch {
+        window.dispatchEvent(new Event("rentdesk:check-version"));
         setMessage("Not sent: the connection was lost. Tap Send again.");
       }
     });

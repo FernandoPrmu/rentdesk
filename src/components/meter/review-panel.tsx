@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { unreachable } from "@/lib/actions/client-errors";
 import type { ActionResult } from "@/lib/action-result";
 import type { MeterContext } from "@/lib/billing/meter-invoice";
 import { formatCount } from "@/lib/format";
@@ -75,7 +76,7 @@ export function ReviewPanel({
           router.refresh();
         } else toast.error(result.error);
       } catch {
-        toast.error("The server could not be reached. Please try again.");
+        toast.error(unreachable("safe"));
       }
     });
 

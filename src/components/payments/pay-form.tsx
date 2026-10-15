@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { unreachable } from "@/lib/actions/client-errors";
 import type { ActionResult } from "@/lib/action-result";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { browserStorage, type DraftStorage } from "@/lib/meter/draft";
@@ -154,7 +155,7 @@ export function PayForm({ view, action }: { view: PayView; action: (input: Custo
         }
         router.push(`/customer/payments/${result.data.paymentId}?sent=1`);
       } catch {
-        setFormError("The server could not be reached. Your details are kept: please try again.");
+        setFormError(`${unreachable("safe")} Your details are kept on this phone.`);
       }
     });
   }

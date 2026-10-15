@@ -3,11 +3,11 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { type ActionResult, fail, fieldErrorsFrom, ok } from "@/lib/action-result";
+import { actionFailure, CHECK_FIRST_MESSAGE, must, SAFE_RETRY_MESSAGE } from "@/lib/actions/errors";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { loadAvailableCredits } from "@/lib/billing/context";
 import { supabaseRpc } from "@/lib/cron/server";
-import { dbErrorMessage } from "@/lib/db-errors";
 import { formatRupees, rupeesToCents } from "@/lib/money";
 import { customer as customerRecipient, notificationsFor } from "@/lib/notifications/service";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -20,10 +20,8 @@ import {
   reallocatePayment,
   rejectPayment,
   reversePayment,
-  RpcError,
   submitSlip,
   type TicketSnapshot,
-  TransitionError,
 } from "@/lib/tickets/transitions";
 import type { Database } from "@/types/db";
 
@@ -59,11 +57,9 @@ export const SLIP_BUCKET = "payment-slips";
 
 const UNPAID = ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED", "PARTIALLY_PAID", "OVERDUE", "DISPUTED"] as const;
 
-function failure(error: unknown, context: string): { ok: false; error: string } {
-  if (error instanceof TransitionError) return fail(error.message.replace(/^[^:]+: /, ""));
-  if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, context));
-  console.error(`[${context}]`, error);
-  return fail("Something went wrong. Please try again.");
+/** Refusals in plain words; anything else is a transient failure with a message that says what is safe (decision 47). */
+function failure(error: unknown, context: string, retryMessage = CHECK_FIRST_MESSAGE): { ok: false; error: string } {
+  return actionFailure(error, context, retryMessage);
 }
 
 const actorOf = (user: CurrentUser): Actor => ({ kind: "USER", id: user.id, role: user.role });
@@ -254,7 +250,7 @@ export async function submitCustomerPayment(user: CurrentUser, input: CustomerPa
   const admin = createAdminClient();
   try {
     // A retry of a payment that already went through returns it (idempotency key).
-    const { data: earlier } = await admin.from("payments").select("id, customer_id").eq("idempotency_key", i.idempotencyKey).maybeSingle();
+    const earlier = must(await admin.from("payments").select("id, customer_id").eq("idempotency_key", i.idempotencyKey).maybeSingle(), "payment replay");
     if (earlier) return earlier.customer_id === user.id ? ok({ paymentId: earlier.id, replayed: true }) : fail("Please reload the page and try again.");
 
     const bills = await loadBills(admin, { ids: i.invoiceIds });
@@ -305,7 +301,7 @@ export async function submitCustomerPayment(user: CurrentUser, input: CustomerPa
     });
     return ok({ paymentId: result.payment_id, replayed: result.replayed });
   } catch (error) {
-    return failure(error, "payment submit");
+    return failure(error, "payment submit", SAFE_RETRY_MESSAGE);
   }
 }
 
@@ -409,8 +405,8 @@ export async function getPaymentDetail(client: Admin, id: string): Promise<Payme
     slipUrl: signed?.data?.signedUrl ?? null,
     slipMime: slip?.mime_type ?? null,
     duplicateOf: d ? { id: d.id, submitted_at: d.submitted_at, status: d.status, amount_cents: d.amount_cents, reference: d.reference, customer: d.customer.name } : null,
-    receiptVersions: versions?.data ?? [],
-    credits: credits.data ?? [],
+    receiptVersions: (versions ? must(versions, "receipt versions") : null) ?? [],
+    credits: must(credits, "credits") ?? [],
   };
 }
 
@@ -421,9 +417,9 @@ export async function getPaymentDetail(client: Admin, id: string): Promise<Payme
 /** The owner's view of a payment's bills: what each owes now and what is left after the split. */
 export async function getVerifyContext(owner: CurrentUser, paymentId: string) {
   const admin = createAdminClient();
-  const { data: payment } = await admin.from("payments").select("id, owner_id, customer_id, amount_cents, status").eq("id", paymentId).maybeSingle();
+  const payment = must(await admin.from("payments").select("id, owner_id, customer_id, amount_cents, status").eq("id", paymentId).maybeSingle(), "payment");
   if (!payment || payment.owner_id !== owner.id) return null;
-  const { data: allocs } = await admin.from("payment_allocations").select("invoice_id").eq("payment_id", paymentId).is("released_at", null);
+  const allocs = must(await admin.from("payment_allocations").select("invoice_id").eq("payment_id", paymentId).is("released_at", null), "payment allocations");
   const bills = await loadBills(admin, { ids: (allocs ?? []).map((a) => a.invoice_id) });
   return { payment, bills };
 }
@@ -465,7 +461,7 @@ export async function verifySlip(owner: CurrentUser, input: VerifyInput): Promis
     await renderReceiptPdfNow(result.receipt_id);
     return ok({ status: result.status, receiptNo: result.receipt_no });
   } catch (error) {
-    return failure(error, "payment verify");
+    return failure(error, "payment verify", SAFE_RETRY_MESSAGE);
   }
 }
 
@@ -496,7 +492,7 @@ export async function recordManualPayment(owner: CurrentUser, input: ManualPayme
   const i = parsed.data;
   const admin = createAdminClient();
   try {
-    const { data: cu } = await admin.from("customers").select("id, owner_id, name").eq("id", i.customerId).maybeSingle();
+    const cu = must(await admin.from("customers").select("id, owner_id, name").eq("id", i.customerId).maybeSingle(), "customer");
     if (!cu || cu.owner_id !== owner.id) return fail("This customer was not found.");
     const bills = await loadBills(admin, { ids: i.invoiceIds });
     if (bills.length !== i.invoiceIds.length || bills.some((b) => b.customerId !== cu.id)) return fail("A bill was not found. Please reload the page.");
@@ -512,7 +508,7 @@ export async function recordManualPayment(owner: CurrentUser, input: ManualPayme
     await renderReceiptPdfNow(result.receipt_id);
     return ok({ paymentId: result.payment_id, receiptNo: result.receipt_no, replayed: result.replayed });
   } catch (error) {
-    return failure(error, "payment record");
+    return failure(error, "payment record", SAFE_RETRY_MESSAGE);
   }
 }
 
@@ -521,13 +517,13 @@ export async function recordManualPayment(owner: CurrentUser, input: ManualPayme
 // -----------------------------------------------------------------------------
 
 async function ownedAccepted(admin: Admin, owner: CurrentUser, paymentId: string) {
-  const { data: p } = await admin
+  const p = must(await admin
     .from("payments")
     .select("id, owner_id, customer_id, status, method, accepted_amount_cents, amount_cents")
     .eq("id", paymentId)
-    .maybeSingle();
+    .maybeSingle(), "payment");
   if (!p || p.owner_id !== owner.id) return null;
-  const { data: allocs } = await admin.from("payment_allocations").select("invoice_id, applied_cents").eq("payment_id", paymentId).is("released_at", null);
+  const allocs = must(await admin.from("payment_allocations").select("invoice_id, applied_cents").eq("payment_id", paymentId).is("released_at", null), "payment allocations");
   return { payment: p, current: (allocs ?? []).filter((a) => a.applied_cents > 0).map((a) => a.invoice_id) };
 }
 
@@ -551,7 +547,7 @@ export async function reverseOwnerPayment(owner: CurrentUser, input: { paymentId
     await renderReceiptPdfNow(receipt?.id);
     return ok(undefined);
   } catch (error) {
-    return failure(error, "payment reverse");
+    return failure(error, "payment reverse", SAFE_RETRY_MESSAGE);
   }
 }
 
@@ -615,7 +611,7 @@ export interface CreditView {
 
 export async function listCustomerCredits(owner: CurrentUser, customerId: string): Promise<CreditView[]> {
   const admin = createAdminClient();
-  const { data: cu } = await admin.from("customers").select("owner_id").eq("id", customerId).maybeSingle();
+  const cu = must(await admin.from("customers").select("owner_id").eq("id", customerId).maybeSingle(), "customer");
   if (!cu || cu.owner_id !== owner.id) return [];
   const [{ data, error }, available] = await Promise.all([
     admin
@@ -647,7 +643,7 @@ export async function refundCredit(owner: CurrentUser, input: RefundInput): Prom
   const i = parsed.data;
   const admin = createAdminClient();
   try {
-    const { data: c } = await admin.from("credits").select("id, owner_id, customer_id").eq("id", i.creditId).maybeSingle();
+    const c = must(await admin.from("credits").select("id, owner_id, customer_id").eq("id", i.creditId).maybeSingle(), "credit");
     if (!c || c.owner_id !== owner.id) return fail("This credit was not found.");
     const result = (await supabaseRpc(admin)("rpc_refund_credit", {
       p_credit_id: i.creditId,

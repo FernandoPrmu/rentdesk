@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { must } from "@/lib/actions/errors";
 import { isIsoDate } from "@/lib/agreements/cycle-calendar";
 import { createClient } from "@/lib/supabase/server";
 
@@ -109,8 +110,8 @@ async function names(actorIds: string[], ownerIds: string[]) {
     ownerIds.length ? supabase.from("owners").select("id, business_name").in("id", ownerIds) : Promise.resolve({ data: [], error: null }),
   ]);
   return {
-    actor: new Map((actors.data ?? []).map((a) => [a.id, a.username])),
-    owner: new Map((owners.data ?? []).map((o) => [o.id, o.business_name])),
+    actor: new Map((must(actors, "actors") ?? []).map((a) => [a.id, a.username])),
+    owner: new Map((must(owners, "owners") ?? []).map((o) => [o.id, o.business_name])),
   };
 }
 

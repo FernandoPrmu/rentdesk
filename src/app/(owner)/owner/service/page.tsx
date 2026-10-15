@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { must } from "@/lib/actions/errors";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { RequestList } from "@/components/service/request-list";
 import { ServiceFilters } from "@/components/service/service-filters";
@@ -29,8 +30,8 @@ export default async function OwnerServicePage({ searchParams }: PageProps<"/own
       <PageHeader title="Service requests" description="Breakdowns, toner, parts and maintenance from your customers." />
       <ServiceFilters
         filter={filter}
-        machines={(machines.data ?? []).map((m) => ({ id: m.id, label: `${m.serial_no} · ${m.brand} ${m.model}` }))}
-        customers={customers.data ?? []}
+        machines={(must(machines, "machines") ?? []).map((m) => ({ id: m.id, label: `${m.serial_no} · ${m.brand} ${m.model}` }))}
+        customers={must(customers, "customers") ?? []}
       />
       <RequestList rows={rows} hrefBase="/owner/service" showCustomer empty={filtered ? "No requests match these filters." : "No open service requests."} />
     </>

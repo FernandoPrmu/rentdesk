@@ -63,6 +63,7 @@ export function CommentThread({
         setKey(crypto.randomUUID());
         router.refresh();
       } catch {
+        window.dispatchEvent(new Event("rentdesk:check-version"));
         setError("Not sent: the connection was lost. Tap Send again.");
       }
     });

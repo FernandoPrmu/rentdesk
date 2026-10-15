@@ -1,6 +1,7 @@
 import "server-only";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { must } from "@/lib/actions/errors";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { dbErrorMessage } from "@/lib/db-errors";
 import {
@@ -55,7 +56,7 @@ export async function getOwnerOverrides(ownerId: string): Promise<Partial<Record
 /** AGR-03: the owner's agreement end notice (their setting, else the platform default). */
 export async function getAgreementNoticeDays(ownerId: string): Promise<number> {
   const supabase = await createClient();
-  const { data } = await supabase.from("owner_settings_effective").select("agreement_end_notice_days").eq("owner_id", ownerId).maybeSingle();
+  const data = must(await supabase.from("owner_settings_effective").select("agreement_end_notice_days").eq("owner_id", ownerId).maybeSingle(), "owner settings");
   return data?.agreement_end_notice_days ?? 30;
 }
 

@@ -102,6 +102,7 @@ export function MeterEntry({ view, action }: { view: MeterEntryView; action: Sub
         setServerErrors(result.fieldErrors ?? {});
         setMessage(result.error);
       } catch {
+        window.dispatchEvent(new Event("rentdesk:check-version"));
         setMessage("Not sent: the connection was lost. Your reading is saved on this phone. Tap Send again.");
       }
     });

@@ -3,17 +3,16 @@ import "server-only";
 import { z } from "zod";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { actionFailure, must } from "@/lib/actions/errors";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { loadAgreementCounters } from "@/lib/billing/context";
 import { carriedCopies, previousReading } from "@/lib/billing/usage";
 import { supabaseRpc } from "@/lib/cron/server";
-import { dbErrorMessage } from "@/lib/db-errors";
 import { formatCount } from "@/lib/format";
 import { parseReading } from "@/lib/meter/readings";
 import { customer, notificationsFor } from "@/lib/notifications/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { englishOnly } from "@/lib/text/english";
-import { RpcError } from "@/lib/tickets/transitions";
 
 /**
  * A new meter baseline after the meter was replaced or reset (spec 6.4, 11.2, 11.8;
@@ -37,11 +36,11 @@ export interface BaselineView {
 
 export async function getBaselineView(owner: CurrentUser, agreementId: string): Promise<BaselineView | null> {
   const admin = createAdminClient();
-  const { data: a } = await admin
+  const a = must(await admin
     .from("rental_agreements")
     .select("id, owner_id, customer_id, status, machine:machines!rental_agreements_machine_fkey(brand, model, serial_no)")
     .eq("id", agreementId)
-    .maybeSingle();
+    .maybeSingle(), "agreement");
   if (!a || a.owner_id !== owner.id) return null;
   const [{ machineType, counters }, { count: pending }] = await Promise.all([
     loadAgreementCounters(admin, a.id),
@@ -122,8 +121,7 @@ export async function recordBaseline(owner: CurrentUser, input: BaselineInput): 
     });
     return ok(undefined);
   } catch (error) {
-    if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, "baseline"));
-    console.error("[baseline]", error);
-    return fail("Something went wrong. Please try again.");
+    // A repeat would record a second baseline, so the owner checks first (decision 47).
+    return actionFailure(error, "baseline");
   }
 }

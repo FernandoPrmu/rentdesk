@@ -1,12 +1,11 @@
 import "server-only";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { actionFailure, must, SAFE_RETRY_MESSAGE } from "@/lib/actions/errors";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { supabaseRpc } from "@/lib/cron/server";
-import { dbErrorMessage } from "@/lib/db-errors";
 import { customer, notificationsFor } from "@/lib/notifications/service";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { RpcError } from "@/lib/tickets/transitions";
 
 /**
  * Spec 11.4 "Invoice notification not delivered: the invoice stays in the portal;
@@ -17,11 +16,11 @@ import { RpcError } from "@/lib/tickets/transitions";
 export async function resendInvoiceNotification(owner: CurrentUser, invoiceId: string): Promise<ActionResult> {
   const admin = createAdminClient();
   try {
-    const { data: inv } = await admin
+    const inv = must(await admin
       .from("invoices")
       .select("id, owner_id, customer_id, invoice_no, due_date, total_cents, amount_paid_cents, machine:machines!invoices_machine_fkey(brand, model)")
       .eq("id", invoiceId)
-      .maybeSingle();
+      .maybeSingle(), "invoice");
     if (!inv || inv.owner_id !== owner.id) return fail("This invoice was not found.");
     await supabaseRpc(admin)("rpc_resend_invoice_notification", {
       p_invoice_id: inv.id,
@@ -35,8 +34,7 @@ export async function resendInvoiceNotification(owner: CurrentUser, invoiceId: s
     });
     return ok(undefined);
   } catch (error) {
-    if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, "invoice resend"));
-    console.error("[invoice resend]", error);
-    return fail("Something went wrong. Please try again.");
+    // The database refuses a second send within 10 minutes, so tapping again is safe.
+    return actionFailure(error, "invoice resend", SAFE_RETRY_MESSAGE);
   }
 }

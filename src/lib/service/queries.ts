@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { must } from "@/lib/actions/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -111,11 +112,14 @@ export function sortRequests(rows: ServiceRow[]): ServiceRow[] {
 async function ownerSettings(ownerId: string | null): Promise<ServiceSettings> {
   if (!ownerId) return SERVICE_DEFAULTS;
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("owner_settings_effective")
-    .select("service_ack_hours_urgent, service_ack_hours_normal, service_admin_escalation_hours_urgent, service_admin_escalation_hours_normal")
-    .eq("owner_id", ownerId)
-    .maybeSingle();
+  const data = must(
+    await supabase
+      .from("owner_settings_effective")
+      .select("service_ack_hours_urgent, service_ack_hours_normal, service_admin_escalation_hours_urgent, service_admin_escalation_hours_normal")
+      .eq("owner_id", ownerId)
+      .maybeSingle(),
+    "owner settings",
+  );
   return (data as ServiceSettings | null) ?? SERVICE_DEFAULTS;
 }
 

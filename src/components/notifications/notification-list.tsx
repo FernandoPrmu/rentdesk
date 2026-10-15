@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { loadMoreNotifications, markAllNotificationsRead, markNotificationRead } from "@/app/actions/notifications";
 import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
+import { unreachable } from "@/lib/actions/client-errors";
 import { formatDateTime } from "@/lib/format";
 import type { CentreItem } from "@/lib/notifications/queries";
 import { cn } from "@/lib/utils";
@@ -47,7 +48,7 @@ export function NotificationList({ initial, more: initialMore }: { initial: Cent
         setItems((all) => all.map((i) => (i.readAt ? i : { ...i, readAt: now })));
         toast.success("All marked as read");
       } catch {
-        toast.error("The server could not be reached. Please try again.");
+        toast.error(unreachable("safe"));
       }
     });
 
@@ -61,7 +62,7 @@ export function NotificationList({ initial, more: initialMore }: { initial: Cent
         setItems((all) => [...all, ...result.data.items.filter((n) => !all.some((a) => a.id === n.id))]);
         setMore(result.data.more);
       } catch {
-        toast.error("The server could not be reached. Please try again.");
+        toast.error(unreachable("safe"));
       }
     });
 

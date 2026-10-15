@@ -188,7 +188,7 @@ export function AccountActions({
                     if (result.ok) setCredentials(result.data);
                     else toast.error(result.error);
                   } catch {
-                    toast.error("The server could not be reached. Please try again.");
+                    toast.error("We could not reach the server, or its answer was lost. Tap Reset again: a new temporary password is made each time.");
                   }
                   setConfirmReset(false);
                 })

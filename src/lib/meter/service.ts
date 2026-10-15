@@ -4,12 +4,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { actionFailure, CHECK_FIRST_MESSAGE, must, SAFE_RETRY_MESSAGE } from "@/lib/actions/errors";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { loadMeterContext } from "@/lib/billing/context";
 import type { MeterContext } from "@/lib/billing/meter-invoice";
 import { previousReading } from "@/lib/billing/usage";
 import { supabaseRpc } from "@/lib/cron/server";
-import { dbErrorMessage } from "@/lib/db-errors";
 import { BRANDING_SNAPSHOT_COLUMNS, brandingSnapshot } from "@/lib/invoices/branding-snapshot";
 import { onInvoiceIssued } from "@/lib/invoices/issued";
 import { describeChange, previewReading, type ReadingErrors } from "@/lib/meter/readings";
@@ -30,10 +30,8 @@ import {
   correctReading,
   enterReadingManually,
   rejectReading,
-  RpcError,
   submitReading,
   type TicketSnapshot,
-  TransitionError,
 } from "@/lib/tickets/transitions";
 import type { Database } from "@/types/db";
 
@@ -97,12 +95,9 @@ async function settingsFor(admin: Admin, ownerId: string): Promise<StageSettings
   return data ? ({ ...PLATFORM_DEFAULTS, ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== null)) } as StageSettings) : PLATFORM_DEFAULTS;
 }
 
-/** Workflow refusals in plain words (the SQL prefixes a stable code). */
-function failure(error: unknown, context: string): { ok: false; error: string } {
-  if (error instanceof TransitionError) return fail(error.message.replace(/^[^:]+: /, ""));
-  if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, context));
-  console.error(`[${context}]`, error);
-  return fail("Something went wrong. Please try again.");
+/** Refusals in plain words; anything else is a transient failure with a message that says what is safe (decision 47). */
+function failure(error: unknown, context: string, retryMessage = CHECK_FIRST_MESSAGE): { ok: false; error: string } {
+  return actionFailure(error, context, retryMessage);
 }
 
 function previousValues(context: MeterContext) {
@@ -206,7 +201,7 @@ export async function submitCustomerReading(
     if (!t || t.customer_id !== user.id) return fail("This ticket was not found.");
 
     // A retry of a submission that already went through returns its result (INV-13).
-    const { data: earlier } = await admin.from("meter_submissions").select("id, ticket_id").eq("idempotency_key", i.idempotencyKey).maybeSingle();
+    const earlier = must(await admin.from("meter_submissions").select("id, ticket_id").eq("idempotency_key", i.idempotencyKey).maybeSingle(), "meter replay");
     if (earlier) return earlier.ticket_id === t.id ? ok({ replayed: true }) : fail("Please reload the page and try again.");
 
     const photoProblem = await checkMeterPhotoFile(admin, t, i.photoPath);
@@ -228,7 +223,7 @@ export async function submitCustomerReading(
     })) as { replayed?: boolean };
     return ok({ replayed: Boolean(result.replayed) });
   } catch (error) {
-    return failure(error, "meter submit");
+    return failure(error, "meter submit", SAFE_RETRY_MESSAGE);
   }
 }
 
@@ -392,7 +387,7 @@ async function ownedTicket(owner: CurrentUser, ticketId: string) {
 }
 
 async function pendingSubmissionId(admin: Admin, ticketId: string): Promise<string | null> {
-  const { data } = await admin.from("meter_submissions").select("id").eq("ticket_id", ticketId).eq("status", "PENDING_REVIEW").maybeSingle();
+  const data = must(await admin.from("meter_submissions").select("id").eq("ticket_id", ticketId).eq("status", "PENDING_REVIEW").maybeSingle(), "pending reading");
   return data?.id ?? null;
 }
 
@@ -432,7 +427,7 @@ export async function confirmReview(owner: CurrentUser, ticketId: string, rollov
     await onInvoiceIssued({ invoiceId: issued.invoice_id, ticketId: t.id, ownerId: t.owner_id });
     return ok({ invoiceNo: issued.invoice_no });
   } catch (error) {
-    return failure(error, "meter confirm");
+    return failure(error, "meter confirm", SAFE_RETRY_MESSAGE);
   }
 }
 
@@ -456,7 +451,7 @@ export async function rejectReview(owner: CurrentUser, ticketId: string, reason:
     });
     return ok({ final });
   } catch (error) {
-    return failure(error, "meter reject");
+    return failure(error, "meter reject", SAFE_RETRY_MESSAGE);
   }
 }
 
@@ -472,14 +467,14 @@ export async function correctReview(
   const { admin, t } = found;
   try {
     if (!note.trim()) return fail("Write a note explaining the correction.", { note: "A note is required" });
-    const { data: sub } = await admin
+    const sub = must(await admin
       .from("meter_submissions")
       .select("id, source, invoice_id, readings:meter_readings!meter_readings_submission_fkey(counter_type, current_value)")
       .eq("ticket_id", t.id)
       .eq("status", "PENDING_REVIEW")
-      .maybeSingle();
+      .maybeSingle(), "pending reading");
     if (!sub || !sub.invoice_id) return fail("There is no reading waiting for review.");
-    const { data: inv } = await admin.from("invoices").select("calculation").eq("id", sub.invoice_id).single();
+    const inv = must(await admin.from("invoices").select("calculation").eq("id", sub.invoice_id).single(), "invoice");
     const excluded = ((inv?.calculation ?? {}) as { credits_excluded?: string[] }).credits_excluded ?? [];
     const context = await loadMeterContext(admin, t.id, { excludeInvoiceId: sub.invoice_id, creditsExcluded: excluded });
     const preview = previewReading(context, typed);
@@ -539,7 +534,7 @@ export async function enterReadingForCustomer(
     });
     return ok(undefined);
   } catch (error) {
-    return failure(error, "meter manual entry");
+    return failure(error, "meter manual entry", SAFE_RETRY_MESSAGE);
   }
 }
 

@@ -51,6 +51,13 @@ async function OwnerCards({ ownerId }: { ownerId: string }) {
   const result = await ownerDashboardForHome(ownerId);
   if (!result.ok) return <SummaryUnavailable href="/owner" message="Your dashboard could not be loaded just now." />;
   const d = result.data;
-  const deposits = d.deposits.count > 0 ? await listDepositsToSettle().catch(() => []) : [];
-  return <OwnerDashboardCards d={d} links={OWNER_LINKS} depositsList={deposits.length > 0 ? <DepositsToSettle items={deposits} empty="Nothing to settle." /> : null} />;
+  // A failed read is never "nothing to settle" (decision 47): the card keeps its count and says the list did not load.
+  const deposits = d.deposits.count > 0 ? await listDepositsToSettle().catch(() => null) : [];
+  const depositsList =
+    deposits === null ? (
+      <p className="text-sm text-muted-foreground">The list could not be loaded just now. Reload the page to see it.</p>
+    ) : deposits.length > 0 ? (
+      <DepositsToSettle items={deposits} empty="Nothing to settle." />
+    ) : null;
+  return <OwnerDashboardCards d={d} links={OWNER_LINKS} depositsList={depositsList} />;
 }

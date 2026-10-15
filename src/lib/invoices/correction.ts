@@ -1,6 +1,7 @@
 import "server-only";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { actionFailure, must, SAFE_RETRY_MESSAGE } from "@/lib/actions/errors";
 import { addDays, todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { loadAvailableCredits } from "@/lib/billing/context";
@@ -32,28 +33,28 @@ function failure(error: unknown, context: string): { ok: false; error: string } 
   if (error instanceof TransitionError) return fail(error.message.replace(/^[^:]+: /, ""));
   if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, context));
   if (error instanceof BillingError) return fail(readingErrorMessage(error).message);
-  console.error(`[${context}]`, error);
-  return fail("Something went wrong. Please try again.");
+  // The original bill is cancelled in the same transaction, so a repeat is refused (decision 47).
+  return actionFailure(error, context, SAFE_RETRY_MESSAGE);
 }
 
 export type { CorrectionInput, CorrectionView };
 
 export async function getCorrectionView(owner: CurrentUser, ticketId: string): Promise<CorrectionView | null> {
   const admin = createAdminClient();
-  const { data: t } = await admin
+  const t = must(await admin
     .from("billing_cycle_tickets")
     .select(
       `id, owner_id, customer_id, agreement_id, cycle_no, status, status_before_overdue, current_invoice_id, machine_type, due_days,
        machine:machines!billing_cycle_tickets_machine_fkey(brand, model), customer:customers!billing_cycle_tickets_customer_fkey(name)`,
     )
     .eq("id", ticketId)
-    .maybeSingle();
+    .maybeSingle(), "ticket");
   if (!t || t.owner_id !== owner.id || !t.current_invoice_id) return null;
-  const { data: inv } = await admin
+  const inv = must(await admin
     .from("invoices")
     .select("id, invoice_no, type, status, total_cents, amount_paid_cents, due_date, calculation, lines:invoice_lines!invoice_lines_invoice_fkey(line_type, description, amount_cents, sort_order)")
     .eq("id", t.current_invoice_id)
-    .maybeSingle();
+    .maybeSingle(), "invoice");
   if (!inv?.invoice_no) return null;
 
   const state = { status: t.status as TicketStatus, statusBeforeOverdue: t.status_before_overdue as TicketStatus | null };

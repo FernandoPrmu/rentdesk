@@ -4,6 +4,7 @@
  * scripts call `readEnvironment`. Relative imports only (runs under Node type stripping).
  */
 import { createRequire } from "node:module";
+import path from "node:path";
 
 import pg from "pg";
 
@@ -81,7 +82,8 @@ export async function exitIfProduction(tool: string, envs: Env[]): Promise<void>
  * so a stray .env.production.local is seen too.
  */
 export function nextEnv(dev: boolean, dir = process.cwd()): Env {
-  const require = createRequire(import.meta.url);
+  // Resolved from the project root, not import.meta (Playwright loads this file as CommonJS).
+  const require = createRequire(path.join(process.cwd(), "package.json"));
   const { loadEnvConfig } = require("@next/env") as {
     loadEnvConfig: (dir: string, dev?: boolean, log?: { info: () => void; error: (...a: unknown[]) => void }, forceReload?: boolean) => {
       combinedEnv: Env;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isKeptCache, isPrecacheable, isStaticAsset, offlineAssetRefs, PRECACHE_PREFIX, STATIC_CACHE } from "./cache-policy.ts";
+import { isKeptCache, isPrecacheable, isStaticAsset, offlineAssetRefs, PRECACHE_PREFIX, STATIC_CACHE } from "./cache-policy.mts";
 import { clearUserData } from "./clear-user-data.ts";
 import { INSTALL_PROMPT_KEY, installPlatform, isIos } from "./install.ts";
 import { isNewVersion, parseVersion, resolveBuildId } from "./version.ts";

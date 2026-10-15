@@ -4,6 +4,7 @@
  * RSC payload, an API answer, a signed URL, a PDF, an image of a meter or a slip,
  * or anything from another origin. Used by src/app/sw.ts (runtime) and by
  * serwist.config.mjs (precache list), so only relative imports and no TS-only syntax.
+ * `.mts`: Node loads it as an ES module straight away (serwist.config.mjs runs in plain Node).
  */
 
 /** The one runtime cache the worker writes to. */

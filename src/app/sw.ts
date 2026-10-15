@@ -8,7 +8,7 @@
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
 import { CacheFirst, ExpirationPlugin, NetworkOnly, Serwist } from "serwist";
 
-import { isKeptCache, isStaticAsset, OFFLINE_URL, STATIC_CACHE } from "../lib/pwa/cache-policy";
+import { isKeptCache, isStaticAsset, OFFLINE_URL, STATIC_CACHE } from "../lib/pwa/cache-policy.mts";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {

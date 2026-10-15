@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 import { serwist } from "@serwist/next/config";
 
-import { isPrecacheable, offlineAssetRefs } from "./src/lib/pwa/cache-policy.ts";
+import { isPrecacheable, offlineAssetRefs } from "./src/lib/pwa/cache-policy.mts";
 
 // The offline page and only what it needs (decision 88). `next build` ran first.
 const offlineRefs = offlineAssetRefs(readFileSync(".next/server/app/offline.html", "utf8"));

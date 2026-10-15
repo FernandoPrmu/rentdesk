@@ -1,4 +1,4 @@
-import { isKeptCache } from "./cache-policy.ts";
+import { isKeptCache } from "./cache-policy.mts";
 import { INSTALL_PROMPT_KEY } from "./install.ts";
 
 /**

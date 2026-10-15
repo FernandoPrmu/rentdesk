@@ -6,6 +6,7 @@ import readXlsxFile from "read-excel-file/node";
 
 import { signInCached } from "./support/auth";
 import { assignMachine, createMachine, issueFirstInvoice } from "./support/billing";
+import { waitForDashboard } from "./support/dashboard";
 import { DEMO, deleteE2eMachines, E2E_SERIAL_PREFIX, profileId } from "./support/demo";
 import { pdfText } from "./support/pdf";
 
@@ -70,6 +71,7 @@ async function download(page: Page, name: "PDF" | "Excel"): Promise<{ file: Down
 test("the owner's dashboard taps through, and every report opens and exports PDF and Excel", async ({ page }) => {
   test.setTimeout(400_000);
   await signInCached(page, DEMO.ownerLanka, "/owner");
+  await waitForDashboard(page, "owner-dashboard");
   const dash = page.getByTestId("owner-dashboard");
   await expect(dash.getByTestId("card-income")).toBeVisible();
   for (const id of ["card-outstanding", "card-review", "card-tickets", "home-service", "card-machines", "card-rating", "card-deposits", "card-ending", "card-top-machines", "card-recent-payments"]) {
@@ -115,6 +117,7 @@ test("the owner's dashboard taps through, and every report opens and exports PDF
 test("the customer's Home shows balance, machines, latest bill, payments and requests", async ({ page }) => {
   await signInCached(page, DEMO.custSilva, "/customer");
   await expect(page.getByRole("heading", { name: "What you need to do now" })).toBeVisible();
+  await waitForDashboard(page, "customer-balance");
   await expect(page.getByTestId("customer-outstanding")).toContainText("Rs.");
   await expect(page.getByTestId("customer-machines")).toContainText(serial);
   await expect(page.getByTestId("customer-machines")).toContainText("Next meter reading");
@@ -125,7 +128,7 @@ test("the customer's Home shows balance, machines, latest bill, payments and req
 
 test("the admin changes a setting (checked) and finds it in the audit log with old and new values", async ({ page }) => {
   await signInCached(page, DEMO.admin, "/admin");
-  await expect(page.getByTestId("admin-dashboard")).toBeVisible();
+  await waitForDashboard(page, "admin-dashboard");
   await expect(page.getByTestId("email-usage")).toBeVisible();
   await expect(page.getByTestId("job-health")).toBeVisible();
 
@@ -161,7 +164,7 @@ test("the admin opens the read-only support view: banner, no forms, logged; owne
   await page.getByTestId("support-entry").getByRole("textbox", { name: /Reason/ }).fill(reason);
   await page.getByRole("button", { name: "Open support view" }).click();
   await expect(page.getByTestId("support-banner")).toHaveText(/Support view — read only/);
-  await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+  await waitForDashboard(page, "owner-dashboard");
   await expect(page.locator("main form")).toHaveCount(0);
 
   await page.getByRole("navigation", { name: "Support sections" }).getByRole("link", { name: "Machines" }).click();

@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0038`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0039`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -487,7 +487,7 @@ app's own per-account and per-IP limits above protect logins instead.
   writes), the bill's PDF (wait, then attach), owner suspension told to customers, bounces and direct sends, RLS on
   deliveries, the log view and preferences. The sender runs with a fake transport: nothing is sent.
 
-## Dashboards, reports, settings and the support view (migrations 0034–0038)
+## Dashboards, reports, settings and the support view (migrations 0034–0039)
 
 - **Report functions (RPT-01..08, CP-01, ADM-04).** `public.report_*` are **security invoker** and **stable**, granted
   to `authenticated` (never `anon`): RLS decides what they read and they cannot write. They are the only public functions
@@ -504,7 +504,16 @@ app's own per-account and per-IP limits above protect logins instead.
   every owner and customer; 27.8 → 17.4 ms and 11.0 → 7.8 ms server time. EXPLAIN (ANALYZE, BUFFERS) showed no scan
   problem: the dev data is small (all tables under 100 rows except `audit_logs`, 21k) and each RLS table reference costs
   about 1 ms of policy evaluation, so the work was per reference and per call. The server caches dashboards per tenant
-  (decision 84) and pages stream them with a 4 s limit and a retry.
+  (decision 84) and pages stream them with a 4 s limit and a retry. **0039**: an A/B under the full e2e load (dashboards
+  on: 490 s of database time, 22 statement timeouts; off: 97 s, none) showed they still tipped the free tier over, so
+  `report_owner_dashboard` and `report_customer_dashboard` are now **security definer** with the policies' rules made
+  explicit: the owner dashboard answers only `app.report_allowed(owner)` (that owner, active, or an admin; the helpers
+  read the caller's JWT inside a definer function too) and filters `owner_id` on every table and helper; the customer
+  summary uses `app.current_customer_id()` (null for a suspended customer or a customer of a suspended owner), filters
+  `customer_id` everywhere and never shows DRAFT or REJECTED bills, as the invoices policy did. 17.6 → 5.0 ms and
+  7.7 → 0.5 ms, the same results (checked for every owner and customer). These two are the only definer report
+  functions; `reports.db.test.ts` checks that, and their isolation (other owner, customer, suspended owner, suspended
+  customer, customers of a suspended owner, anon).
 
   | Function | Returns |
   | --- | --- |

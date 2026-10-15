@@ -226,7 +226,7 @@ export function RaiseForm({
               aria-checked={urgency === u}
               className={cn(
                 "min-h-12 rounded-lg border text-sm",
-                urgency === u ? (u === "URGENT" ? "border-red-600 bg-red-600 font-semibold text-white" : u === "HIGH" ? "border-orange-500 bg-orange-500 font-semibold text-white" : "border-primary bg-primary/10 font-semibold") : "bg-background",
+                urgency === u ? (u === "URGENT" ? "border-red-600 bg-red-600 font-semibold text-white" : u === "HIGH" ? "border-orange-700 bg-orange-700 font-semibold text-white" : "border-primary bg-primary/10 font-semibold") : "bg-background",
               )}
               onClick={() => setUrgency(u)}
             >

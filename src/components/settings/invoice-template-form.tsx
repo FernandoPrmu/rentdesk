@@ -140,6 +140,7 @@ export function InvoiceTemplateForm({
           <input
             ref={fileInput}
             id="field-letterhead"
+            aria-label="Letterhead file (JPG, PNG or a 1-page PDF)"
             type="file"
             name="letterhead"
             accept={LETTERHEAD_ACCEPT}

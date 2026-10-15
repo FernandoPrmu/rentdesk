@@ -19,7 +19,8 @@ async function audit(page: Page, label: string) {
   const minor = result.violations.filter((v) => !blocking.includes(v));
   if (minor.length) console.info(`[a11y] ${label}: ${minor.map((v) => `${v.id} (${v.impact}, ${v.nodes.length})`).join(", ")}`);
   const summary = blocking.map((v) => `${v.id} (${v.impact}): ${v.help}\n  ${v.nodes.slice(0, 5).map((n) => n.target.join(" ")).join("\n  ")}`);
-  expect(summary, `${label}: serious or critical accessibility issues`).toEqual([]);
+  // Soft: one run reports every page's findings, the test still fails at the end.
+  expect.soft(summary, `${label}: serious or critical accessibility issues`).toEqual([]);
 }
 
 async function check(page: Page, path: string) {
@@ -74,4 +75,28 @@ test("admin portal: dashboard, owners, audit log, settings", async ({ page }) =>
   await signInCached(page, DEMO.admin, "/admin");
   await audit(page, "/admin");
   for (const path of ["/admin/owners", "/admin/escalations", "/admin/audit", "/admin/settings", "/admin/reports"]) await check(page, path);
+});
+
+test("keyboard only: skip to content, then sign in with Tab and Enter", async ({ page }) => {
+  await page.goto("/login");
+  await page.keyboard.press("Tab");
+  const skip = page.getByRole("link", { name: "Skip to content" });
+  await expect(skip).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main#main")).toBeFocused();
+
+  // Focus order follows the form: username, password, show password, sign in.
+  await page.keyboard.press("Tab");
+  await expect(page.getByLabel("Username")).toBeFocused();
+  await page.keyboard.type(DEMO.custSilva.username);
+  await page.keyboard.press("Tab");
+  await expect(page.getByLabel("Password", { exact: true })).toBeFocused();
+  await page.keyboard.type(DEMO.custSilva.password);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/customer$/);
+
+  // In the portal the skip link comes first too, and the main navigation is reachable by name.
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Bills" }).last()).toBeVisible();
 });

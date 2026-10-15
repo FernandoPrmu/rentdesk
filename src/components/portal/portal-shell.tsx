@@ -25,6 +25,12 @@ export function PortalShell({
   const width = isCustomer ? "max-w-lg" : "max-w-6xl";
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">
+      <a
+        href="#main"
+        className="sr-only z-50 rounded-md bg-background px-4 py-3 text-base font-medium text-foreground shadow focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:outline-2 focus:outline-primary"
+      >
+        Skip to content
+      </a>
       <header className="sticky top-0 z-20 border-b bg-background pt-[env(safe-area-inset-top)]">
         <div className={cn("mx-auto flex h-14 w-full items-center gap-3 px-4", width)}>
           <Suspense fallback={<div className="h-9 w-40 animate-pulse rounded-md bg-muted" />}>{brand}</Suspense>
@@ -39,7 +45,7 @@ export function PortalShell({
             <SidebarNav portal={portal} />
           </aside>
         )}
-        <main className={cn("min-w-0 flex-1 px-4 py-5 pb-24", !isCustomer && "md:px-6 md:pb-8")}>
+        <main id="main" tabIndex={-1} className={cn("min-w-0 flex-1 px-4 py-5 pb-24 outline-none", !isCustomer && "md:px-6 md:pb-8")}>
           <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
         </main>
       </div>

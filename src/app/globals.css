@@ -60,7 +60,7 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.51 0 0); /* #666: 5:1 or more on white, muted and tinted backgrounds (axe, task 12) */
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.505 0.213 27.518); /* red-700: 4.5:1 or more as text on white and on its 10 % tint (axe, task 12) */

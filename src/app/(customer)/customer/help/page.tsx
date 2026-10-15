@@ -53,6 +53,22 @@ export default async function CustomerHelpPage() {
       )}
       <Card>
         <CardHeader>
+          <CardTitle>Install the app</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm" data-testid="install-help">
+          <p>Put RentDesk on your home screen and open it like any other app.</p>
+          <div>
+            <p className="font-medium">Android (Chrome)</p>
+            <p className="text-muted-foreground">Tap the menu (three dots) at the top right, then tap “Install app” or “Add to Home screen”.</p>
+          </div>
+          <div>
+            <p className="font-medium">iPhone or iPad (Safari)</p>
+            <p className="text-muted-foreground">Tap the Share button at the bottom, scroll down, tap “Add to Home Screen”, then tap “Add”.</p>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
           <CardTitle>Your account</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

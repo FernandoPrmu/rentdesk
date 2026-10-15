@@ -35,7 +35,7 @@ export function UrgencyBadge({ urgency, quiet = false }: { urgency: Urgency; qui
   }
   if (urgency === "HIGH") {
     return (
-      <Badge className="h-6 bg-orange-500 px-2.5 text-xs font-semibold text-white" data-testid="urgency-badge">
+      <Badge className="h-6 bg-orange-700 px-2.5 text-xs font-semibold text-white" data-testid="urgency-badge">
         High
       </Badge>
     );
@@ -68,7 +68,7 @@ export function EscalatedBadge({ level }: { level: number }) {
 /** On a rented machine with an open request: it stays Rented (decision 63). */
 export function InServiceBadge() {
   return (
-    <Badge className="h-6 gap-1 bg-amber-500 px-2.5 text-xs text-white" data-testid="in-service">
+    <Badge className="h-6 gap-1 bg-amber-700 px-2.5 text-xs text-white" data-testid="in-service">
       <Wrench aria-hidden /> Service in progress
     </Badge>
   );

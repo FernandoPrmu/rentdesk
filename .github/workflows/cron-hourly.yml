@@ -1,0 +1,46 @@
+# OPTIONAL: run the daily job every hour as well (decision 97; docs/go-live.md, step j).
+#
+# Vercel Hobby runs /api/cron/daily once a day (vercel.json, 00:30-01:29 Asia/Colombo).
+# Steps counted in hours (owner review reminders after 24 h / 48 h, the admin after 72 h)
+# can then be up to a day late. Calling the same route every hour from here makes them
+# on time, for free. The job is safe to run hourly: a second run while one is going is
+# recorded as SKIPPED (advisory lock + 10-minute lease), every change is compare-and-set
+# (reminder count, escalation level, late fee once, one estimate per ticket), cycles open
+# idempotently, and once-a-week / once-per-date messages use dedupe keys.
+#
+# OFF by default. To turn it on (Settings > Secrets and variables > Actions):
+#   Variables: APP_URL = https://<your-project>.vercel.app (no trailing slash)
+#              HOURLY_CRON_ENABLED = true
+#   Secrets:   CRON_SECRET = the same value as CRON_SECRET in Vercel Production
+# "Run workflow" (Actions tab) works even while it is off, to test it once.
+name: Hourly daily-job run (optional)
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: cron-hourly
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.event_name == 'workflow_dispatch' || vars.HOURLY_CRON_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/cron/daily
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          [ -n "$APP_URL" ] || { echo "::error::Set the APP_URL repository variable."; exit 1; }
+          [ -n "$CRON_SECRET" ] || { echo "::error::Set the CRON_SECRET repository secret."; exit 1; }
+          code=$(curl -sS -o body.json -w '%{http_code}' --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" "${APP_URL%/}/api/cron/daily")
+          jq -c '{ok, status, ranAt}' body.json 2>/dev/null || head -c 300 body.json
+          [ "$code" = "200" ] || { echo "::error::The daily job answered HTTP $code."; exit 1; }

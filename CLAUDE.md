@@ -114,17 +114,38 @@ paid provider" in `docs/progress.md`.
 - Commit in small logical steps with clear messages in Conventional Commits style
   (e.g. `feat(auth): username login with lockout`).
 - Before the final commit, run `npm run lint`, `npm run typecheck`, `npm test` and
-  `npm run test:db`. All must pass.
+  `npm run test:db`. All must pass. Then meet the e2e merge gate (see "Testing on the free
+  tier") before pushing.
 - At the end, push the branch to `origin`. Never merge into `main` and never push to
   `main`: the user reviews and merges.
 - Never commit `.env.local` or any secret.
 - Line endings are LF everywhere (`.gitattributes`: `* text=auto eol=lf`).
+
+## Testing on the free tier
+The project stays on the Supabase free tier, which throttles under load: statements stall or
+hit the statement timeout at random. This is the standing e2e rule:
+- **During a task:** run only the e2e specs related to the change
+  (`npm run test:e2e -- e2e/<name>.spec.ts ...`), never the full suite.
+- **Merge gate:** rest the DB for 30 minutes, then run the full suite on one worker:
+  `npm run test:e2e:gate`.
+  - If some tests fail **only** with statement timeouts or stalls, rest the DB for
+    15 minutes and re-run just those spec files once. If they pass, the gate is met.
+  - Report which tests needed the re-run.
+  - Never loop beyond this one re-run. If real failures remain (wrong behaviour, or still
+    failing after the re-run), stop and report them; do not push.
+- `npm run db:cleanup-test-data` trims test data on the dev project (run it when the DB grows,
+  e.g. before a merge gate).
 
 ## Commands
 - `npm run dev` / `npm run build`
 - `npm run lint` / `npm run typecheck` / `npm test` / `npm run test:e2e`
   (e2e signs in with the seed accounts on the linked dev DB at a 360 px viewport; it restores
   them afterwards and needs `SUPABASE_DB_URL` to delete the accounts it creates)
+- `npm run test:e2e:gate` = the full e2e suite on a single worker (the merge gate)
+- `npm run db:cleanup-test-data` = deletes e2e leftovers older than a day, and audit_logs and
+  notification rows that tests created, older than 7 days (`-- --days=N`, `-- --dry-run`).
+  Dev project only: it refuses to run unless `SUPABASE_DB_URL` points at project
+  `gpviraoifdnakkigrfga`.
 - `npx supabase link --project-ref <ref>` (once; links the CLI to the cloud project)
 - `npm run db:push` = `supabase db push` (apply new migrations to the linked cloud DB;
   add `--dry-run` to preview)

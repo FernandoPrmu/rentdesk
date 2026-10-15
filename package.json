@@ -15,10 +15,12 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:dev": "playwright test --config=playwright.dev.config.ts",
+    "test:e2e:gate": "playwright test --workers=1",
     "test:db": "vitest run --config vitest.db.config.mts",
     "db:push": "supabase db push",
     "db:types": "supabase gen types typescript --linked > src/types/db.ts",
     "db:seed": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed.ts",
+    "db:cleanup-test-data": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cleanup-test-data.ts",
     "cron:run": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cron-run.ts"
   },
   "dependencies": {

@@ -109,6 +109,7 @@ export function AccountActions({
   resetAction,
   suspendWarning,
   email,
+  emailOffNote,
 }: {
   name: string;
   status: AccountStatusValue;
@@ -117,6 +118,8 @@ export function AccountActions({
   suspendWarning?: string;
   /** The account's email: offers "Also send by email" on reset (ADM-03, CUS-02). */
   email?: string | null;
+  /** Production without a sending domain: no email option, this note instead (decision 96). */
+  emailOffNote?: string | null;
 }) {
   const [target, setTarget] = useState<AccountStatusValue | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -165,7 +168,8 @@ export function AccountActions({
               password stops working now.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {email && (
+          {email && emailOffNote && <p className="text-sm text-muted-foreground">{emailOffNote}</p>}
+          {email && !emailOffNote && (
             <label className="flex min-h-11 items-center gap-3 text-sm">
               <input type="checkbox" className="size-5 shrink-0" checked={emailReset} onChange={(e) => setEmailReset(e.target.checked)} />
               <span>
@@ -184,7 +188,7 @@ export function AccountActions({
               onClick={() =>
                 startReset(async () => {
                   try {
-                    const result = await resetAction(Boolean(email) && emailReset);
+                    const result = await resetAction(Boolean(email) && !emailOffNote && emailReset);
                     if (result.ok) setCredentials(result.data);
                     else toast.error(result.error);
                   } catch {

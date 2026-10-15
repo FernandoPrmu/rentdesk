@@ -48,7 +48,14 @@ type FormAction<T> = (prev: T | null, formData: FormData) => Promise<T>;
  */
 export function AccountForm(
   props:
-    | { kind: AccountKind; mode: "create"; action: FormAction<CreateAccountResult>; detailsBase: string }
+    | {
+        kind: AccountKind;
+        mode: "create";
+        action: FormAction<CreateAccountResult>;
+        detailsBase: string;
+        /** Production without a sending domain: "Also send by email" is off (decision 96). */
+        emailOffNote?: string | null;
+      }
     | { kind: AccountKind; mode: "edit"; action: FormAction<ActionResult>; defaults: Record<string, string | null> },
 ) {
   const router = useRouter();
@@ -101,14 +108,18 @@ export function AccountForm(
               type="checkbox"
               name="send_email"
               className="mt-0.5 size-5 shrink-0"
-              checked={hasEmail && sendEmail}
-              disabled={!hasEmail}
+              checked={!props.emailOffNote && hasEmail && sendEmail}
+              disabled={!!props.emailOffNote || !hasEmail}
               onChange={(e) => setSendEmail(e.target.checked)}
             />
             <span>
               <span className="font-medium">Also send the login details by email</span>
-              <span className="block text-muted-foreground">
-                {hasEmail ? "They are still shown once on the screen." : "Add an email address above to send them."}
+              <span className="block text-muted-foreground" data-testid="send-email-note">
+                {props.emailOffNote
+                  ? props.emailOffNote
+                  : hasEmail
+                    ? "They are still shown once on the screen."
+                    : "Add an email address above to send them."}
               </span>
             </span>
           </label>

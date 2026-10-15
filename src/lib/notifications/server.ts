@@ -35,6 +35,8 @@ export function outboxConfig(env: NodeJS.ProcessEnv = process.env): OutboxConfig
   return {
     appUrl: (env.APP_URL?.trim() || "http://localhost:3000").replace(/\/+$/, ""),
     fromAddress: env.EMAIL_FROM?.trim() || RESEND_TEST_FROM,
+    // Production without EMAIL_FROM = no sending domain yet: email off (decision 96).
+    fromConfigured: Boolean(env.EMAIL_FROM?.trim()),
     production: isProductionDeployment(env),
     devRedirect: env.EMAIL_DEV_REDIRECT?.trim() || null,
     platformReplyTo: env.EMAIL_REPLY_TO?.trim() || null,

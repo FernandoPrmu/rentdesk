@@ -6,6 +6,7 @@ import { BackLink } from "@/components/portal/back-link";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
+import { EMAIL_OFF_NOTE, emailSetup } from "@/lib/notifications/policy";
 
 export const metadata: Metadata = { title: "New owner" };
 
@@ -17,7 +18,9 @@ export default async function NewOwnerPage() {
       <PageHeader title="New owner" description="A username and temporary password are created for them." />
       <Card>
         <CardContent>
-          <AccountForm kind="owner" mode="create" action={createOwnerAction} detailsBase="/admin/owners" />
+          <AccountForm kind="owner" mode="create" action={createOwnerAction} detailsBase="/admin/owners"
+            emailOffNote={emailSetup().enabled ? null : EMAIL_OFF_NOTE}
+          />
         </CardContent>
       </Card>
     </div>

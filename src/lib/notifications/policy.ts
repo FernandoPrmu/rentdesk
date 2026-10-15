@@ -14,7 +14,31 @@ export function isProductionDeployment(env: Record<string, string | undefined> =
   return env.VERCEL_ENV === "production" || env.APP_ENV === "production";
 }
 
-export type Destination = { kind: "send"; to: string; subject: string; devNote: string | null } | { kind: "skip"; reason: string };
+/**
+ * Email needs a verified sending domain (Resend). Until one is added, production runs
+ * with EMAIL_FROM empty and email OFF: every delivery is logged as SKIPPED with this
+ * reason and in-app notifications carry on. Setting EMAIL_FROM turns email on with no
+ * code change (decision 96). Outside production the redirect rules apply (decision 73).
+ */
+export const NO_SENDER_DOMAIN = "NO_SENDER_DOMAIN: email is off until a sending domain is set up (EMAIL_FROM is empty); in-app notifications only";
+
+export type EmailSetup = { enabled: true } | { enabled: false; reason: "NO_SENDER_DOMAIN" };
+
+export function emailSetup(env: Record<string, string | undefined> = process.env): EmailSetup {
+  return senderDomainMissing({ production: isProductionDeployment(env), fromConfigured: Boolean(env.EMAIL_FROM?.trim()) })
+    ? { enabled: false, reason: "NO_SENDER_DOMAIN" }
+    : { enabled: true };
+}
+
+/** Production without EMAIL_FROM. `fromConfigured` left out = configured (older callers, tests). */
+export function senderDomainMissing(config: { production: boolean; fromConfigured?: boolean }): boolean {
+  return config.production && config.fromConfigured === false;
+}
+
+/** The short line the admin and account screens show while email is off. */
+export const EMAIL_OFF_NOTE = "Email is not set up yet (no domain). Give the login details to them yourself.";
+
+export type Destination ={ kind: "send"; to: string; subject: string; devNote: string | null } | { kind: "skip"; reason: string };
 
 /**
  * Outside production every email goes to EMAIL_DEV_REDIRECT, with "[DEV]" in the

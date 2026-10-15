@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type DeliveryRow, deliverDue, type OutboxPorts, PDF_WAIT_MS } from "./outbox";
+import { type DeliveryRow, deliverDue, type OutboxPorts, PDF_WAIT_MS, sendEmail } from "./outbox";
 import type { Quota } from "./policy";
 import { fakeTransport, stubTextTransport } from "./transport";
 
@@ -37,7 +37,7 @@ function row(over: Partial<DeliveryRow> = {}): DeliveryRow {
   };
 }
 
-function setup(rows: DeliveryRow[], options: { quota?: Partial<Quota>; production?: boolean; redirect?: string | null; due?: boolean } = {}) {
+function setup(rows: DeliveryRow[], options: { quota?: Partial<Quota>; production?: boolean; redirect?: string | null; due?: boolean; fromConfigured?: boolean } = {}) {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   const recorded: Record<string, unknown>[] = [];
   let batch = [...rows];
@@ -62,7 +62,7 @@ function setup(rows: DeliveryRow[], options: { quota?: Partial<Quota>; productio
     email: transport,
     text: stubTextTransport(() => {}),
     readFile: async (bucket, path) => new TextEncoder().encode(`${bucket}:${path}`),
-    config: { appUrl: "https://app.test", fromAddress: "notify@app.test", production: options.production ?? true, devRedirect: options.redirect ?? null },
+    config: { appUrl: "https://app.test", fromAddress: "notify@app.test", production: options.production ?? true, devRedirect: options.redirect ?? null, fromConfigured: options.fromConfigured },
   };
   return { ports, calls, recorded, transport };
 }
@@ -135,6 +135,46 @@ describe("deliverDue (NOT-02)", () => {
     await deliverDue(off.ports, { now: () => NOW });
     expect(off.transport.sent).toEqual([]);
     expect(off.recorded[0]).toMatchObject({ p_outcome: "SKIPPED", p_error: expect.stringMatching(/^DEV_NO_REDIRECT/) });
+  });
+
+  it("production without a sending domain (EMAIL_FROM empty): skipped as NO_SENDER_DOMAIN, nothing sent, no PDF wait (decision 96)", async () => {
+    const pending = row({ attachment: { kind: "INVOICE", number: "INV-000123", status: "PENDING", path: null } });
+    const off = setup([row(), pending, row({ recipient: null })], { production: true, fromConfigured: false });
+    const summary = await deliverDue(off.ports, { now: () => NOW });
+    expect(off.transport.sent).toEqual([]);
+    expect(summary).toMatchObject({ claimed: 3, skipped: 3, sent: 0, postponed: 0 });
+    for (const r of off.recorded) expect(r).toMatchObject({ p_outcome: "SKIPPED", p_error: expect.stringMatching(/^NO_SENDER_DOMAIN: /) });
+
+    // The direct login-details email takes the same path.
+    const direct = await sendEmail(off.ports, {
+      event: "account.credentials",
+      category: "ESSENTIAL",
+      role: "OWNER",
+      to: "owner@example.lk",
+      recipientName: "Owner",
+      title: "Your RentDesk login details",
+      message: "m",
+      link: "/login",
+      vars: {},
+      company: null,
+      template: null,
+      attachments: [],
+      idempotencyKey: "k",
+      attempts: 0,
+      at: NOW,
+    });
+    expect(direct).toEqual({ outcome: "SKIPPED", error: expect.stringMatching(/^NO_SENDER_DOMAIN/) });
+    expect(off.transport.sent).toEqual([]);
+
+    // Setting EMAIL_FROM turns it on with no code change.
+    const on = setup([row()], { production: true, fromConfigured: true });
+    await deliverDue(on.ports, { now: () => NOW });
+    expect(on.transport.sent[0]).toMatchObject({ to: "nimal@example.lk" });
+
+    // Outside production the redirect rules still apply, with or without EMAIL_FROM.
+    const dev = setup([row()], { production: false, redirect: "me@dev.lk", fromConfigured: false });
+    await deliverDue(dev.ports, { now: () => NOW });
+    expect(dev.transport.sent[0]).toMatchObject({ to: "me@dev.lk" });
   });
 
   it("an owner's new URGENT request keeps URGENT first, even with the owner's own subject", async () => {

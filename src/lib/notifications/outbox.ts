@@ -8,8 +8,10 @@ import {
   emailAllowance,
   footerNote,
   nextUtcDay,
+  NO_SENDER_DOMAIN,
   type Quota,
   retryDelayMs,
+  senderDomainMissing,
   senderName,
   withPriority,
 } from "./policy.ts";
@@ -53,6 +55,8 @@ export interface OutboxConfig {
   appUrl: string;
   /** Sending address, e.g. notifications@mail.example.lk (EMAIL_FROM). */
   fromAddress: string;
+  /** False when EMAIL_FROM is empty: in production email is then off (NO_SENDER_DOMAIN, decision 96). */
+  fromConfigured?: boolean;
   production: boolean;
   /** EMAIL_DEV_REDIRECT (non-production). */
   devRedirect?: string | null;
@@ -177,6 +181,8 @@ async function deliverOne(ports: OutboxPorts, row: DeliveryRow, at: Date, logos:
     if (sent.ok) return { outcome: "SENT", provider: sent.provider, providerId: sent.id, subject: row.title, sentTo: row.recipient ?? "", note: null };
     return { outcome: "SKIPPED", error: "NO_PROVIDER: SMS and WhatsApp need a paid provider (deferred)" };
   }
+  // Production without a sending domain: skipped at once, never waiting for a PDF (decision 96).
+  if (senderDomainMissing(ports.config)) return { outcome: "SKIPPED", error: NO_SENDER_DOMAIN };
   if (!row.recipient) return { outcome: "SKIPPED", error: "NO_EMAIL: no email address on the account" };
 
   // Attachment: the bill or receipt PDF (decision 72). Wait for it up to a day.
@@ -244,6 +250,7 @@ export interface ComposeInput {
  * adds the logo and sends. Shared by the outbox and the direct login-details email.
  */
 export async function sendEmail(ports: Pick<OutboxPorts, "email" | "readFile" | "config" | "log">, input: ComposeInput): Promise<Outcome> {
+  if (senderDomainMissing(ports.config)) return { outcome: "SKIPPED", error: NO_SENDER_DOMAIN };
   if (!ports.email) return { outcome: "SKIPPED", error: "NOT_CONFIGURED: email is not set up (RESEND_API_KEY / EMAIL_FROM)" };
   const { config } = ports;
   const companyName = input.company?.name ?? "RentDesk";

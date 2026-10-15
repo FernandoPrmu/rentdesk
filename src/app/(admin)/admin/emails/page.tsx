@@ -6,7 +6,7 @@ import { PreferencesForm } from "@/components/notifications/preferences-form";
 import { PageHeader } from "@/components/portal/portal-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/current-user";
-import type { Quota } from "@/lib/notifications/policy";
+import { emailSetup, type Quota } from "@/lib/notifications/policy";
 import { getPreferences } from "@/lib/notifications/queries";
 import { emailTransport, outboxConfig } from "@/lib/notifications/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -29,16 +29,19 @@ export default async function AdminEmailsPage() {
   const config = outboxConfig();
   const transport = emailTransport();
   const q = quota as unknown as Quota | null;
+  const setup = emailSetup();
   const rows: [string, string][] = [
     ["Sending through", transport ? (transport.name === "resend" ? "Resend" : "Fake (nothing leaves the server)") : "Not set up: emails are skipped and logged"],
-    ["From", config.fromAddress],
+    ["From", setup.enabled ? config.fromAddress : "Not set (EMAIL_FROM is empty)"],
     [
       "Mode",
-      config.production
-        ? "Production: emails go to the real addresses"
-        : config.devRedirect
-          ? `Not production: every email goes to ${config.devRedirect}`
-          : "Not production and EMAIL_DEV_REDIRECT is not set: nothing is sent",
+      !setup.enabled
+        ? "Production, email off: every email is logged as skipped (NO_SENDER_DOMAIN); in-app notifications work"
+        : config.production
+          ? "Production: emails go to the real addresses"
+          : config.devRedirect
+            ? `Not production: every email goes to ${config.devRedirect}`
+            : "Not production and EMAIL_DEV_REDIRECT is not set: nothing is sent",
     ],
     ["Sent today (UTC day)", q ? `${q.sent_today} of ${q.daily_limit} (the last ${q.reserve} are kept for essential emails)` : "—"],
     ["Sent this month", q ? `${q.sent_month} of ${q.monthly_limit}` : "—"],
@@ -51,7 +54,14 @@ export default async function AdminEmailsPage() {
         <CardHeader>
           <CardTitle>Email setup</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {!setup.enabled && (
+            <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100" data-testid="email-off">
+              <strong className="block">Email is not set up yet (no domain).</strong>
+              Notifications reach everyone in the app. Emails are logged as skipped until a sending domain is added and
+              EMAIL_FROM is set.
+            </p>
+          )}
           <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[10rem_1fr]" data-testid="email-setup">
             {rows.map(([k, v]) => (
               <div key={k} className="contents">

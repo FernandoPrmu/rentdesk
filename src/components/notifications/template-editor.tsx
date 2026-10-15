@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { unreachable } from "@/lib/actions/client-errors";
 import { buildEmail } from "@/lib/notifications/email-html";
 import { allowedVariables, type VariableName, VARIABLES } from "@/lib/notifications/events";
 import { type EmailTemplate, renderTemplate, sampleVariables, validateTemplate } from "@/lib/notifications/template";
@@ -86,7 +87,7 @@ export function TemplateEditor({
         setBody(inherited.body);
         toast.success("Back to the default text");
       } catch {
-        toast.error("The server could not be reached. Please try again.");
+        toast.error(unreachable("safe"));
       }
     });
 

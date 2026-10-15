@@ -3,6 +3,7 @@ import "server-only";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 
+import { must } from "@/lib/actions/errors";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import type { ReportSection } from "@/lib/reports/document";
@@ -38,7 +39,7 @@ export const supportBase = (ownerId: string) => `/admin/owners/${ownerId}/suppor
 export async function openSupportView(admin: CurrentUser, ownerId: string, path: string, reason?: string | null): Promise<{ id: string; business_name: string }> {
   if (!z.uuid().safeParse(ownerId).success) notFound();
   const supabase = await createClient();
-  const { data: owner } = await supabase.from("owners").select("id, business_name").eq("id", ownerId).maybeSingle();
+  const owner = must(await supabase.from("owners").select("id, business_name").eq("id", ownerId).maybeSingle(), "owner");
   if (!owner) notFound();
   const { error } = await createAdminClient().rpc("rpc_log_support_view", {
     p_admin_id: admin.id,
@@ -65,7 +66,7 @@ export async function supportList(section: SupportSection, ownerId: string, stat
         supabase.from("customer_balances").select("customer_id, outstanding_cents").eq("owner_id", ownerId),
       ]);
       if (error) throw new Error(`support customers: ${error.message}`);
-      const owed = new Map((balances.data ?? []).map((b) => [b.customer_id, b.outstanding_cents]));
+      const owed = new Map((must(balances, "balances") ?? []).map((b) => [b.customer_id, b.outstanding_cents]));
       return {
         title: SECTION_LABEL.customers,
         columns: [
@@ -94,7 +95,7 @@ export async function supportList(section: SupportSection, ownerId: string, stat
         supabase.from("rental_agreements").select("machine_id, customer:customers!rental_agreements_customer_fkey(name)").eq("owner_id", ownerId).eq("status", "ACTIVE"),
       ]);
       if (error) throw new Error(`support machines: ${error.message}`);
-      const rentedTo = new Map((live.data ?? []).map((a) => [a.machine_id, a.customer.name]));
+      const rentedTo = new Map((must(live, "agreements") ?? []).map((a) => [a.machine_id, a.customer.name]));
       return {
         title: SECTION_LABEL.machines,
         columns: [

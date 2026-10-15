@@ -66,7 +66,8 @@ async function provision(input: {
     if (authError || !created.user) {
       if (authError?.code === "email_exists" || authError?.status === 422) continue;
       console.error("[accounts] create auth user:", authError?.code, authError?.message);
-      return fail("The account could not be created. Please try again.");
+      // The account may exist even though the answer was lost: a blind retry could make a second one.
+      return fail("The account could not be confirmed (the connection was slow). Check the list for it before trying again, so it is not created twice.");
     }
 
     const userId = created.user.id;
@@ -187,7 +188,7 @@ export async function resetAccountPassword(actor: CurrentUser, targetId: string,
   const { error: authError } = await admin.auth.admin.updateUserById(targetId, { password: temporaryPassword });
   if (authError) {
     console.error("[accounts] reset password:", authError.code, authError.message);
-    return fail("The password could not be reset. Please try again.");
+    return fail("The password could not be reset (the connection was slow). Tap Reset again: a new temporary password is made each time.");
   }
   const email = options.sendEmail ? await emailNewPassword(targetId, username, temporaryPassword) : null;
   return ok({ userId: targetId, username, temporaryPassword, email });
@@ -196,7 +197,9 @@ export async function resetAccountPassword(actor: CurrentUser, targetId: string,
 /** The reset account's contact details (the rpc above already checked the actor may manage it). */
 async function emailNewPassword(targetId: string, username: string, temporaryPassword: string): Promise<LoginEmailResult> {
   const admin = createAdminClient();
-  const { data: profile } = await admin.from("profiles").select("role, owner_id, full_name").eq("id", targetId).maybeSingle();
+  const { data: profile, error } = await admin.from("profiles").select("role, owner_id, full_name").eq("id", targetId).maybeSingle();
+  // A failed read is not "no email": the password was set, so say the email did not go (decision 47).
+  if (error) return { status: "FAILED", to: null, message: "The email could not be sent (the connection was slow). Give the details in person." };
   if (!profile || (profile.role !== "OWNER" && profile.role !== "CUSTOMER") || !profile.owner_id) {
     return { status: "SKIPPED", to: null, message: "No email address on the account." };
   }

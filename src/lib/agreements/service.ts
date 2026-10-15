@@ -1,6 +1,7 @@
 import "server-only";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { must } from "@/lib/actions/errors";
 import { returnBlockedMessage } from "@/lib/agreements/blockers";
 import { addDays, todayInColombo } from "@/lib/agreements/cycle-calendar";
 import {
@@ -94,7 +95,7 @@ async function returnPayload(actor: CurrentUser, agreementId: string, input: Ret
     const checked = await checkSettlement(agreementId, input.deposit, submission?.invoice.total_cents ?? 0);
     if (!checked.ok) return checked;
   }
-  const { data: branding } = await admin.from("owner_company_profiles").select(BRANDING_SNAPSHOT_COLUMNS).eq("owner_id", actor.id).maybeSingle();
+  const branding = must(await admin.from("owner_company_profiles").select(BRANDING_SNAPSHOT_COLUMNS).eq("owner_id", actor.id).maybeSingle(), "company profile");
   const dueDate = addDays(today, context.dueDays);
   return ok({
     idempotency_key: input.idempotency_key,

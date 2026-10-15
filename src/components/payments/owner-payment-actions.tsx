@@ -9,6 +9,7 @@ import { FormField } from "@/components/forms/form-field";
 import { ReasonDialog } from "@/components/forms/reason-dialog";
 import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
+import { unreachable } from "@/lib/actions/client-errors";
 import type { ActionResult } from "@/lib/action-result";
 import { formatDate } from "@/lib/format";
 import { formatRupees, rupeesToCents } from "@/lib/money";
@@ -42,7 +43,7 @@ function useRun() {
           router.refresh();
         } else toast.error(result.error);
       } catch {
-        toast.error("The server could not be reached. Please try again.");
+        toast.error(unreachable("safe"));
       }
     });
   return { pending, run };

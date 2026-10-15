@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 
 import { PhotoViewer } from "@/components/meter/photo-viewer";
 import { AcceptedPaymentActions, VerifyPanel } from "@/components/payments/owner-payment-actions";
-import { AllocationList, DuplicateNotice, PaymentStatusBadge, paymentAmount, ReceiptButton } from "@/components/payments/payment-views";
+import { AllocationList, DuplicateNotice, PaymentStatusBadge, paymentAmount, ReceiptButton, SlipFileNotice } from "@/components/payments/payment-views";
 import { BackLink } from "@/components/portal/back-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uuidSchema } from "@/lib/accounts/schemas";
@@ -94,6 +94,7 @@ export default async function OwnerPaymentPage({ params }: PageProps<"/owner/pay
         </CardContent>
       </Card>
 
+      <SlipFileNotice deletedAt={p.slipDeletedAt} unavailable={p.slipUnavailable} title="Payment slip" />
       {p.slipUrl && (
         <Card>
           <CardHeader>

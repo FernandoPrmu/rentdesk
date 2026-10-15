@@ -4,7 +4,8 @@ import { Camera, CircleCheck, RotateCcw, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 
-import { CameraCapture, type CapturedPhoto } from "@/components/meter/camera-capture";
+import type { CapturedPhoto } from "@/components/meter/camera-capture";
+import { CameraCapture } from "@/components/meter/camera-capture-lazy";
 import { ReadingFields } from "@/components/meter/reading-form";
 import { Button, buttonVariants } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
@@ -63,6 +64,7 @@ export function DisputePhotoEntry({
         setErrors((result.fieldErrors ?? {}) as ReadingErrors);
         setMessage(result.error);
       } catch {
+        window.dispatchEvent(new Event("rentdesk:check-version"));
         setMessage("Not sent: the connection was lost. Tap Send again.");
       }
     });

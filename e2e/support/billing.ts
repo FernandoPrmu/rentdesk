@@ -94,6 +94,8 @@ export async function assignMachine(
   today: string,
   firstBilling = today,
   colour = false,
+  /** Extra terms, e.g. `upfront` money received (security deposit, advance; DEP-01/02). */
+  extraTerms: Record<string, unknown> = {},
 ): Promise<string> {
   const row = check(
     await service().rpc("rpc_assign_machine", {
@@ -111,6 +113,7 @@ export async function assignMachine(
         installation_location: "Front desk",
         initial_bw_reading: 1000,
         ...(colour ? { colour_included: 500, colour_rate_cents: 1000, initial_colour_reading: 200 } : {}),
+        ...extraTerms,
       },
       p_today: today,
     }),

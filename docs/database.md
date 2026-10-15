@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0039`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0040`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -560,6 +560,33 @@ app's own per-account and per-IP limits above protect logins instead.
   writes; agreement end reminders once per end date with an essential email, a new end date, another owner's notice,
   suspended owners skipped.
 
+## Slip retention and the task 12 security review (migration 0040)
+
+- **Slip retention (decision 91).** `payment_slips.file_deleted_at` (new). `app.cron_expired_slips(now, limit)` lists slips
+  whose upload day (Asia/Colombo) plus the owner's effective `payment_slip_retention_days` (platform default 2,555 days,
+  admin-editable, owner override) has passed, oldest first, never one whose payment is still `SUBMITTED`. The setting in
+  force on the day decides, so an admin change applies to every slip; `retention_until` (set at upload) is informational.
+  The daily job deletes the files (`storage.removePaymentSlips`), then `app.mark_slips_deleted(ids, now)` stamps the rows
+  and writes one `PAYMENT_SLIP_FILE_DELETED` audit entry per slip (actor null = system, retention days). The row, the
+  SHA-256 (duplicate detection, decision 40), amount and reference stay. Wrappers `rpc_cron_expired_slips`,
+  `rpc_mark_slips_deleted`: service role only. Payment pages say "The slip file was deleted on … because its keeping
+  period ended".
+- **`meter-photos` accepts JPEG only** (was JPEG and WebP): the phone always makes a JPEG and the server checks the JPEG
+  signature (decision 30).
+- **Review of every `rpc_*` wrapper and storage policy (task 12).** All 98 wrappers are `security invoker`,
+  `search_path = ''`, executable by `service_role` only (anon and authenticated get 42501, `rls.db.test.ts`). Each one
+  that takes an actor checks it in the `app` function: `app.assert_actor` (role, tenant, customer) directly or through
+  `app.open_dispute`, `app.lock_managed_account` (Admin → Owner, Owner → own Customer), the sub-calls of
+  `reassign_machine` (return + assign), an explicit role check (`set_account_status`, `update_owner`, settings and
+  templates), a tenant match (`log_direct_delivery`, `payment_duplicates`, `notify_once`) or self only
+  (`complete_password_change`, `save_notification_preferences`). The cron / outbox / PDF wrappers have no actor: they are
+  called by the daily job and the server only. Every `security definer` function in `public` and `app` has a fixed
+  `search_path`; every public table has RLS; no policy is `USING (true)`; `anon` has no `USAGE` on `app`
+  (`authenticated` has it because the RLS policies call the `app.current_*` helpers; it cannot execute workflow
+  functions). Storage: all 7 buckets private with size and type limits; client policies only for SELECT (own tenant /
+  own folder / recorded files) and INSERT (customers, into their own folder or ticket); no UPDATE or DELETE policy, so no
+  client can overwrite or remove a file.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -567,13 +594,38 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 
 | Bucket | Limit / types | Direct client access |
 | --- | --- | --- |
-| `meter-photos` | 1 MB; JPEG, WebP | Customer uploads to `{owner}/{ticket}/{photo id}.jpg` while their ticket awaits a reading, or while their open dispute waits for a fresh photo (0027). Only the owner reads (signed URL). Deleted on confirm; rejected after retention; never-submitted after 2 days (rule 30) |
-| `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads into `{owner}/{customer}/` (their own folder only, 0025). The server checks the stored file before recording it; the owner and admin read only recorded slips, the customer their folder. Files never sent with a payment are purged after 2 days |
+| `meter-photos` | 1 MB; JPEG (0040) | Customer uploads to `{owner}/{ticket}/{photo id}.jpg` while their ticket awaits a reading, or while their open dispute waits for a fresh photo (0027). Only the owner reads (signed URL). Deleted on confirm; rejected after retention; never-submitted after 2 days (rule 30) |
+| `payment-slips` | 5 MB; JPEG, PNG, PDF | Customer uploads into `{owner}/{customer}/` (their own folder only, 0025). The server checks the stored file before recording it; the owner and admin read only recorded slips, the customer their folder. Files never sent with a payment are purged after 2 days; recorded slips' files after the retention period (0040, decision 91), the row kept |
 | `receipts` | 10 MB; PDF | Server writes only. `{owner_id}/{receipt_id}/v{n}.pdf`: owner (own tenant), the payment's customer and admin read |
 | `branding` | 5 MB; PNG, JPEG, SVG, PDF | Server writes only (0022). Owner, their customers and admin read. Logos at `{owner_id}/logos/{sha256}.png` (max 512 px, SVG rasterised on the server; older `{owner_id}/logo.png` still valid), letterheads at `{owner_id}/letterheads/{sha256}.{pdf,jpg,png}`. Never overwritten or deleted (rule 35) |
 | `dispute-files` | 5 MB; JPEG, PNG, PDF | Customer uploads into `{owner}/{customer}/` (own folder). The server checks the stored file before recording it with the dispute; the owner and admin read only files sent with a dispute, the customer their folder. Unsent files purged after 2 days (0027) |
 | `service-photos` | 5 MB; JPEG, PNG | Customer uploads into `{owner}/{customer}/` (own folder, 0031). The server checks the stored file before recording it with the request; the owner and admin read only photos sent with a request, the customer their folder. Unsent photos purged after 2 days |
 | `invoices` | 10 MB; PDF | Server writes only. `{owner_id}/{invoice_id}/v{n}.pdf`: owner (own tenant), the invoice's customer (issued invoices only) and admin read. `{owner_id}/preview/sample.pdf`: the owner's sample preview |
+
+## Backups
+
+The Supabase free tier keeps no backups you can restore. **Planned for go-live (task 13):** a daily `pg_dump` by a free
+GitHub Actions schedule into a private artifact or repository, with a restore tested on a scratch project. Until then,
+take a manual backup before any risky change:
+
+1. Use the **session pooler** URI from Supabase › Project settings › Database (the same as `SUPABASE_DB_URL`), and a
+   `pg_dump` of the same major version as the server (Postgres 17: `pg_dump --version`).
+2. Schema and data, without Supabase-managed schemas that a new project recreates:
+
+   ```bash
+   pg_dump "$SUPABASE_DB_URL" --format=custom --no-owner --no-privileges \
+     --schema=public --schema=app --schema=auth --schema=storage \
+     --file="rentdesk-$(date +%Y%m%d-%H%M).dump"
+   ```
+
+   `storage` holds the file *records* only; the files themselves are in Supabase Storage. Download the private
+   buckets too (Supabase CLI: `npx supabase storage cp -r ss:///payment-slips ./backup/payment-slips --experimental`,
+   and the same for `invoices`, `receipts`, `branding`, `dispute-files`, `service-photos`; meter photos are deleted on
+   confirm by design).
+3. Keep the dump and files somewhere private and encrypted: they contain personal data and password hashes.
+4. **Restore test** (on a scratch Supabase project, never the live one): `pg_restore --no-owner --no-privileges
+   --dbname "$SCRATCH_DB_URL" rentdesk-YYYYMMDD-HHMM.dump`, then `npm run db:types` against it and sign in with a
+   known account. Note the date of the last successful restore test in `docs/progress.md`.
 
 ## Tests and seed
 
@@ -588,7 +640,8 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 - `reports.db.test.ts`: report functions, settings, the support view and agreement end reminders (see above).
   `rls.db.test.ts` gives its wrapper-privilege test 6 minutes: about 700 refused calls take over 2 minutes on the free tier.
 - `payments.db.test.ts`: every payment flow, SQL split = TypeScript split, duplicates, receipts gap-free and under concurrency (committed
-  fixture, skipped with `DB_TEST_APPLY_MIGRATIONS=1`), orphan slips, RLS on slips, allocations, receipts and refunds.
+  fixture, skipped with `DB_TEST_APPLY_MIGRATIONS=1`), orphan slips, the slip retention purge (0040), RLS on slips, allocations,
+  receipts and refunds.
 - `npm run db:seed` (`scripts/seed.ts`) creates demo accounts, machines, agreements and tickets in
   several stages through the same workflow functions. It is safe to re-run, and it prints the demo
   logins. A re-run also restores the demo login state (active, not locked, forced password change

@@ -4,12 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { actionFailure, must } from "@/lib/actions/errors";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { supabaseRpc } from "@/lib/cron/server";
-import { dbErrorMessage } from "@/lib/db-errors";
 import { notificationsFor } from "@/lib/notifications/service";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { RpcError } from "@/lib/tickets/transitions";
 import type { Database } from "@/types/db";
 
 import { canEdit, type CommentRow, commentPreview, commentRecipient, editCommentSchema, newCommentSchema } from "./rules";
@@ -35,10 +34,11 @@ export async function listComments(client: Client, ticketId: string): Promise<Co
   return data;
 }
 
+/** A message carries an idempotency key and an edit sets the same text again, so a retry is always safe (decision 47). */
+export const COMMENT_RETRY_MESSAGE = "We could not confirm that your message was sent (the connection was slow). Tap Send again: it is never sent twice.";
+
 function failure(error: unknown): { ok: false; error: string } {
-  if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, "comment"));
-  console.error("[comment]", error);
-  return fail("The message could not be sent. Please try again.");
+  return actionFailure(error, "comment", COMMENT_RETRY_MESSAGE);
 }
 
 export async function addComment(user: CurrentUser, input: z.input<typeof newCommentSchema>): Promise<ActionResult<{ commentId: string }>> {
@@ -48,13 +48,13 @@ export async function addComment(user: CurrentUser, input: z.input<typeof newCom
   const i = parsed.data;
   const admin = createAdminClient();
   try {
-    const { data: t } = await admin
+    const t = must(await admin
       .from("billing_cycle_tickets")
       .select(
         "id, owner_id, customer_id, machine:machines!billing_cycle_tickets_machine_fkey(brand, model), customer:customers!billing_cycle_tickets_customer_fkey(name)",
       )
       .eq("id", i.ticketId)
-      .maybeSingle();
+      .maybeSingle(), "ticket");
     const mine = t && (user.role === "OWNER" ? t.owner_id === user.id : t.customer_id === user.id);
     if (!t || !mine) return fail("This ticket was not found.");
     const to = commentRecipient(user.role, t);
@@ -79,7 +79,7 @@ export async function editComment(user: CurrentUser, input: z.input<typeof editC
   const i = parsed.data;
   const admin = createAdminClient();
   try {
-    const { data: c } = await admin.from("ticket_comments").select("author_id, created_at").eq("id", i.commentId).maybeSingle();
+    const c = must(await admin.from("ticket_comments").select("author_id, created_at").eq("id", i.commentId).maybeSingle(), "message");
     if (!c || c.author_id !== user.id) return fail("This message was not found.");
     if (!canEdit(c, user.id, new Date())) return fail("A message can be changed only in the first 5 minutes.");
     await supabaseRpc(admin)("rpc_edit_ticket_comment", { p_comment_id: i.commentId, p_actor_id: user.id, p_body: i.body });

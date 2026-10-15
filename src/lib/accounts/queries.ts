@@ -1,5 +1,6 @@
 import "server-only";
 
+import { must } from "@/lib/actions/errors";
 import type { AccountStatusValue } from "@/lib/accounts/schemas";
 import { createClient } from "@/lib/supabase/server";
 
@@ -33,7 +34,7 @@ export async function listOwners(filter: AccountFilter) {
     const like = `%${term}%`;
     // Quoted, so dots and spaces in the term cannot break the or=(...) syntax.
     const quoted = `"${like}"`;
-    const { data: byUsername } = await supabase.from("profiles").select("id").eq("role", "OWNER").ilike("username", like).limit(50);
+    const byUsername = must(await supabase.from("profiles").select("id").eq("role", "OWNER").ilike("username", like).limit(50), "username search");
     const ids = (byUsername ?? []).map((r) => r.id);
     const conditions = [`business_name.ilike.${quoted}`, `contact_person.ilike.${quoted}`, `phone.ilike.${quoted}`, `email.ilike.${quoted}`];
     if (ids.length > 0) conditions.push(`id.in.(${ids.join(",")})`);
@@ -65,7 +66,7 @@ export async function listCustomers(filter: AccountFilter) {
     const like = `%${term}%`;
     // Quoted, so dots and spaces in the term cannot break the or=(...) syntax.
     const quoted = `"${like}"`;
-    const { data: byUsername } = await supabase.from("profiles").select("id").eq("role", "CUSTOMER").ilike("username", like).limit(50);
+    const byUsername = must(await supabase.from("profiles").select("id").eq("role", "CUSTOMER").ilike("username", like).limit(50), "username search");
     const ids = (byUsername ?? []).map((r) => r.id);
     const conditions = [`name.ilike.${quoted}`, `business_name.ilike.${quoted}`, `phone.ilike.${quoted}`, `email.ilike.${quoted}`];
     if (ids.length > 0) conditions.push(`id.in.(${ids.join(",")})`);

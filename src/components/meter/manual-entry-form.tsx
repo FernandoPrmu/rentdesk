@@ -8,6 +8,7 @@ import { ReadingFields, ReadingPreview } from "@/components/meter/reading-form";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { unreachable } from "@/lib/actions/client-errors";
 import type { ActionResult } from "@/lib/action-result";
 import type { MeterContext } from "@/lib/billing/meter-invoice";
 import { previewReading, type TypedText } from "@/lib/meter/readings";
@@ -57,7 +58,7 @@ export function ManualEntryForm({
               setMessage(result.error);
             }
           } catch {
-            setMessage("The server could not be reached. Please try again.");
+            setMessage(unreachable("safe"));
           }
         });
       }}

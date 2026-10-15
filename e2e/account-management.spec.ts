@@ -102,7 +102,7 @@ test.describe("owner manages customers (CUS-01..03)", () => {
     const otherTenantCustomer = await profileId("cust.jayasuriya"); // Ceylon Office Machines
     await signInAndWait(page, DEMO.ownerLanka.username, DEMO.ownerLanka.password, /\/owner$/);
     await page.goto(`/owner/customers/${otherTenantCustomer}`);
-    await expect(page.getByText("This page could not be found.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "We could not find this page" })).toBeVisible();
     await expect(page.getByText("Jayasuriya")).toHaveCount(0);
   });
 });

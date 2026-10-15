@@ -8,6 +8,7 @@ import { ChoiceSelect } from "@/components/forms/choice-select";
 import { FormError, FormField, SelectField } from "@/components/forms/form-field";
 import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
+import { unreachable } from "@/lib/actions/client-errors";
 import type { ActionResult } from "@/lib/action-result";
 import { formatDate } from "@/lib/format";
 import { centsToRupeesInput, formatRupees, rupeesToCents } from "@/lib/money";
@@ -98,7 +99,7 @@ export function RecordPaymentForm({
                 toast.success(`Payment recorded. Receipt ${result.data.receiptNo}`);
                 router.push(`/owner/payments/${result.data.paymentId}`);
               } catch {
-                setFormError("The server could not be reached. Please try again.");
+                setFormError(unreachable("safe"));
               }
             });
           }}

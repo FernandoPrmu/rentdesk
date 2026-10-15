@@ -1,10 +1,10 @@
 import "server-only";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { actionFailure, CHECK_FIRST_MESSAGE, must, SAFE_RETRY_MESSAGE } from "@/lib/actions/errors";
 import { isIsoDate, todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { supabaseRpc } from "@/lib/cron/server";
-import { dbErrorMessage } from "@/lib/db-errors";
 import { onInvoiceChanged } from "@/lib/invoices/issued";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -16,9 +16,7 @@ import {
   clearOverdue,
   reopenTicket,
   requestPaymentAgain,
-  RpcError,
   type TicketSnapshot,
-  TransitionError,
 } from "@/lib/tickets/transitions";
 
 /**
@@ -28,16 +26,14 @@ import {
  * transition function and in the rpc). Reversing a payment is on the payment.
  */
 
-function failure(error: unknown, context: string): { ok: false; error: string } {
-  if (error instanceof TransitionError) return fail(error.message.replace(/^[^:]+: /, ""));
-  if (error instanceof RpcError) return fail(dbErrorMessage({ code: error.code, message: error.message.replace(/^[A-Z_]+: /, "") }, context));
-  console.error(`[${context}]`, error);
-  return fail("Something went wrong. Please try again.");
+/** Refusals in plain words; anything else is a transient failure with a message that says what is safe (decision 47). */
+function failure(error: unknown, context: string, retryMessage = CHECK_FIRST_MESSAGE): { ok: false; error: string } {
+  return actionFailure(error, context, retryMessage);
 }
 
 async function ownedTicket(owner: CurrentUser, ticketId: string) {
   const admin = createAdminClient();
-  const { data } = await admin
+  const data = must(await admin
     .from("billing_cycle_tickets")
     .select(
       `id, owner_id, customer_id, cycle_no, status, status_before_overdue, current_invoice_id,
@@ -45,7 +41,7 @@ async function ownedTicket(owner: CurrentUser, ticketId: string) {
        invoice:invoices!billing_cycle_tickets_current_invoice_fkey(id, due_date, total_cents, amount_paid_cents)`,
     )
     .eq("id", ticketId)
-    .maybeSingle();
+    .maybeSingle(), "ticket");
   if (!data || data.owner_id !== owner.id) return null;
   const ticket: TicketSnapshot = {
     id: data.id,
@@ -101,13 +97,13 @@ export async function ownerTicketAction(owner: CurrentUser, ticketId: string, in
     }
     return ok(undefined);
   } catch (error) {
-    return failure(error, `ticket ${input.action}`);
+    return failure(error, `ticket ${input.action}`, SAFE_RETRY_MESSAGE);
   }
 }
 
 /** The payment whose slip waits on this ticket (the signed-in user's client: RLS decides). */
 export async function waitingPaymentId(ticketId: string): Promise<string | null> {
   const supabase = await createClient();
-  const { data } = await supabase.from("payment_allocations").select("payment_id").eq("ticket_id", ticketId).eq("waiting", true).maybeSingle();
+  const data = must(await supabase.from("payment_allocations").select("payment_id").eq("ticket_id", ticketId).eq("waiting", true).maybeSingle(), "waiting payment");
   return data?.payment_id ?? null;
 }

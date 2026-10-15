@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { must } from "@/lib/actions/errors";
 import { settleDepositAction, updateTermsAction } from "@/app/(owner)/owner/agreements/actions";
 import { Facts, TermsHistory, termsFacts } from "@/components/agreements/agreement-display";
 import { SettleDepositForm, TermsEditForm } from "@/components/agreements/agreement-forms";
@@ -143,9 +144,9 @@ export default async function AgreementPage({ params, searchParams }: PageProps<
             Meter replaced or reset? Record the new starting reading so the next bill measures from it (spec 11.8). Copies printed on the old meter since the last
             reading can be carried into the next bill.
           </p>
-          {(baselines.data ?? []).length > 0 && (
+          {(must(baselines, "meter baselines") ?? []).length > 0 && (
             <ul className="divide-y text-sm" aria-label="Meter baselines" data-testid="baseline-history">
-              {(baselines.data ?? []).map((b) => (
+              {(must(baselines, "meter baselines") ?? []).map((b) => (
                 <li key={b.id} className="py-2">
                   <p className="font-medium">
                     {formatDate(b.recorded_at.slice(0, 10))} · {b.counter_type === "BW" ? "B&W" : "Colour"} from {formatCount(b.value)}

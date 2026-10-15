@@ -78,6 +78,6 @@ test("another customer opening this ticket gets 'not found', and the attempt is 
   const ticketId = await openFirstCycle(agreementId);
   await signInCached(page, DEMO.custSilva, "/customer");
   await page.goto(`/customer/tickets/${ticketId}`);
-  await expect(page.getByText("This page could not be found.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "We could not find this page" })).toBeVisible();
   await expect.poll(() => auditCount("ACCESS_DENIED", ticketId, silva)).toBe(1);
 });

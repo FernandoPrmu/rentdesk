@@ -4,7 +4,7 @@ import { Eye, FileUp, Trash2, TriangleAlert } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { LayoutEditor } from "@/components/settings/layout-editor";
+import { LayoutEditor } from "@/components/settings/layout-editor-lazy";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -140,6 +140,7 @@ export function InvoiceTemplateForm({
           <input
             ref={fileInput}
             id="field-letterhead"
+            aria-label="Letterhead file (JPG, PNG or a 1-page PDF)"
             type="file"
             name="letterhead"
             accept={LETTERHEAD_ACCEPT}

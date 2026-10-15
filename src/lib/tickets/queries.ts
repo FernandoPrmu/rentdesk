@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { must } from "@/lib/actions/errors";
 import { createClient } from "@/lib/supabase/server";
 
 import { TICKET_STATUSES, type TicketStatus } from "./states";
@@ -80,7 +81,7 @@ export async function listCustomerTicketRows(customerId: string): Promise<Custom
   ]);
   if (open.error) throw new Error(`customer tickets: ${open.error.message}`);
   if (confirmed.error) throw new Error(`confirmed readings: ${confirmed.error.message}`);
-  const photoTickets = new Set((photos.data ?? []).map((d) => d.ticket_id));
+  const photoTickets = new Set((must(photos, "dispute photos") ?? []).map((d) => d.ticket_id));
 
   const lastConfirmed = new Map<string, number>();
   for (const s of confirmed.data) {

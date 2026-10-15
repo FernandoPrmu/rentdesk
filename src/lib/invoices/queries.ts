@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { must } from "@/lib/actions/errors";
 import { isIsoDate } from "@/lib/agreements/cycle-calendar";
 import { createClient } from "@/lib/supabase/server";
 
@@ -112,8 +113,8 @@ export async function getInvoiceDetail(id: string) {
     ...row,
     lines: [...row.lines].sort((a, b) => a.sort_order - b.sort_order),
     final: Boolean(row.calculation?.partial),
-    replaces: replaces?.data ?? null,
-    replacedBy: replacedBy.data ?? null,
+    replaces: (replaces ? must(replaces, "replaced invoice") : null),
+    replacedBy: must(replacedBy, "corrected invoice"),
   };
 }
 export type InvoiceDetail = NonNullable<Awaited<ReturnType<typeof getInvoiceDetail>>>;

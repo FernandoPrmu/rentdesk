@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useHydrated } from "@/components/forms/use-hydrated";
 import { Button } from "@/components/ui/button";
+import { unreachable } from "@/lib/actions/client-errors";
 import type { ActionResult } from "@/lib/action-result";
 import { formatDate } from "@/lib/format";
 import { centsToRupeesInput, formatRupees } from "@/lib/money";
@@ -101,7 +102,7 @@ function RefundForm({ credit, today, action, onDone }: { credit: CreditView; tod
             onDone();
             router.refresh();
           } catch {
-            setFormError("The server could not be reached. Please try again.");
+            setFormError(unreachable("check"));
           }
         });
       }}

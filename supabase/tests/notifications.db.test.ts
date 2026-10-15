@@ -2,7 +2,7 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { deliveryCatalog } from "../../src/lib/notifications/events.ts";
-import { deliverDue, type OutboxPorts } from "../../src/lib/notifications/outbox.ts";
+import { deliverDue, type OutboxOptions, type OutboxPorts } from "../../src/lib/notifications/outbox.ts";
 import { fakeTransport, type SendResult, stubTextTransport } from "../../src/lib/notifications/transport.ts";
 import { APPLY_MIGRATIONS, asPostgres, asService, asUser, begin, connect, count, DB_URL, isolated, sqlError } from "./db";
 import { createFixture, type Fixture } from "./fixtures";
@@ -16,6 +16,12 @@ import { pgRpc } from "./rpc";
 describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () => {
   let db: pg.Client;
   let f: Fixture;
+  // The database clock minus this machine's: a row is due from the database's `now()`, and a
+  // local clock a few seconds behind would find nothing due yet (measured once, in beforeAll).
+  let skewMs = 0;
+  const dbNow = () => Date.now() + skewMs;
+  /** The sender on the database's clock. */
+  const send = (p: OutboxPorts, options: OutboxOptions = {}) => deliverDue(p, { now: () => new Date(dbNow()), ...options });
 
   const one = async <T>(sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows[0] as T;
   const deliveries = (userId: string, event: string) =>
@@ -42,6 +48,9 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
 
   beforeAll(async () => {
     db = await connect();
+    const before = Date.now();
+    const { rows } = await db.query<{ t: Date }>("select clock_timestamp() as t");
+    skewMs = rows[0].t.getTime() - (before + Date.now()) / 2;
     await begin(db);
     f = await createFixture(db);
     // Only this test's deliveries are due, and the dev database's real sends never count.
@@ -82,7 +91,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       expect(await deliveries(f.custA2, "account.contact_changed")).toHaveLength(0);
 
       const p = ports();
-      const s = await deliverDue(p);
+      const s = await send(p);
       expect(s.sent).toBe(1);
       expect(p.transport.sent.map((m) => m.to)).toEqual(["a1@example.lk"]);
       expect(p.transport.sent[0]).toMatchObject({ from: "Owner A Copiers via RentDesk <notify@rentdesk.test>", subject: "Your email address for Owner A Copiers" });
@@ -90,7 +99,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       expect((await deliveries(f.custA1, "account.contact_changed"))[0]).toMatchObject({ status: "SENT", sent_to: "a1@example.lk", attempts: 1 });
 
       // Sending again finds nothing (no double send).
-      expect((await deliverDue(p)).claimed).toBe(0);
+      expect((await send(p)).claimed).toBe(0);
     });
   });
 
@@ -151,9 +160,9 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       await db.query("update public.platform_settings set email_max_attempts = 3 where id");
       await db.query("update public.customers set email = 'a1@example.lk' where id = $1", [f.custA1]);
       const failing = fakeTransport({ fail: (): SendResult => ({ ok: false, provider: "resend", status: 503, message: "unavailable" }) });
-      let clock = Date.now();
+      let clock = dbNow();
       const p = ports(failing);
-      const run = () => deliverDue(p, { now: () => new Date(clock) });
+      const run = () => send(p, { now: () => new Date(clock) });
 
       await run();
       let [d] = await deliveries(f.custA1, "account.contact_changed");
@@ -180,7 +189,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
 
       // A 4xx (bad address) is not retried.
       await db.query("update public.customers set email = 'bad@example.lk' where id = $1", [f.custA2]);
-      await deliverDue(ports(fakeTransport({ fail: () => ({ ok: false, provider: "resend", status: 422, message: "invalid_to" }) })));
+      await send(ports(fakeTransport({ fail: () => ({ ok: false, provider: "resend", status: 422, message: "invalid_to" }) })));
       expect((await deliveries(f.custA2, "account.contact_changed"))[0]).toMatchObject({ status: "FAILED", attempts: 1 });
     });
   });
@@ -215,7 +224,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       expect(first).toMatch(/^[0-9a-f-]{36}$/);
       // A second sender (another server instance) gets nothing while the lease is held.
       expect(await rpc("rpc_outbox_begin", { p_now: now })).toBeNull();
-      expect((await deliverDue(ports())).idle).toBe(true);
+      expect((await send(ports())).idle).toBe(true);
       // Only the holder can give it back; then the next sender may take it.
       await rpc("rpc_outbox_end", { p_token: crypto.randomUUID() });
       expect(await rpc("rpc_outbox_begin", { p_now: now })).toBeNull();
@@ -276,7 +285,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
         [f.ownerA, f.custA1],
       );
       const p = ports();
-      const s = await deliverDue(p);
+      const s = await send(p);
       expect(s.limited).toBe(true);
       expect(p.transport.sent.map((m) => m.subject)).toEqual(["Your email address for Owner A Copiers"]); // the essential one
       for (const event of ["payment.due_today", "meter.rejected"]) {
@@ -291,7 +300,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       // At the limit, nothing goes, not even essential ones.
       await db.query("update public.platform_settings set email_daily_limit = 8 where id");
       await db.query("update public.customers set email = 'a1-new@example.lk' where id = $1", [f.custA1]);
-      expect((await deliverDue(p)).sent).toBe(0);
+      expect((await send(p)).sent).toBe(0);
       expect((await deliveries(f.custA1, "account.contact_changed")).map((d) => d.status)).toEqual(["SENT", "PENDING"]);
 
       // A reminder still waiting after the expiry is skipped, never sent late.
@@ -310,7 +319,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       await rpc("rpc_save_notification_template", { p_actor_id: f.admin, p_owner_id: null, p_event: "account.contact_changed", p_subject: "Global: {email}", p_body: "Global {recipient_name}" });
       await rpc("rpc_save_notification_template", { p_actor_id: f.ownerA, p_owner_id: f.ownerA, p_event: "account.contact_changed", p_subject: "Owner A: {email}", p_body: "From A to {recipient_name}" });
       const p = ports();
-      await deliverDue(p);
+      await send(p);
       const byTo = Object.fromEntries(p.transport.sent.map((m) => [m.to, m.subject]));
       expect(byTo).toEqual({ "a1@example.lk": "Owner A: a1@example.lk", "b1@example.lk": "Global: b1@example.lk" });
 
@@ -343,12 +352,12 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
       const delivery = () => one<{ status: string; attempts: number; last_error: string | null }>("select status, attempts, last_error from public.notification_deliveries where id = $1", [id]);
       await db.query("update public.invoices set pdf_status = 'PENDING', pdf_path = null where id = $1", [f.invoices.a2Mono]);
       const p = ports(fakeTransport(), { [`invoices/${f.ownerA}/${f.invoices.a2Mono}/v1.pdf`]: new Uint8Array([37, 80, 68, 70]) });
-      expect(await deliverDue(p)).toMatchObject({ postponed: 1, sent: 0 });
+      expect(await send(p)).toMatchObject({ postponed: 1, sent: 0 });
       expect(await delivery()).toMatchObject({ status: "PENDING", attempts: 0, last_error: expect.stringMatching(/^WAITING_FOR_PDF/) });
 
       await db.query("update public.invoices set pdf_status = 'READY', pdf_path = $2 where id = $1", [f.invoices.a2Mono, `${f.ownerA}/${f.invoices.a2Mono}/v1.pdf`]);
       await db.query("update public.notification_deliveries set next_attempt_at = now() where id = $1", [id]);
-      expect((await deliverDue(p)).sent).toBe(1);
+      expect((await send(p)).sent).toBe(1);
       expect((await delivery()).status).toBe("SENT");
       const invoiceNo = (await one<{ invoice_no: string }>("select invoice_no from public.invoices where id = $1", [f.invoices.a2Mono])).invoice_no;
       expect(p.transport.sent[0].attachments.map((a) => a.filename)).toEqual([`Bill-${invoiceNo}.pdf`]);
@@ -379,7 +388,7 @@ describe.skipIf(!DB_URL)("notifications (linked dev database, rolled back)", () 
     await isolated(db, async () => {
       const rpc = pgRpc(db);
       await db.query("update public.customers set email = 'a1@example.lk' where id = $1", [f.custA1]);
-      await deliverDue(ports(fakeTransport({ fail: () => null })));
+      await send(ports(fakeTransport({ fail: () => null })));
       const [d] = await deliveries(f.custA1, "account.contact_changed");
       await db.query("update public.notification_deliveries set provider = 'resend', provider_id = 're_123' where id = $1", [d.id]);
       expect(await rpc("rpc_mark_delivery_bounced", { p_provider_id: "re_123", p_reason: "Bounced: mailbox does not exist" })).toMatchObject({ found: true });

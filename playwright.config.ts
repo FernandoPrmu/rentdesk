@@ -42,6 +42,9 @@ export function e2eConfig(dev: boolean): PlaywrightTestConfig {
     use: {
       baseURL,
       trace: "on-first-retry",
+      // The install card (decision 90) sits above the bottom bar; feature specs start with
+      // it dismissed so it never covers what they tap. pwa.spec.ts tests it from scratch.
+      storageState: { cookies: [], origins: [{ origin: baseURL, localStorage: [{ name: "rentdesk:install-prompt", value: "dismissed" }] }] },
     },
     projects: [
       { name: "mobile-chrome", use: { ...devices["Pixel 7"], viewport: { width: 360, height: 740 } } },

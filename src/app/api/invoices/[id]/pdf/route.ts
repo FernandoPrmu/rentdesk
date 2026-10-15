@@ -32,7 +32,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   let path: string | null = null;
   let name = "invoice";
-  const { data: invoice } = await supabase.from("invoices").select("invoice_no, pdf_path").eq("id", id).not("invoice_no", "is", null).maybeSingle();
+  const { data: invoice, error: readError } = await supabase.from("invoices").select("invoice_no, pdf_path").eq("id", id).not("invoice_no", "is", null).maybeSingle();
+  // A failed read is not "not found" (decision 47): no denied-access entry, a retry message.
+  if (readError) return notFound("The invoice could not be opened (the connection was slow). Please try again.", 503);
   if (!invoice) {
     // 11.7 / decision 54: another tenant's or customer's file is logged, then answered like a missing one.
     await logDeniedAccess({ id: auth.user.id, role: (auth.user.app_metadata?.role as string | undefined) ?? undefined }, "invoices", id, "/api/invoices/[id]/pdf");
@@ -42,7 +44,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (version === null) {
     path = invoice.pdf_path;
   } else {
-    const { data: row } = await supabase.from("invoice_pdf_versions").select("storage_path").eq("invoice_id", id).eq("version", version).maybeSingle();
+    const { data: row, error: versionError } = await supabase.from("invoice_pdf_versions").select("storage_path").eq("invoice_id", id).eq("version", version).maybeSingle();
+    if (versionError) return notFound("The invoice could not be opened (the connection was slow). Please try again.", 503);
     path = row?.storage_path ?? null;
     name = `${name}-v${version}`;
   }

@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { must } from "@/lib/actions/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -201,6 +202,6 @@ export async function templateStates(ownerId: string | null): Promise<TemplateSt
 
 export async function getPreferences(userId: string): Promise<{ reminders: boolean; updates: boolean }> {
   const supabase = await createClient();
-  const { data } = await supabase.from("notification_preferences").select("email_reminders, email_updates").eq("user_id", userId).maybeSingle();
+  const data = must(await supabase.from("notification_preferences").select("email_reminders, email_updates").eq("user_id", userId).maybeSingle(), "email preferences");
   return { reminders: data?.email_reminders ?? true, updates: data?.email_updates ?? true };
 }

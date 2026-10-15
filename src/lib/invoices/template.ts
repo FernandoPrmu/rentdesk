@@ -1,6 +1,7 @@
 import "server-only";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { must } from "@/lib/actions/errors";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { BRANDING_BUCKET, isOwnLetterheadPath, letterheadFilePath, letterheadKind } from "@/lib/branding/files";
@@ -101,7 +102,7 @@ export async function previewSampleInvoice(owner: CurrentUser, input: InvoiceTem
   const pathOk = checkPath(owner, input.letterheadPath);
   if (!pathOk.ok) return pathOk;
   const admin = createAdminClient();
-  const { data: profile } = await admin.from("owner_company_profiles").select(BRANDING_SNAPSHOT_COLUMNS).eq("owner_id", owner.id).maybeSingle();
+  const profile = must(await admin.from("owner_company_profiles").select(BRANDING_SNAPSHOT_COLUMNS).eq("owner_id", owner.id).maybeSingle(), "company profile");
   if (!profile) return fail("Complete the company details first.");
   const branding = brandingFromSnapshot({
     ...profile,

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { must } from "@/lib/actions/errors";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import {
   type BuildContext,
@@ -145,9 +146,9 @@ export async function adminDashboardForHome(): Promise<DashboardResult<AdminDash
 
 /** The company name on owner reports (RLS: the owner, or an admin). */
 export async function companyName(client: Client, ownerId: string): Promise<string> {
-  const { data } = await client.from("owner_company_profiles").select("company_name").eq("owner_id", ownerId).maybeSingle();
+  const data = must(await client.from("owner_company_profiles").select("company_name").eq("owner_id", ownerId).maybeSingle(), "company name");
   if (data?.company_name) return data.company_name;
-  const { data: owner } = await client.from("owners").select("business_name").eq("id", ownerId).maybeSingle();
+  const owner = must(await client.from("owners").select("business_name").eq("id", ownerId).maybeSingle(), "owner");
   return owner?.business_name ?? "RentDesk";
 }
 

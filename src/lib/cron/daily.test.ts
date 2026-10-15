@@ -187,6 +187,31 @@ describe("buildEstimate (11.6, rule 13)", () => {
     expect(steps.indexOf("rpc_cron_pending_receipt_pdfs")).toBeGreaterThan(steps.indexOf("rpc_cron_pending_invoice_pdfs"));
   });
 
+  it("deletes slip files past their retention, then marks the rows; a storage failure marks nothing (decision 91)", async () => {
+    const removePaymentSlips = vi.fn(async () => {});
+    const expired = [
+      { id: "s1", storage_path: "o/c/1.pdf" },
+      { id: "s2", storage_path: "o/c/2.jpg" },
+    ];
+    let served = false;
+    const { rpc, calls } = fakeRpc({
+      rpc_cron_expired_slips: () => (served ? [] : ((served = true), expired)),
+      rpc_mark_slips_deleted: (args) => (args.p_ids as string[]).length,
+    });
+    const result = await runDailyJob(rpc, { ...storage, removePaymentSlips }, { now: NOW, trigger: "CRON" });
+    expect(removePaymentSlips).toHaveBeenCalledWith(["o/c/1.pdf", "o/c/2.jpg"]);
+    expect(calls.find(([fn]) => fn === "rpc_mark_slips_deleted")?.[1]).toEqual({ p_ids: ["s1", "s2"], p_now: NOW.toISOString() });
+    expect(result.counts).toMatchObject({ slipsDeleted: 2 });
+
+    const failing = vi.fn(async () => {
+      throw new Error("storage down");
+    });
+    const second = fakeRpc({ rpc_cron_expired_slips: () => expired });
+    const failed = await runDailyJob(second.rpc, { ...storage, removePaymentSlips: failing }, { now: NOW, trigger: "CRON" });
+    expect(second.calls.some(([fn]) => fn === "rpc_mark_slips_deleted")).toBe(false);
+    expect(failed.errors.some((e) => e.step === "expired slips")).toBe(true);
+  });
+
   it("sends due emails last (after the PDFs, so they can be attached); a sender error is reported, not fatal", async () => {
     const order: string[] = [];
     const generate = vi.fn(async () => {

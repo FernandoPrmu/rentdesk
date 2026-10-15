@@ -349,6 +349,23 @@ export async function runDailyJob(rpc: Rpc, storage: PhotoStorage, options: Dail
       }
     }
 
+    // Payment slips past their retention period (decision 91): the file goes, the row and an audit entry stay.
+    if (storage.removePaymentSlips) {
+      for (;;) {
+        checkTime();
+        const expired = (await rpc("rpc_cron_expired_slips", { p_now: now.toISOString(), p_limit: batch })) as { id: string; storage_path: string }[];
+        if (expired.length === 0) break;
+        try {
+          await storage.removePaymentSlips(expired.map((s) => s.storage_path));
+          counts.slipsDeleted += (await rpc("rpc_mark_slips_deleted", { p_ids: expired.map((s) => s.id), p_now: now.toISOString() })) as number;
+        } catch (error) {
+          record(errorEntry("expired slips", undefined, error));
+          break;
+        }
+        if (expired.length < batch) break;
+      }
+    }
+
     // Dispute files uploaded but never sent with a dispute, older than 2 days (rule 47). One batch per run.
     if (storage.removeDisputeFiles) {
       checkTime();

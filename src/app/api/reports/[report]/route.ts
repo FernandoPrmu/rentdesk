@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { must } from "@/lib/actions/errors";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import { blockReason } from "@/lib/auth/session-policy";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -110,11 +111,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   let company = { name: doc.company, address: null as string | null, phone: null as string | null, email: null as string | null };
   let logo: Uint8Array | null = null;
   if (ownerId) {
-    const { data: profile } = await client
-      .from("owner_company_profiles")
-      .select("company_name, address, phone, email, logo_path")
-      .eq("owner_id", ownerId)
-      .maybeSingle();
+    const profile = must(
+      await client.from("owner_company_profiles").select("company_name, address, phone, email, logo_path").eq("owner_id", ownerId).maybeSingle(),
+      "company profile",
+    );
     if (profile) {
       company = { name: profile.company_name, address: profile.address, phone: profile.phone, email: profile.email };
       logo = await logoBytes(profile.logo_path);

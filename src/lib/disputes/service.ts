@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { must } from "@/lib/actions/errors";
 import { isIsoDate, todayInColombo } from "@/lib/agreements/cycle-calendar";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { creditOnIssuedInvoice } from "@/lib/billing/dispute";
@@ -299,12 +300,12 @@ export async function getDisputePhotoRequest(user: CurrentUser, ticketId: string
   const admin = createAdminClient();
   const t = await loadTicket(admin, ticketId);
   if (!t || t.customer_id !== user.id) return null;
-  const { data: d } = await admin
+  const d = must(await admin
     .from("disputes")
     .select("id, photo_requested_at, photo_request_note, photo_received_at")
     .eq("ticket_id", t.id)
     .eq("status", "OPEN")
-    .maybeSingle();
+    .maybeSingle(), "dispute");
   const open = t.status === "DISPUTED" && d?.photo_requested_at && !d.photo_received_at;
   return { ticketId: t.id, ownerId: t.owner_id, machine: t.machine_name ?? "", machineType: t.machine_type, note: d?.photo_request_note ?? null, open: Boolean(open) };
 }
@@ -401,7 +402,7 @@ export interface ReadingRecord {
  * client: RLS limits it to the tenant.
  */
 export async function getReadingRecord(client: Admin, invoiceId: string): Promise<ReadingRecord | null> {
-  const { data } = await client
+  const data = must(await client
     .from("meter_submissions")
     .select(
       `source, submitted_at, reviewed_at, reviewer:profiles!meter_submissions_reviewed_by_fkey(full_name, username),
@@ -410,7 +411,7 @@ export async function getReadingRecord(client: Admin, invoiceId: string): Promis
     )
     .eq("invoice_id", invoiceId)
     .eq("status", "CONFIRMED")
-    .maybeSingle();
+    .maybeSingle(), "reading record");
   if (!data) return null;
   const photo = Array.isArray(data.photo) ? data.photo[0] : data.photo;
   return {

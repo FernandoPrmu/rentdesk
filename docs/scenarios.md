@@ -158,3 +158,20 @@ Not section 11 rows, but paths with the same risk (wrong data shown, a silent ch
 | Who changed a setting, and from what | Audit entry with old → new and the actor for every change; Admin › Audit log, Settings › Change history | Admin › Audit log | DB `rpt`; E2E `reports.spec.ts` | done |
 | An agreement ends without anyone noticing | The owner is told once, within their notice (default 30 days), in-app and by email; "Ending soon" on the agreement, the customer profile and Rental information (decision 86) | Notifications, agreement, Reports › Rental information | U `daily.test.ts`; DB `rpt` | done |
 | A text cell in an export looks like a formula | Kept as text with a leading apostrophe (decision 83) | Excel exports | U `export.test.ts` | done |
+
+## PWA, offline, security and failures (task 12)
+
+Not section 11 rows, but paths where a phone, a deployment or the network could show wrong or someone else's data.
+`pwa` = `e2e/pwa.spec.ts`, `sec` = `e2e/security-headers.spec.ts`, `a11y` = `e2e/a11y.spec.ts`.
+
+| Scenario | How RentDesk handles it | Screens | Tests | Status |
+| --- | --- | --- | --- | --- |
+| The phone is offline when a page is opened | The service worker shows "No internet connection" at the address the user wanted, with Try again; the page reloads by itself when the connection returns. Nothing personal is ever stored by the worker (decision 88) | Offline page | U `pwa.test.ts`; E2E `pwa` (offline, then back online) | done |
+| A shared phone: the next person opens RentDesk | Signing out (or being signed out) clears drafts, session data and every non-static cache; pages, API answers, PDFs and signed URLs were never cached (decision 88) | Sign in | U `pwa.test.ts`; E2E `pwa` (sign-out clears; only static files cached) | done |
+| A new version is deployed while a page is open | "New version available — tap to refresh" (on focus, every 15 minutes, or when an action fails); the tap reloads the same page; a typed meter reading stays on the phone (decision 89) | Any page | U `pwa.test.ts`; E2E `pwa` | done |
+| A Server Action times out or the answer is lost | The message says whether tapping again is safe ("it is never done twice") or the user should reload and check first; a failed read never shows an empty list or "not found" (decision 92) | Every form | U `errors.test.ts` | done |
+| A page cannot load (database stall, server error) | "This page could not load" with Try again and Go to Home, inside the portal's navigation; unknown addresses and other accounts' records get "We could not find this page" (rule 54 still logs the attempt) | Every portal | E2E `comments.spec.ts`, `account-management.spec.ts` (not found) | done |
+| Another site frames RentDesk, injects a script or a form target | CSP `frame-ancestors 'none'`, scripts and forms from this site only, `X-Frame-Options: DENY`, HSTS, nosniff (decision 87) | — | U `headers.test.ts`; E2E `sec` (headers on every kind of response; no CSP violation in any portal) | done |
+| A secret ends up in the browser | `npm run check:bundle` scans every browser file for the server secrets' values, service-role JWTs and server-only modules (clean; proven to catch a planted value) | — | `scripts/check-bundle-secrets.ts` | done |
+| A payment slip is kept longer than needed | The file is deleted after the retention period (7 years by default, admin setting); the payment, its hash and an audit entry stay (decision 91) | Payment pages ("the slip file was deleted on …") | U `daily.test.ts`; DB `pay` | done |
+| A keyboard or screen-reader user | Skip to content, labelled fields, focus order, contrast 4.5:1 or more; axe on every main page (decision 93) | All | E2E `a11y` | done |

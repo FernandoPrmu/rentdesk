@@ -142,6 +142,8 @@ hit the statement timeout at random. This is the standing e2e rule:
   (e2e signs in with the seed accounts on the linked dev DB at a 360 px viewport; it restores
   them afterwards and needs `SUPABASE_DB_URL` to delete the accounts it creates)
 - `npm run test:e2e:gate` = the full e2e suite on a single worker (the merge gate)
+- `npm run check:bundle` = after `npm run build`: proves no secret value, service-role JWT or server-only module is in
+  any browser file (`.next/static`, `public/`)
 - `npm run db:cleanup-test-data` = deletes e2e leftovers older than a day, and audit_logs and
   notification rows that tests created, older than 7 days (`-- --days=N`, `-- --dry-run`).
   Dev project only: it refuses to run unless `SUPABASE_DB_URL` points at project

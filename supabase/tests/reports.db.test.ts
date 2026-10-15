@@ -141,6 +141,66 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
       });
     });
 
+    it("definer customer dashboard: only the caller's own figures, never DRAFT, REJECTED or CANCELLED bills", async () => {
+      await isolated(db, async () => {
+        const dash = (user: string) =>
+          report<{ outstanding_cents: number; machines: { serial_no: string }[]; latest_invoice: { id: string } | null }>(user, "public.report_customer_dashboard()");
+        const serials = async (customer: string) =>
+          (await db.query<{ s: string }>("select m.serial_no as s from public.rental_agreements a join public.machines m on m.id = a.machine_id where a.customer_id = $1 and a.status = 'ACTIVE' order by 1", [customer])).rows.map((r) => r.s);
+        // Same owner, other customer (A1) and other owner (B1): each sees only their own bill and machines.
+        const a2 = await dash(f.custA2);
+        expect(a2).toMatchObject({ outstanding_cents: RS(6500), latest_invoice: { id: f.invoices.a2Mono } });
+        expect(a2.machines.map((m) => m.serial_no).sort()).toEqual(await serials(f.custA2));
+        const b1 = await dash(f.custB1);
+        expect(b1).toMatchObject({ outstanding_cents: RS(6500), latest_invoice: { id: f.invoices.b1Mono } });
+        expect(b1.machines.map((m) => m.serial_no)).toEqual(await serials(f.custB1));
+        const a1 = await dash(f.custA1);
+        expect(a1.machines.map((m) => m.serial_no).sort()).toEqual(await serials(f.custA1));
+        // A1's bill waiting for review is a DRAFT: hidden even once it carries a number.
+        await db.query("update public.invoices set invoice_no = 'DRAFT-' || $2 where id = $1", [f.invoices.a1Colour, f.tag]);
+        expect(await dash(f.custA1)).toMatchObject({ outstanding_cents: 0, latest_invoice: null });
+        // A2's issued bill turned DRAFT, REJECTED or CANCELLED (number kept) leaves the dashboard.
+        for (const status of ["DRAFT", "REJECTED", "CANCELLED"]) {
+          await db.query("savepoint bill_status");
+          await db.query("update public.invoices set status = $2, cancel_reason = 'test' where id = $1", [f.invoices.a2Mono, status]);
+          expect(await dash(f.custA2), status).toMatchObject({ outstanding_cents: 0, latest_invoice: null });
+          await db.query("rollback to savepoint bill_status");
+        }
+      });
+    });
+
+    it("definer dashboards return what the RLS (security invoker) version returns, for every caller", async () => {
+      await isolated(db, async () => {
+        // The same function bodies as security invoker (rolled back): RLS applies on top of the explicit guards.
+        for (const name of ["report_owner_dashboard", "report_customer_dashboard"]) {
+          const { def } = await one<{ def: string }>("select pg_get_functiondef(p.oid) as def from pg_proc p where p.oid = $1::regproc", [`public.${name}`]);
+          expect(def).toContain("SECURITY DEFINER");
+          await db.query(def.replace(`public.${name}(`, `public.${name}_rls_check(`).replace("SECURITY DEFINER", "SECURITY INVOKER"));
+          await db.query(`grant execute on function public.${name}_rls_check to authenticated`);
+        }
+        const same = async (label: string) => {
+          const owners = [f.ownerA, f.ownerB, f.admin, f.custA1];
+          for (const caller of owners) {
+            for (const owner of [f.ownerA, f.ownerB]) {
+              const definer = await report(caller, "public.report_owner_dashboard($1, $2)", [owner, today]);
+              const invoker = await report(caller, "public.report_owner_dashboard_rls_check($1, $2)", [owner, today]);
+              expect(definer, `${label}: owner dashboard of ${owner === f.ownerA ? "A" : "B"} as ${caller}`).toEqual(invoker);
+            }
+          }
+          for (const caller of [f.custA1, f.custA2, f.custB1, f.ownerA, f.admin]) {
+            const definer = await report(caller, "public.report_customer_dashboard()");
+            const invoker = await report(caller, "public.report_customer_dashboard_rls_check()");
+            expect(definer, `${label}: customer dashboard as ${caller}`).toEqual(invoker);
+          }
+        };
+        await same("fixture");
+        await moneyIn();
+        await same("after payments, advance, deposit and refund");
+        await db.query("update public.profiles set status = 'SUSPENDED' where id = $1", [f.ownerA]);
+        await same("owner A suspended");
+      });
+    });
+
     it("an admin reads any owner's reports (support view) and the platform dashboard", async () => {
       await isolated(db, async () => {
         const b = await report<{ months: IncomeMonthRow[] }>(f.admin, "public.report_income($1, $2, $3)", [f.ownerB, from, to]);
@@ -432,5 +492,23 @@ describe.skipIf(!DB_URL)("reports, dashboards, settings and support view (linked
     const definers = ["report_customer_dashboard", "report_owner_dashboard"];
     for (const r of rows) expect(r, r.name).toMatchObject({ definer: definers.includes(r.name), volatile: "s", auth: true });
     expect((await sqlError(db, "set local role anon; select public.report_owner_dashboard(gen_random_uuid(), current_date)"))?.code).toBe("42501");
+    expect((await sqlError(db, "set local role anon; select public.report_customer_dashboard()"))?.code).toBe("42501");
+  });
+
+  it("the definer dashboards: fixed empty search_path, owned by postgres, executable only by authenticated and the service role", async () => {
+    const { rows } = await db.query<{ name: string; owner: string; config: string[] | null; grantees: string[] }>(
+      `select p.proname as name, pg_get_userbyid(p.proowner) as owner, p.proconfig as config,
+              array(select case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee)::text end
+                    from aclexplode(p.proacl) a where a.privilege_type = 'EXECUTE' order by 1) as grantees
+       from pg_proc p where p.oid in ('public.report_owner_dashboard'::regproc, 'public.report_customer_dashboard'::regproc) order by 1`,
+    );
+    expect(rows).toEqual(
+      ["report_customer_dashboard", "report_owner_dashboard"].map((name) => ({
+        name,
+        owner: "postgres",
+        config: ['search_path=""'],
+        grantees: ["authenticated", "postgres", "service_role"],
+      })),
+    );
   });
 });

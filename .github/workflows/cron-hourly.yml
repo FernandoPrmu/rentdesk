@@ -1,4 +1,4 @@
-# OPTIONAL: run the daily job every hour as well (decision 97; docs/go-live.md, step j).
+# OPTIONAL: run the daily job every hour as well (decision 100; docs/go-live.md, step j).
 #
 # Vercel Hobby runs /api/cron/daily once a day (vercel.json, 00:30-01:29 Asia/Colombo).
 # Steps counted in hours (owner review reminders after 24 h / 48 h, the admin after 72 h)

@@ -146,8 +146,13 @@ hit the statement timeout at random. This is the standing e2e rule:
   any browser file (`.next/static`, `public/`)
 - `npm run db:cleanup-test-data` = deletes e2e leftovers older than a day, and audit_logs and
   notification rows that tests created, older than 7 days (`-- --days=N`, `-- --dry-run`).
-  Dev project only: it refuses to run unless `SUPABASE_DB_URL` points at project
-  `gpviraoifdnakkigrfga`.
+  It refuses a production database (the production lock below).
+- **Production lock** (task 13, decision 95): `platform_settings.environment` = `production` marks the live
+  database. `npm run dev`, `test:db`, `test:e2e*`, `db:seed` and `db:cleanup-test-data` check it first and refuse;
+  nothing overrides it. Never point `.env.local` at production; production secrets for the admin scripts live only in
+  `.env.admin.local` (not `.env.production.local`, which `next build`/`next start` load).
+- `npm run golive:wipe` / `npm run golive:admin` = one-time go-live tools (`docs/go-live.md`); `GET /api/health` =
+  uptime check. Backups: `.github/workflows/backup.yml`, `docs/backup-restore.md`.
 - `npx supabase link --project-ref <ref>` (once; links the CLI to the cloud project)
 - `npm run db:push` = `supabase db push` (apply new migrations to the linked cloud DB;
   add `--dry-run` to preview)

@@ -1,7 +1,7 @@
 # RentDesk — Database
 
 Supabase Postgres, one shared schema (`public`) for all tenants. Every tenant table has `owner_id`
-and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0040`). Types are
+and row-level security (RLS). Migrations live in `supabase/migrations/` (`0001`–`0042`). Types are
 generated into `src/types/db.ts` with `npm run db:types`. The private `app` schema holds RLS helpers
 and workflow functions. It is **not** exposed through the Data API.
 
@@ -587,6 +587,33 @@ app's own per-account and per-IP limits above protect logins instead.
   own folder / recorded files) and INSERT (customers, into their own folder or ticket); no UPDATE or DELETE policy, so no
   client can overwrite or remove a file.
 
+## Production lock (migrations 0041–0042, task 13)
+
+- **`platform_settings.environment`** (decision 95): `development` (the default, so every database built from the
+  migrations starts as development) or `production` (check constraint). Only `npm run golive:wipe` sets `production`,
+  as its last step, over the direct `postgres` connection in `.env.admin.local`.
+- **Trigger `platform_settings_environment_guard`** (`app.guard_platform_environment`): a change to another value is
+  refused (`RD403`) unless **both** `session_user` and `current_user` are `postgres` (0042: the service role has
+  table-level UPDATE; through the Data API the session user is `authenticator`, even inside a security definer
+  function), and `production` can **never** change back. Other settings still save in production. It is not in
+  `app.platform_setting_keys()`, so `update_platform_settings` refuses it as an unknown setting.
+- **`public.rentdesk_environment()`**: `security definer`, `stable`, `search_path = ''`; returns only the word.
+  Executable by `anon`, `authenticated` and `service_role`: the **only** public function anon may call (the dev guard
+  and `/api/health` use the publishable key; `rls.db.test.ts` lists it as the exception).
+- **Who checks it** (first, before touching anything): `npm run test:db` (Vitest global setup
+  `supabase/tests/global-setup.ts`, and `connect()` in `supabase/tests/db.ts`), the e2e global setup and teardown,
+  `db:seed`, `db:cleanup-test-data` (which no longer checks a fixed project ref), and the npm pre-hooks of `dev`,
+  `test:e2e`, `test:e2e:dev`, `test:e2e:gate` (`scripts/guard-not-production.ts`, with the env exactly as `next dev` /
+  `next start` load it). They read it through every database configured (pg and the Data API) and refuse when one is
+  production or cannot be checked. A database without 0041 counts as development.
+- **Go-live scripts** (`docs/go-live.md`): `golive:wipe` (files through the Storage API, `supabase db reset --linked
+  --no-seed`, auth users checked, flag set; refuses when already production) and `golive:admin` (production only;
+  `createUser` + `rpc_provision_account` (ADMIN, `must_change_password`) + `rpc_set_admin_email`, password shown once).
+- **Tests.** `production-lock.db.test.ts` (rolled back: default and allowed values, readers, set by postgres and seen by
+  anon, no way back, the service role and the settings rpc refused, the trigger's two checks); unit tests in
+  `src/lib/ops/environment.test.ts`, `scripts/lib/production-lock.test.ts` (refusal against a fake Data API, the env as
+  Next loads it) and `scripts/lib/go-live.test.ts`.
+
 ## Storage
 
 All buckets are private. Files are served through short-lived signed URLs. Paths start with
@@ -604,32 +631,16 @@ All buckets are private. Files are served through short-lived signed URLs. Paths
 
 ## Backups
 
-The Supabase free tier keeps no backups you can restore. **Planned for go-live (task 13):** a daily `pg_dump` by a free
-GitHub Actions schedule into a private artifact or repository, with a restore tested on a scratch project. Until then,
-take a manual backup before any risky change:
-
-1. Use the **session pooler** URI from Supabase › Project settings › Database (the same as `SUPABASE_DB_URL`), and a
-   `pg_dump` of the same major version as the server (Postgres 17: `pg_dump --version`).
-2. Schema and data, without Supabase-managed schemas that a new project recreates:
-
-   ```bash
-   pg_dump "$SUPABASE_DB_URL" --format=custom --no-owner --no-privileges \
-     --schema=public --schema=app --schema=auth --schema=storage \
-     --file="rentdesk-$(date +%Y%m%d-%H%M).dump"
-   ```
-
-   `storage` holds the file *records* only; the files themselves are in Supabase Storage. Download the private
-   buckets too (Supabase CLI: `npx supabase storage cp -r ss:///payment-slips ./backup/payment-slips --experimental`,
-   and the same for `invoices`, `receipts`, `branding`, `dispute-files`, `service-photos`; meter photos are deleted on
-   confirm by design).
-3. Keep the dump and files somewhere private and encrypted: they contain personal data and password hashes.
-4. **Restore test** (on a scratch Supabase project, never the live one): `pg_restore --no-owner --no-privileges
-   --dbname "$SCRATCH_DB_URL" rentdesk-YYYYMMDD-HHMM.dump`, then `npm run db:types` against it and sign in with a
-   known account. Note the date of the last successful restore test in `docs/progress.md`.
+Daily, encrypted, free (decision 97): `.github/workflows/backup.yml` dumps `public`, `app`, `auth`, `storage` and
+`supabase_migrations` with `pg_dump` 17, adds a row-count manifest (`scripts/backup/manifest.sql`), encrypts with gpg
+and keeps it 30 days as a workflow artifact. Files in Storage are not in the dump (copied by hand). Set-up, download,
+the restore test into a local `postgres:17` (passed on 2026-10-15 with the pre-go-live database) and a disaster restore
+into a new project: `docs/backup-restore.md`.
 
 ## Tests and seed
 
-- `npm run test:db` runs RLS and workflow tests against the linked dev database.
+- `npm run test:db` runs RLS and workflow tests against the linked dev database. It refuses a production database
+  (the production lock above).
   - It uses `SUPABASE_DB_URL`. Use the **session pooler** URI: long runs over the direct IPv6 host
     dropped their connection.
   - Each suite builds a two-tenant fixture inside a transaction and rolls it back. The concurrency
@@ -642,6 +653,7 @@ take a manual backup before any risky change:
 - `payments.db.test.ts`: every payment flow, SQL split = TypeScript split, duplicates, receipts gap-free and under concurrency (committed
   fixture, skipped with `DB_TEST_APPLY_MIGRATIONS=1`), orphan slips, the slip retention purge (0040), RLS on slips, allocations,
   receipts and refunds.
+- `production-lock.db.test.ts`: the production flag, rolled back (see Production lock above).
 - `npm run db:seed` (`scripts/seed.ts`) creates demo accounts, machines, agreements and tickets in
   several stages through the same workflow functions. It is safe to re-run, and it prints the demo
   logins. A re-run also restores the demo login state (active, not locked, forced password change

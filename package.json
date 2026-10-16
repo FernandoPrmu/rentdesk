@@ -1,11 +1,12 @@
 {
   "name": "rentdesk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "engines": {
     "node": "24.x"
   },
   "scripts": {
+    "predev": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/guard-not-production.ts \"npm run dev\"",
     "dev": "next dev",
     "build": "next build && serwist build serwist.config.mjs",
     "start": "next start",
@@ -13,8 +14,11 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:e2e": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/guard-not-production.ts \"npm run test:e2e\"",
     "test:e2e": "playwright test",
+    "pretest:e2e:dev": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/guard-not-production.ts \"npm run test:e2e:dev\"",
     "test:e2e:dev": "playwright test --config=playwright.dev.config.ts",
+    "pretest:e2e:gate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/guard-not-production.ts \"npm run test:e2e:gate\"",
     "test:e2e:gate": "playwright test --workers=1",
     "test:db": "vitest run --config vitest.db.config.mts",
     "db:push": "supabase db push",
@@ -22,7 +26,9 @@
     "db:seed": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed.ts",
     "db:cleanup-test-data": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cleanup-test-data.ts",
     "cron:run": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/cron-run.ts",
-    "check:bundle": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-bundle-secrets.ts"
+    "check:bundle": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-bundle-secrets.ts",
+    "golive:wipe": "node --env-file=.env.admin.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/go-live-wipe.ts",
+    "golive:admin": "node --conditions=react-server --env-file=.env.admin.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/create-admin.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

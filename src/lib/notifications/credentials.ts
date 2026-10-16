@@ -110,8 +110,11 @@ export async function emailLoginDetails(input: {
   return {
     status: result.outcome === "SKIPPED" ? "SKIPPED" : "FAILED",
     to,
-    message: result.outcome === "SKIPPED" && message.startsWith("DEV_NO_REDIRECT")
-      ? "Not sent: this is not production and EMAIL_DEV_REDIRECT is not set."
-      : "The email could not be sent. Please give the details yourself.",
+    message:
+      result.outcome === "SKIPPED" && message.startsWith("NO_SENDER_DOMAIN")
+        ? "Not sent: email is not set up yet (no domain). Please give the details yourself."
+        : result.outcome === "SKIPPED" && message.startsWith("DEV_NO_REDIRECT")
+          ? "Not sent: this is not production and EMAIL_DEV_REDIRECT is not set."
+          : "The email could not be sent. Please give the details yourself.",
   };
 }

@@ -8,6 +8,9 @@
 /** This build's ID, inlined by next.config.ts. "dev" outside a deployment build. */
 export const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? "dev";
 
+/** The app's release (package.json "version"), inlined by next.config.ts; shown by /api/health. */
+export const APP_VERSION = process.env.RENTDESK_VERSION ?? "0.0.0";
+
 export const VERSION_PATH = "/api/version";
 
 /** How often an open page asks, besides on focus and when it becomes visible. */

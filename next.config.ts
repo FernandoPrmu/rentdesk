@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 import type { NextConfig } from "next";
 
@@ -17,11 +18,14 @@ const buildId = resolveBuildId(process.env, () => {
 
 const isDev = process.env.NODE_ENV === "development";
 
+// The release shown by /api/health (decision 99).
+const version = (JSON.parse(readFileSync("package.json", "utf8")) as { version: string }).version;
+
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
-  env: { NEXT_PUBLIC_BUILD_ID: buildId },
+  env: { NEXT_PUBLIC_BUILD_ID: buildId, RENTDESK_VERSION: version },
   experimental: {
     // Letterhead uploads (5 MB limit, checked again on the server) plus multipart overhead.
     serverActions: { bodySizeLimit: "6mb" },

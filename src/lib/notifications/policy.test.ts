@@ -8,11 +8,14 @@ import {
   classifyStatus,
   destination,
   emailAllowance,
+  emailSetup,
   footerNote,
   isProductionDeployment,
   nextUtcDay,
+  NO_SENDER_DOMAIN,
   type Quota,
   retryDelayMs,
+  senderDomainMissing,
   senderName,
   withPriority,
 } from "./policy";
@@ -45,6 +48,24 @@ describe("non-production safety (decision 73)", () => {
     for (const redirect of [undefined, null, "", "   "]) {
       expect(destination({ to: "a@b.lk", subject: "Bill", production: false, redirect })).toMatchObject({ kind: "skip", reason: expect.stringMatching(/^DEV_NO_REDIRECT/) });
     }
+  });
+});
+
+describe("email off without a sending domain (decision 96)", () => {
+  it("is off only in production with EMAIL_FROM empty", () => {
+    expect(emailSetup({ VERCEL_ENV: "production" })).toEqual({ enabled: false, reason: "NO_SENDER_DOMAIN" });
+    expect(emailSetup({ VERCEL_ENV: "production", EMAIL_FROM: "  " })).toEqual({ enabled: false, reason: "NO_SENDER_DOMAIN" });
+    expect(emailSetup({ APP_ENV: "production", EMAIL_FROM: "" })).toEqual({ enabled: false, reason: "NO_SENDER_DOMAIN" });
+    expect(emailSetup({ VERCEL_ENV: "production", EMAIL_FROM: "notify@mail.example.lk" })).toEqual({ enabled: true });
+    expect(emailSetup({ VERCEL_ENV: "preview" })).toEqual({ enabled: true });
+    expect(emailSetup({})).toEqual({ enabled: true });
+  });
+
+  it("older configs without the flag count as configured", () => {
+    expect(senderDomainMissing({ production: true })).toBe(false);
+    expect(senderDomainMissing({ production: true, fromConfigured: false })).toBe(true);
+    expect(senderDomainMissing({ production: false, fromConfigured: false })).toBe(false);
+    expect(NO_SENDER_DOMAIN).toMatch(/^NO_SENDER_DOMAIN: /);
   });
 });
 

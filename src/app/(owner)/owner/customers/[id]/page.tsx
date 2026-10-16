@@ -26,6 +26,7 @@ import { uuidSchema } from "@/lib/accounts/schemas";
 import { todayInColombo } from "@/lib/agreements/cycle-calendar";
 import { listCustomerAgreements } from "@/lib/agreements/queries";
 import { requireUser } from "@/lib/auth/current-user";
+import { EMAIL_OFF_NOTE, emailSetup } from "@/lib/notifications/policy";
 import { getCustomerBalances, getCustomerBilling } from "@/lib/customers/queries";
 import { getDepositsHeld, listDepositsToSettle } from "@/lib/deposits/queries";
 import { formatDate } from "@/lib/format";
@@ -243,6 +244,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/owner/c
             statusAction={setCustomerStatusAction.bind(null, customer.id)}
             resetAction={resetCustomerPasswordAction.bind(null, customer.id)}
             email={customer.email}
+            emailOffNote={emailSetup().enabled ? null : EMAIL_OFF_NOTE}
           />
         </CardContent>
       </Card>

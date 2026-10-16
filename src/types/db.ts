@@ -2664,6 +2664,7 @@ export type Database = {
           email_max_attempts: number
           email_monthly_limit: number
           email_reminder_expiry_days: number
+          environment: string
           estimated_billing_enabled: boolean
           grace_period_days: number
           id: boolean
@@ -2708,6 +2709,7 @@ export type Database = {
           email_max_attempts?: number
           email_monthly_limit?: number
           email_reminder_expiry_days?: number
+          environment?: string
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -2752,6 +2754,7 @@ export type Database = {
           email_max_attempts?: number
           email_monthly_limit?: number
           email_reminder_expiry_days?: number
+          environment?: string
           estimated_billing_enabled?: boolean
           grace_period_days?: number
           id?: boolean
@@ -3775,6 +3778,7 @@ export type Database = {
     }
     Functions: {
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      rentdesk_environment: { Args: never; Returns: string }
       report_admin_activity: {
         Args: { p_from: string; p_to: string }
         Returns: Json

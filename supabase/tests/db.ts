@@ -26,6 +26,16 @@ export async function connect(): Promise<pg.Client> {
   if (!DB_URL) throw new Error("SUPABASE_DB_URL is not set (see .env.example)");
   const client = new pg.Client({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
   await client.connect();
+  // The production lock (decision 95), again per connection: the global setup checked
+  // first, this catches a suite run on its own. A missing function = before 0041.
+  const flag = await client.query("select public.rentdesk_environment() as environment").catch((error: { code?: string }) => {
+    if (error.code === "42883") return { rows: [{ environment: "development" }] };
+    throw error;
+  });
+  if (flag.rows[0]?.environment === "production") {
+    await client.end();
+    throw new Error("Refusing to run database tests: SUPABASE_DB_URL points at the PRODUCTION database (decision 95).");
+  }
   return client;
 }
 

@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { getOwner } from "@/lib/accounts/queries";
 import { uuidSchema } from "@/lib/accounts/schemas";
 import { requireUser } from "@/lib/auth/current-user";
+import { EMAIL_OFF_NOTE, emailSetup } from "@/lib/notifications/policy";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Owner" };
@@ -51,8 +52,13 @@ export default async function OwnerDetailPage({ params }: PageProps<"/admin/owne
             status={owner.profile.status}
             statusAction={setOwnerStatusAction.bind(null, owner.id)}
             resetAction={resetOwnerPasswordAction.bind(null, owner.id)}
-            suspendWarning="All of this owner's customers are blocked too, and they are told by email."
+            suspendWarning={
+              emailSetup().enabled
+                ? "All of this owner's customers are blocked too, and they are told by email."
+                : "All of this owner's customers are blocked too, and they are told in the app."
+            }
             email={owner.email}
+            emailOffNote={emailSetup().enabled ? null : EMAIL_OFF_NOTE}
           />
         </CardContent>
       </Card>

@@ -33,6 +33,10 @@ import type { Rpc } from "../src/lib/tickets/transitions.ts";
 import type { Database, Json } from "../src/types/db";
 
 import { demoLogo, demoMeterPhoto } from "./demo-meter-photo.ts";
+import { exitIfProduction } from "./lib/production-lock.ts";
+
+// The production lock first (decision 95): demo data never goes into production.
+await exitIfProduction("npm run db:seed", [process.env]);
 
 type Admin = SupabaseClient<Database>;
 type Ticket = Database["public"]["Tables"]["billing_cycle_tickets"]["Row"];

@@ -17,7 +17,7 @@ import {
   sessionTimeout,
   type SignOutReason,
 } from "@/lib/auth/session-policy";
-import { publicEnv } from "@/lib/env";
+import { isSupabaseConfigured, NO_DATABASE_HTML, publicEnv } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/types/db";
 
@@ -36,6 +36,14 @@ import type { Database } from "@/types/db";
  * target page in GUARD_REDIRECT_HEADER; currentActor() then redirects properly.
  */
 export async function proxy(request: NextRequest) {
+  // A deployment without Supabase variables (a Vercel preview, decision 98) answers
+  // every page with a plain notice instead of an error.
+  if (!isSupabaseConfigured()) {
+    return new NextResponse(NO_DATABASE_HTML, {
+      status: 503,
+      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "86400" },
+    });
+  }
   let response = NextResponse.next({ request });
   const env = publicEnv();
 

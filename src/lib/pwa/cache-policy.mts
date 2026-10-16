@@ -21,8 +21,8 @@ const PUBLIC_FILES = new Set(["/manifest.webmanifest", "/icon.svg", "/apple-icon
 
 /**
  * Whether a build file belongs in the precache list. Paths are as `serwist build`
- * globs them, relative to the project: `.next/static/...`, `public/...`,
- * `.next/server/app/...html`.
+ * globs them, relative to the project: `.next/static/...`, `public/...`. No HTML: the
+ * offline page is added by its URL (serwist.config.mjs, offline-page.mts).
  */
 export function isPrecacheable(path: string, offlineRefs?: ReadonlySet<string>): boolean {
   const p = path.replace(/\\/g, "/");
@@ -33,8 +33,7 @@ export function isPrecacheable(path: string, offlineRefs?: ReadonlySet<string>):
     if (!offlineRefs) return true;
     return p.endsWith(".css") || offlineRefs.has(`/_next/${p.slice(".next/".length)}`);
   }
-  if (p.startsWith("public/icons/")) return true;
-  return p === ".next/server/app/offline.html";
+  return p.startsWith("public/icons/");
 }
 
 /** The /_next/static files the prerendered offline page refers to. */

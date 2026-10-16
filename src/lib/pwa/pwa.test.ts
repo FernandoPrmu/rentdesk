@@ -14,7 +14,6 @@ describe("precache list (decision 88)", () => {
     ".next/static/css/abc.css",
     ".next/static/media/geist.woff2",
     "public/icons/icon-192.png",
-    ".next/server/app/offline.html",
     ".next\\static\\chunks\\x.js",
   ])("keeps %s", (p) => expect(isPrecacheable(p)).toBe(true));
 
@@ -23,6 +22,8 @@ describe("precache list (decision 88)", () => {
     ".next/server/app/owner/tickets.html",
     ".next/server/app/login.html",
     ".next/server/app/index.html",
+    // The offline page is precached by URL (offline-page.mts), never as a globbed file.
+    ".next/server/app/offline.html",
     ".next/static/chunks/app-123.js.map",
     "public/sw.js",
     "public/anything.pdf",
@@ -38,7 +39,7 @@ describe("precache list (decision 88)", () => {
     expect(isPrecacheable(".next/static/css/other.css", refs)).toBe(true);
     expect(isPrecacheable(".next/static/chunks/pdf.worker.js", refs)).toBe(false);
     expect(isPrecacheable("public/icons/icon-192.png", refs)).toBe(true);
-    expect(isPrecacheable(".next/server/app/offline.html", refs)).toBe(true);
+    expect(isPrecacheable(".next/server/app/offline.html", refs)).toBe(false);
   });
 });
 
